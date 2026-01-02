@@ -1,10 +1,11 @@
 import json
 import re
 import streamlit as st
-from levels_engine import Patient, evaluate, render_note, VERSION
+from levels_engine import Patient, evaluate, render_note_quick, render_note_full, VERSION
 
 st.set_page_config(page_title="LEVELS Demo", layout="wide")
-st.title(f"LEVELS™ {VERSION['levels']} — Public Demo (De-identified)")
+st.title(f"LEVELS™ {VERSION['levels']} — De-identified Demo")
+
 st.warning("⚠️ Do NOT enter names, MRNs, DOBs, dates, addresses, phone numbers, or free-text notes.")
 
 PHI_PATTERNS = [
@@ -22,23 +23,22 @@ def contains_phi(s: str) -> bool:
             return True
     return False
 
+mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
+
 with st.form("levels_form"):
     consent = st.checkbox("I confirm this input contains no patient identifiers (PHI).")
 
     st.subheader("Core (Levels)")
     c1, c2, c3 = st.columns(3)
-
     with c1:
         age = st.number_input("Age (years)", 0, 120, 52, step=1)
         sex = st.selectbox("Sex", ["F", "M"])
         ascvd = st.selectbox("ASCVD (clinical)", ["No", "Yes"])
         fhx = st.selectbox("Premature family history", ["No", "Yes"])
-
     with c2:
         ldl = st.number_input("LDL-C (mg/dL)", 0, 400, 148, step=1)
         apob = st.number_input("ApoB (mg/dL)", 0, 300, 112, step=1)
         lpa = st.number_input("Lp(a) value", 0, 1000, 165, step=1)
-
     with c3:
         lpa_unit = st.selectbox("Lp(a) unit", ["nmol/L", "mg/dL"])
         cac_known = st.selectbox("CAC available?", ["Yes", "No"])
@@ -70,7 +70,7 @@ with st.form("levels_form"):
     st.subheader("Pooled Cohort Equations (10-year ASCVD risk)")
     d1, d2, d3 = st.columns(3)
     with d1:
-        race = st.selectbox("Race (PCE)", ["Other (use non-Black coefficients)", "Black"])
+        race = st.selectbox("Race (calculator)", ["Other (use non-Black coefficients)", "Black"])
         tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, 210, step=1)
         hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, 45, step=1)
     with d2:
@@ -91,17 +91,14 @@ with st.form("levels_form"):
             bleed_ich = st.checkbox("Prior intracranial hemorrhage", value=False)
             bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
 
-    submitted = st.form_submit_button("Run Levels")
+    submitted = st.form_submit_button("Run")
 
 if submitted:
     if not consent:
-        st.error("Please confirm the input contains no PHI.")
+        st.error("Please confirm no PHI is included.")
         st.stop()
 
-    raw_check = " ".join([str(x) for x in [
-        age, sex, ascvd, fhx, ldl, apob, lpa, lpa_unit, cac, hscrp, a1c, diabetes, smoking,
-        race, tc, hdl, sbp, bp_treated
-    ]])
+    raw_check = " ".join([str(x) for x in [age, sex, ascvd, fhx, ldl, apob, lpa, lpa_unit, cac, hscrp, a1c, diabetes, smoking, race, tc, hdl, sbp, bp_treated]])
     if contains_phi(raw_check):
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
@@ -122,15 +119,9 @@ if submitted:
         "diabetes": (diabetes == "Yes"),
         "smoking": (smoking == "Yes"),
 
-        "ra": bool(ra),
-        "psoriasis": bool(psoriasis),
-        "sle": bool(sle),
-        "ibd": bool(ibd),
-        "hiv": bool(hiv),
-        "osa": bool(osa),
-        "nafld": bool(nafld),
+        "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle), "ibd": bool(ibd), "hiv": bool(hiv),
+        "osa": bool(osa), "nafld": bool(nafld),
 
-        # Race other -> non-Black coefficients
         "race": "black" if race == "Black" else "other",
         "tc": int(tc),
         "hdl": int(hdl),
@@ -144,22 +135,21 @@ if submitted:
         "bleed_disorder": bool(bleed_disorder),
         "bleed_ckd": bool(bleed_ckd),
     }
-
     data = {k: v for k, v in data.items() if v is not None}
+
     patient = Patient(data)
-
     out = evaluate(patient)
-    note = render_note(patient, out)
 
-    st.subheader("Output (copy/paste)")
+    note = render_note_quick(patient, out) if mode.startswith("Quick") else render_note_full(patient, out)
+
+    st.subheader("Output")
     st.code(note, language="text")
 
     st.download_button("Download note (.txt)", data=note.encode("utf-8"), file_name="levels_note.txt", mime="text/plain")
     st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"), file_name="levels_output.json", mime="application/json")
 
     if show_json:
-        st.subheader("JSON (debug / transparency)")
+        st.subheader("JSON (debug)")
         st.json(out)
 
-    st.caption(f"Versions: Levels {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['pce']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
-
+    st.caption(f"Versions: {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['pce']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
