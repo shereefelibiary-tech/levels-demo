@@ -1,14 +1,16 @@
 # levels_engine.py
-# LEVELS v1.3 — Clinician-technical, high-yield output (no redundant therapy ladder)
-# Includes: Levels 0–4, Risk Signal Score, Pooled Cohort Equations (10-year ASCVD risk),
-# A1c/prediabetes + inflammatory states, aspirin logic, targets, discordance insights.
+# LEVELS v1.4 — Quick mode + Pooled Cohort Equations label spelled out + target language fixed
+# - Quick note (default) + Full note (details)
+# - "Atherosclerotic disease burden" replaces "substrate"
+# - Targets: Levels default + guideline context (ACC threshold vs ESC goals)
+# - Pooled Cohort Equations (10-year ASCVD risk) is fully spelled out everywhere
 
 import math
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 
 VERSION = {
-    "levels": "v1.3",
+    "levels": "v1.4",
     "risk_signal": "RSS v1.0",
     "pce": "Pooled Cohort Equations (ACC/AHA 2013; Race other->non-Black)",
     "aspirin": "Aspirin v1.0 (CAC≥100 OR 10y risk≥10%, age 40–69, low bleed risk)"
@@ -47,11 +49,13 @@ def inflammation_flags(p: Patient) -> List[str]:
                 flags.append("hsCRP>=2")
         except:
             pass
+    # chronic inflammatory disease
     if p.get("ra") is True: flags.append("RA")
     if p.get("psoriasis") is True: flags.append("Psoriasis")
     if p.get("sle") is True: flags.append("SLE")
     if p.get("ibd") is True: flags.append("IBD")
     if p.get("hiv") is True: flags.append("HIV")
+    # optional drivers
     if p.get("osa") is True: flags.append("OSA")
     if p.get("nafld") is True: flags.append("NAFLD/MASLD")
     return flags
@@ -79,19 +83,19 @@ def _rss_band(score: int) -> str:
     return "Very high"
 
 def risk_signal_score(p: Patient) -> Dict[str, Any]:
-    # Substrate (0–55): ASCVD dominates, then CAC bands
-    substrate = 0
+    # Atherosclerotic disease burden (0–55)
+    burden = 0
     if p.get("ascvd") is True:
-        substrate = 55
+        burden = 55
     elif p.has("cac"):
         cac = int(p.get("cac", 0))
-        if cac == 0: substrate = 0
-        elif 1 <= cac <= 9: substrate = 20
-        elif 10 <= cac <= 99: substrate = 30
-        elif 100 <= cac <= 399: substrate = 45
-        else: substrate = 55
+        if cac == 0: burden = 0
+        elif 1 <= cac <= 9: burden = 20
+        elif 10 <= cac <= 99: burden = 30
+        elif 100 <= cac <= 399: burden = 45
+        else: burden = 55
 
-    # Atherogenic (0–25): prefer ApoB else LDL
+    # Atherogenic burden (0–25): prefer ApoB else LDL
     athero = 0
     if p.has("apob"):
         apob = float(p.get("apob", 0))
@@ -108,7 +112,7 @@ def risk_signal_score(p: Patient) -> Dict[str, Any]:
         elif ldl <= 189: athero = 15
         else: athero = 20
 
-    # Genetics (0–15): Lp(a) + FHx capped
+    # Genetics (0–15): Lp(a) + FHx
     genetics = 0
     if p.has("lpa"):
         unit = str(p.get("lpa_unit", "")).lower()
@@ -123,41 +127,42 @@ def risk_signal_score(p: Patient) -> Dict[str, Any]:
         genetics += 5
     genetics = min(genetics, 15)
 
-    # Inflammation (0–10): hsCRP>=10 downweighted (+3), chronic inflammatory disease +5
-    inflammation = 0
+    # Inflammation (0–10): hsCRP ≥10 downweighted (+3), chronic inflammatory disease +5
+    infl = 0
     if p.has("hscrp"):
         h = float(p.get("hscrp", 0))
-        if h < 2: inflammation += 0
-        elif h < 10: inflammation += 5
-        else: inflammation += 3
+        if h < 2: infl += 0
+        elif h < 10: infl += 5
+        else: infl += 3
     if has_chronic_inflammatory_disease(p):
-        inflammation += 5
-    inflammation = min(inflammation, 10)
+        infl += 5
+    infl = min(infl, 10)
 
     # Metabolic (0–10): diabetes +6, smoking +4, prediabetes +2
-    metabolic = 0
-    if p.get("diabetes") is True: metabolic += 6
-    if p.get("smoking") is True: metabolic += 4
-    if a1c_status(p) == "prediabetes": metabolic += 2
-    metabolic = min(metabolic, 10)
+    metab = 0
+    if p.get("diabetes") is True: metab += 6
+    if p.get("smoking") is True: metab += 4
+    if a1c_status(p) == "prediabetes": metab += 2
+    metab = min(metab, 10)
 
-    total = _clamp(substrate + athero + genetics + inflammation + metabolic)
+    total = _clamp(burden + athero + genetics + infl + metab)
+
     return {
         "score": total,
         "band": _rss_band(total),
         "breakdown": {
-            "Atherosclerotic disease burden": substrate,
+            "Atherosclerotic disease burden": burden,
             "Atherogenic burden": athero,
             "Genetic acceleration": genetics,
-            "Inflammatory acceleration": inflammation,
-            "Metabolic acceleration": metabolic,
+            "Inflammatory acceleration": infl,
+            "Metabolic acceleration": metab,
         },
         "note": "Not an event probability (biologic + plaque signal).",
     }
 
 
 # ----------------------------
-# Pooled Cohort Equations (PCE) 10-year ASCVD risk
+# Pooled Cohort Equations (10-year ASCVD risk)
 # Race: Other -> non-Black coefficients
 # ----------------------------
 
@@ -190,7 +195,7 @@ PCE = {
     },
 }
 
-def pce_10y(p: Patient) -> Dict[str, Any]:
+def pooled_cohort_equations_10y_ascvd_risk(p: Patient) -> Dict[str, Any]:
     req = ["age", "sex", "race", "tc", "hdl", "sbp", "bp_treated", "smoking", "diabetes"]
     missing = [k for k in req if not p.has(k)]
     if missing:
@@ -204,9 +209,11 @@ def pce_10y(p: Patient) -> Dict[str, Any]:
     sex_key = "male" if sex in ("m", "male") else "female"
 
     race = str(p.get("race", "")).lower()
+    # Other -> non-Black coefficients
     race_key = "black" if race in ("black", "african american", "african-american") else "white"
 
     c = PCE[(race_key, sex_key)]
+
     tc = float(p.get("tc"))
     hdl = float(p.get("hdl"))
     sbp = float(p.get("sbp"))
@@ -264,14 +271,14 @@ def pce_10y(p: Patient) -> Dict[str, Any]:
     else:
         cat = "High (≥20%)"
 
-    return {"risk_pct": risk_pct, "category": cat, "notes": "Pooled Cohort Equations 10-year ASCVD risk (population estimate)."}
+    return {"risk_pct": risk_pct, "category": cat, "notes": "Population estimate (does not include CAC/ApoB/Lp(a))."}
 
 
 # ----------------------------
 # Aspirin module (C)
 # ----------------------------
 
-def aspirin_advice(p: Patient, pce: Dict[str, Any]) -> Dict[str, Any]:
+def aspirin_advice(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
     age = int(p.get("age", 0)) if p.has("age") else None
     cac = int(p.get("cac", 0)) if p.has("cac") else None
     ascvd = (p.get("ascvd") is True)
@@ -302,21 +309,21 @@ def aspirin_advice(p: Patient, pce: Dict[str, Any]) -> Dict[str, Any]:
     if bleed_flags:
         return {"status": "Avoid (primary prevention)", "rationale": ["High bleeding risk: " + "; ".join(bleed_flags)]}
 
-    pce_risk = pce.get("risk_pct")
-    pce_ok = (pce_risk is not None and pce_risk >= 10.0)
+    risk_pct = risk10.get("risk_pct")
+    risk_ok = (risk_pct is not None and risk_pct >= 10.0)
     cac_ok = (cac is not None and cac >= 100)
 
-    if cac_ok or pce_ok:
+    if cac_ok or risk_ok:
         reasons = []
         if cac_ok: reasons.append("CAC ≥100")
-        if pce_ok: reasons.append(f"Pooled Cohort Equations 10-year risk ≥10% ({pce_risk}%)")
-        return {"status": "Consider low-dose aspirin (shared decision)", "rationale": reasons + ["Bleeding risk low by available flags"]}
+        if risk_ok: reasons.append(f"Pooled Cohort Equations 10-year risk ≥10% ({risk_pct}%)")
+        return {"status": "Consider (shared decision)", "rationale": reasons + ["Bleeding risk low by available flags"]}
 
-    return {"status": "Usually avoid / individualize", "rationale": ["Primary prevention benefit likely small; prioritize risk factor optimization"]}
+    return {"status": "Avoid / individualize", "rationale": ["Primary prevention benefit likely small at current risk level"]}
 
 
 # ----------------------------
-# Levels banding + targets + customized next steps
+# Levels banding and targets language
 # ----------------------------
 
 def levels_band(p: Patient) -> Dict[str, Any]:
@@ -343,9 +350,7 @@ def levels_band(p: Patient) -> Dict[str, Any]:
             level = max(level, 2); triggers.append("FHx_premature")
         if a1c_status(p) == "prediabetes":
             triggers.append("Prediabetes_A1c")
-        if has_chronic_inflammatory_disease(p):
-            triggers.append("Chronic_inflammation")
-        if inflammation_flags(p):
+        if inflammation_flags(p) or has_chronic_inflammatory_disease(p):
             triggers.append("Inflammation_present")
 
     if level == 0 and p.data:
@@ -360,206 +365,201 @@ def levels_band(p: Patient) -> Dict[str, Any]:
     }
     return {"level": level, "label": labels[level], "triggers": sorted(set(triggers))}
 
-def _targets(level: int, enh_count: int) -> Dict[str, int]:
+def levels_targets(level: int, enh_count: int) -> Dict[str, int]:
+    # User choice A: Level 2 defaults LDL <100 (not 70)
     if level <= 1:
         return {"apob_goal": 80, "ldl_goal": 100}
     if level == 2:
-        return {"apob_goal": 70 if enh_count >= 2 else 80, "ldl_goal": 70 if enh_count >= 2 else 100}
+        return {"apob_goal": 80, "ldl_goal": 100}
     if level == 3:
         return {"apob_goal": 70, "ldl_goal": 70}
     return {"apob_goal": 60, "ldl_goal": 70}
 
-def _completeness(p: Patient) -> Dict[str, Any]:
-    key_items = ["apob", "lpa", "cac", "hscrp", "a1c", "tc", "hdl", "sbp", "bp_treated", "smoking", "diabetes", "sex", "race", "age"]
-    present = [k for k in key_items if p.has(k)]
-    missing = [k for k in key_items if not p.has(k)]
-    score = int(round(100 * (len(present) / len(key_items))))
-    band = "High" if score >= 85 else ("Moderate" if score >= 60 else "Low")
-    return {"completeness_pct": score, "confidence": band, "missing": missing}
+def guideline_target_line(level: int) -> str:
+    # High-yield statement: ACC uses LDL thresholds for add-on; ESC uses LDL goals.
+    # We keep this generic and defensible.
+    if level >= 4:
+        return "Guidelines: ACC/AHA uses LDL-C 70 mg/dL threshold for add-on therapy in very-high-risk ASCVD; ESC/EAS goal often <55 mg/dL in very high risk."
+    if level == 3:
+        return "Guidelines: ESC/EAS goal often <70 mg/dL in high risk; ACC/AHA commonly treats CAC>0 as supporting intensified prevention."
+    return "Guidelines: calculators provide population risk; CAC/biology help refine individual intensity."
 
-def _atherosclerotic_disease_burden(p: Patient) -> str:
+def completeness(p: Patient) -> Dict[str, Any]:
+    key = ["apob","lpa","cac","hscrp","a1c","tc","hdl","sbp","bp_treated","smoking","diabetes","sex","race","age"]
+    present = [k for k in key if p.has(k)]
+    missing = [k for k in key if not p.has(k)]
+    pct = int(round(100 * (len(present)/len(key))))
+    conf = "High" if pct >= 85 else ("Moderate" if pct >= 60 else "Low")
+    top_missing = missing[:2]
+    return {"pct": pct, "confidence": conf, "missing": missing, "top_missing": top_missing}
+
+def atherosclerotic_disease_burden(p: Patient) -> str:
     if p.get("ascvd") is True:
         return "Present (clinical ASCVD)"
     if p.has("cac"):
         cac = int(p.get("cac", 0))
-        if cac == 0:
-            return "Not detected (CAC=0)"
+        if cac == 0: return "Not detected (CAC=0)"
         return f"Present (CAC {cac})"
     return "Unknown (CAC not available)"
 
-def _discordance_insights(p: Patient, lvl: Dict[str, Any], pce: Dict[str, Any]) -> List[str]:
-    insights = []
+def discordance_notes(p: Patient, lvl: Dict[str, Any], risk10: Dict[str, Any]) -> List[str]:
+    notes = []
     cac = p.get("cac", None)
-
     if lvl["level"] == 2 and cac is None:
-        insights.append("CAC missing: consider CAC to clarify atherosclerotic disease burden and refine intensity.")
-
-    if cac == 0 and lvl["level"] == 2 and (
-        (p.has("apob") and float(p.get("apob")) >= 120) or
-        (p.has("ldl") and float(p.get("ldl")) >= 160) or
-        (lpa_elevated(p) and p.get("fhx") is True)
-    ):
-        insights.append("CAC=0 with high biologic risk: staged escalation reasonable; consider repeat CAC in 3–5 years.")
-
+        notes.append("CAC missing: consider CAC to clarify disease burden.")
+    if cac == 0 and lvl["level"] == 2 and ((p.has("apob") and float(p.get("apob")) >= 120) or (p.has("ldl") and float(p.get("ldl")) >= 160) or (lpa_elevated(p) and p.get("fhx") is True)):
+        notes.append("CAC=0 with high biology: staged escalation reasonable; consider repeat CAC in 3–5 years.")
     if a1c_status(p) == "prediabetes":
-        insights.append("A1c in prediabetes range: metabolic acceleration; address lifestyle and cardiometabolic drivers.")
-
+        notes.append("Prediabetes range A1c: metabolic acceleration; address lifestyle/cardiometabolic drivers.")
     if has_chronic_inflammatory_disease(p):
-        insights.append("Chronic inflammatory disease present: inflammatory acceleration; optimize disease control and ASCVD prevention intensity.")
+        notes.append("Chronic inflammatory disease: inflammatory acceleration; optimize disease control.")
+    rp = risk10.get("risk_pct")
+    if cac and int(cac) > 0 and rp is not None and rp < 5:
+        notes.append("Low 10-year risk estimate but CAC>0: disease burden present; intensity may exceed calculators.")
+    return notes
 
-    if cac and int(cac) > 0 and pce.get("risk_pct") is not None and pce["risk_pct"] < 5:
-        insights.append("Low PCE but CAC>0: disease burden present; intensity may exceed what calculators suggest.")
+def top_drivers(p: Patient) -> List[str]:
+    drivers = []
+    # order matters: disease burden first if present
+    if p.get("ascvd") is True:
+        drivers.append("Clinical ASCVD")
+    elif p.has("cac"):
+        cac = int(p.get("cac"))
+        if cac > 0:
+            drivers.append(f"CAC {cac}")
+    # biology
+    if p.has("apob") and float(p.get("apob")) >= 100:
+        drivers.append(f"ApoB {int(round(float(p.get('apob'))))}")
+    elif p.has("ldl") and float(p.get("ldl")) >= 130:
+        drivers.append(f"LDL-C {int(round(float(p.get('ldl'))))}")
+    if lpa_elevated(p):
+        drivers.append("Lp(a) elevated")
+    if p.get("fhx") is True:
+        drivers.append("Premature family history")
+    if a1c_status(p) == "prediabetes":
+        drivers.append("Prediabetes range A1c")
+    if has_chronic_inflammatory_disease(p) or (p.has("hscrp") and float(p.get("hscrp")) >= 2):
+        drivers.append("Inflammatory signal")
+    # keep top 3
+    return drivers[:3]
 
-    if cac == 0 and pce.get("risk_pct") is not None and pce["risk_pct"] >= 20:
-        insights.append("High PCE but CAC=0: risk estimate may be age-driven; individualize based on enhancers and preferences.")
-
-    return insights
-
-def _next_prevention_focus(p: Patient, lvl: Dict[str, Any], targets: Dict[str, int], pce: Dict[str, Any]) -> List[str]:
-    bullets = []
-
-    # Target gaps
+def next_actions(p: Patient, lvl: Dict[str, Any], targets: Dict[str, int]) -> List[str]:
+    acts = []
+    # 1) close the biggest gap first
     if p.has("apob"):
         apob = int(round(float(p.get("apob"))))
         gap = apob - targets["apob_goal"]
         if gap > 0:
-            bullets.append(f"ApoB reduction needed (~{gap} mg/dL) to reach goal (<{targets['apob_goal']}).")
-    if p.has("ldl"):
+            acts.append(f"Reduce ApoB toward <{targets['apob_goal']} (Δ ~{gap} mg/dL).")
+    elif p.has("ldl"):
         ldl = int(round(float(p.get("ldl"))))
         gap = ldl - targets["ldl_goal"]
         if gap > 0:
-            bullets.append(f"LDL-C reduction needed (~{gap} mg/dL) to reach goal (<{targets['ldl_goal']}).")
+            acts.append(f"Reduce LDL-C toward <{targets['ldl_goal']} (Δ ~{gap} mg/dL).")
 
-    # CAC nuance
-    if p.has("cac"):
-        cac = int(p.get("cac"))
-        if cac == 0 and lvl["level"] == 2:
-            bullets.append("CAC=0 supports staged escalation rather than immediate intensification (if symptoms absent and no other contraindications).")
-        if cac > 0 and lvl["level"] >= 3:
-            bullets.append("CAC>0 indicates subclinical disease burden; prevention intensity typically higher.")
+    # 2) imaging trajectory if needed
+    if p.has("cac") and int(p.get("cac")) == 0 and lvl["level"] == 2:
+        acts.append("Given CAC=0, staged escalation reasonable; consider repeat CAC in 3–5 years if risk persists/worsens.")
+    elif not p.has("cac") and lvl["level"] >= 2:
+        acts.append("Consider CAC to clarify atherosclerotic disease burden and refine intensity.")
 
-    # Genetic/inflammation acceleration
-    if lpa_elevated(p) or p.get("fhx") is True:
-        bullets.append("Genetic acceleration (Lp(a) and/or FHx) lowers threshold for intensification over time.")
-    if inflammation_flags(p) or has_chronic_inflammatory_disease(p):
-        bullets.append("Inflammatory acceleration may increase progression risk; optimize inflammatory drivers and reassess.")
+    return acts[:2]
 
-    # PCE context (brief)
-    if pce.get("risk_pct") is not None:
-        bullets.append(f"Pooled Cohort Equations (10-year ASCVD risk): {pce['risk_pct']}% ({pce['category']}) — interpret alongside disease burden and biology.")
 
-    # Keep it tight (max 4 bullets)
-    return bullets[:4]
+# ----------------------------
+# Master evaluate + render (Quick + Full)
+# ----------------------------
 
 def evaluate(p: Patient) -> Dict[str, Any]:
     lvl = levels_band(p)
     rs = risk_signal_score(p)
-    pce = pce_10y(p)
+    risk10 = pooled_cohort_equations_10y_ascvd_risk(p)
+    comp = completeness(p)
+    burden = atherosclerotic_disease_burden(p)
+    aspirin = aspirin_advice(p, risk10)
 
-    enh_count = 0
-    enh_count += 1 if p.get("fhx") is True else 0
-    enh_count += 1 if lpa_elevated(p) else 0
-    enh_count += 1 if (a1c_status(p) == "prediabetes") else 0
-    enh_count += 1 if bool(inflammation_flags(p)) else 0
-    enh_count += 1 if p.get("smoking") is True else 0
-    enh_count += 1 if p.get("diabetes") is True else 0
+    enh = 0
+    enh += 1 if p.get("fhx") is True else 0
+    enh += 1 if lpa_elevated(p) else 0
+    enh += 1 if (a1c_status(p) == "prediabetes") else 0
+    enh += 1 if bool(inflammation_flags(p)) else 0
+    enh += 1 if p.get("smoking") is True else 0
+    enh += 1 if p.get("diabetes") is True else 0
 
-    targets = _targets(lvl["level"], enh_count)
-    completeness = _completeness(p)
-    burden = _atherosclerotic_disease_burden(p)
-    discordance = _discordance_insights(p, lvl, pce)
-    aspirin = aspirin_advice(p, pce)
-    focus = _next_prevention_focus(p, lvl, targets, pce)
+    targets = levels_targets(lvl["level"], enh)
+    drivers = top_drivers(p)
+    disc = discordance_notes(p, lvl, risk10)
+    acts = next_actions(p, lvl, targets)
 
     return {
         "version": VERSION,
         "levels": lvl,
         "risk_signal": rs,
-        "pce_10y": pce,
+        "pooled_cohort_equations_10y_ascvd_risk": risk10,
         "targets": targets,
-        "completeness": completeness,
+        "confidence": comp,
         "atherosclerotic_disease_burden": burden,
-        "discordance_insights": discordance,
-        "next_prevention_focus": focus,
+        "top_drivers": drivers,
+        "next_actions": acts,
+        "discordance_notes": disc,
         "aspirin": aspirin,
+        "guideline_targets_line": guideline_target_line(lvl["level"]),
     }
 
-def render_note(p: Patient, out: Dict[str, Any]) -> str:
+def _fmt_int(x):
+    try: return int(round(float(x)))
+    except: return x
+
+def render_note_quick(p: Patient, out: Dict[str, Any]) -> str:
     lvl = out["levels"]
     rs = out["risk_signal"]
-    pce = out["pce_10y"]
+    risk10 = out["pooled_cohort_equations_10y_ascvd_risk"]
     targets = out["targets"]
-    completeness = out["completeness"]
+    conf = out["confidence"]
     burden = out["atherosclerotic_disease_burden"]
-    discordance = out["discordance_insights"]
-    focus = out["next_prevention_focus"]
-    aspirin = out["aspirin"]
-
-    def fmt_int(x):
-        try: return int(round(float(x)))
-        except: return x
+    asp = out["aspirin"]
 
     lines: List[str] = []
-    lines.append(f"LEVELS™ {out['version']['levels']} — Cardiovascular Risk Summary")
-    lines.append(f"Confidence: {completeness['confidence']} (data completeness {completeness['completeness_pct']}%)")
-    lines.append("")
-    lines.append(f"Risk band: {lvl['label']}")
+    lines.append(f"LEVELS™ {out['version']['levels']} — Quick Reference")
+    lines.append(f"Risk band: {lvl['label'].split('—',1)[1].strip()}")
     lines.append(f"Atherosclerotic disease burden: {burden}")
+    miss = conf.get("top_missing", [])
+    miss_txt = (", ".join(miss)) if miss else "none"
+    lines.append(f"Confidence: {conf['confidence']} (missing: {miss_txt})")
     lines.append("")
-
-    # Numeric context
-    lines.append("Numeric context")
-    lines.append(f"• Risk Signal Score: {rs['score']}/100 ({rs['band']}) — {rs['note']}")
-    if pce.get("risk_pct") is not None:
-        lines.append(f"• Pooled Cohort Equations (10-year ASCVD risk): {pce['risk_pct']}% — {pce['category']} (population estimate)")
+    # numeric context
+    lines.append(f"Risk Signal Score: {rs['score']}/100 ({rs['band']}) — {rs['note']}")
+    if risk10.get("risk_pct") is not None:
+        lines.append(f"Pooled Cohort Equations (10-year ASCVD risk): {risk10['risk_pct']}% ({risk10['category']})")
     else:
-        if pce.get("missing"):
-            lines.append(f"• Pooled Cohort Equations (10-year ASCVD risk): Not calculated (missing: {', '.join(pce['missing'])})")
-        elif pce.get("notes"):
-            lines.append(f"• Pooled Cohort Equations (10-year ASCVD risk): Not calculated ({pce['notes']})")
-    lines.append("")
+        if risk10.get("missing"):
+            lines.append(f"Pooled Cohort Equations (10-year ASCVD risk): not calculated (missing {', '.join(risk10['missing'][:3])})")
+        else:
+            lines.append("Pooled Cohort Equations (10-year ASCVD risk): not calculated")
+    # drivers
+    if out["top_drivers"]:
+        lines.append("Drivers: " + "; ".join(out["top_drivers"]))
+    # targets + deltas
+    deltas = []
+    if p.has("apob"):
+        deltas.append(f"ΔApoB {max(0, _fmt_int(p.get('apob')) - targets['apob_goal'])}")
+    if p.has("ldl"):
+        deltas.append(f"ΔLDL {max(0, _fmt_int(p.get('ldl')) - targets['ldl_goal'])}")
+    lines.append(f"Targets: ApoB<{targets['apob_goal']} | LDL<{targets['ldl_goal']}  ({' | '.join(deltas)})")
+    # next actions
+    if out["next_actions"]:
+        lines.append("Next: " + " / ".join(out["next_actions"]))
+    # aspirin
+    lines.append(f"Aspirin 81 mg: {asp['status']}")
+    return "\n".join(lines)
 
-    # Key drivers (keep concise)
-    lines.append("Key drivers")
-    if p.has("apob"): lines.append(f"• ApoB {fmt_int(p.get('apob'))} mg/dL")
-    if p.has("ldl"): lines.append(f"• LDL-C {fmt_int(p.get('ldl'))} mg/dL")
-    if p.has("lpa"):
-        unit = p.get("lpa_unit", "")
-        lines.append(f"• Lp(a) {fmt_int(p.get('lpa'))} {unit}".strip())
-    if p.get("fhx") is True: lines.append("• Premature family history")
-    if p.has("hscrp") and float(p.get("hscrp")) >= 2: lines.append("• hsCRP ≥2 (inflammatory signal)")
-    if a1c_status(p) == "prediabetes": lines.append("• Prediabetes range A1c (metabolic acceleration)")
-    if has_chronic_inflammatory_disease(p): lines.append("• Chronic inflammatory disease present")
-    lines.append("")
-
-    # Targets
-    lines.append("Targets")
-    lines.append(f"• ApoB <{targets['apob_goal']} mg/dL")
-    lines.append(f"• LDL-C <{targets['ldl_goal']} mg/dL")
-    lines.append("")
-
-    # Next focus
-    lines.append("Next prevention focus")
-    for b in focus:
-        lines.append(f"• {b}")
-    lines.append("")
-
-    # Discordance (only if present)
-    if discordance:
-        lines.append("Discordance notes")
-        for d in discordance[:3]:
-            lines.append(f"• {d}")
-        lines.append("")
-
-    # Aspirin (one line)
-    lines.append("Aspirin 81 mg")
-    lines.append(f"• {aspirin['status']}")
-    if aspirin.get("rationale"):
-        lines.append(f"• Rationale: {', '.join(aspirin['rationale'][:3])}")
-    lines.append("")
-
-    # Triggers (compact)
-    lines.append("Triggers")
-    lines.append("• " + ", ".join(lvl["triggers"]))
+def render_note_full(p: Patient, out: Dict[str, Any]) -> str:
+    # Full is still concise, but includes key drivers + discordance + guideline line
+    base = render_note_quick(p, out).splitlines()
+    lines = base + ["", "Guideline context:", f"- {out['guideline_targets_line']}"]
+    if out["discordance_notes"]:
+        lines += ["", "Discordance notes:"] + [f"- {x}" for x in out["discordance_notes"][:4]]
+    # Add triggers at end
+    lines += ["", "Triggers: " + ", ".join(out["levels"]["triggers"])]
     return "\n".join(lines)
 
