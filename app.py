@@ -7,7 +7,6 @@ st.set_page_config(page_title="LEVELS Demo", layout="wide")
 st.title(f"LEVELS™ {VERSION['levels']} — Public Demo (De-identified)")
 st.warning("⚠️ Do NOT enter names, MRNs, DOBs, dates, addresses, phone numbers, or free-text notes.")
 
-# Minimal PHI guardrails (mostly redundant since we use form fields)
 PHI_PATTERNS = [
     r"\b\d{3}-\d{2}-\d{4}\b",
     r"\b\d{2}/\d{2}/\d{4}\b",
@@ -17,8 +16,7 @@ PHI_PATTERNS = [
     r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"
 ]
 def contains_phi(s: str) -> bool:
-    if not s:
-        return False
+    if not s: return False
     for pat in PHI_PATTERNS:
         if re.search(pat, s, re.IGNORECASE):
             return True
@@ -47,21 +45,38 @@ with st.form("levels_form"):
         cac = st.number_input("CAC score (Agatston)", 0, 5000, 0, step=1) if cac_known == "Yes" else None
         hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1)
 
+    st.subheader("Metabolic")
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        a1c = st.number_input("A1c (%) (optional)", 0.0, 15.0, 0.0, step=0.1)
+    with m2:
+        diabetes = st.selectbox("Diabetes", ["No", "Yes"])
+    with m3:
+        smoking = st.selectbox("Smoking (current)", ["No", "Yes"])
+
+    st.subheader("Inflammatory states (optional)")
+    i1, i2, i3 = st.columns(3)
+    with i1:
+        ra = st.checkbox("Rheumatoid arthritis", value=False)
+        psoriasis = st.checkbox("Psoriasis", value=False)
+    with i2:
+        sle = st.checkbox("SLE", value=False)
+        ibd = st.checkbox("IBD", value=False)
+    with i3:
+        hiv = st.checkbox("HIV", value=False)
+        osa = st.checkbox("OSA", value=False)
+        nafld = st.checkbox("NAFLD/MASLD", value=False)
+
     st.subheader("PCE inputs (10-year ASCVD risk %)")
     d1, d2, d3 = st.columns(3)
-
     with d1:
         race = st.selectbox("Race (PCE)", ["Other (use non-Black coeffs)", "Black"])
         tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, 210, step=1)
         hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, 45, step=1)
-
     with d2:
         sbp = st.number_input("Systolic BP (mmHg)", 60, 250, 130, step=1)
         bp_treated = st.selectbox("On BP meds?", ["No", "Yes"])
-        smoking = st.selectbox("Smoking (current)", ["No", "Yes"])
-
     with d3:
-        diabetes = st.selectbox("Diabetes", ["No", "Yes"])
         show_patient_summary = st.checkbox("Show patient-friendly summary", value=True)
         show_json = st.checkbox("Show JSON", value=True)
 
@@ -85,14 +100,15 @@ if submitted:
         st.stop()
 
     raw_check = " ".join([str(x) for x in [
-        age, sex, ascvd, fhx, ldl, apob, lpa, lpa_unit, cac, hscrp, race, tc, hdl, sbp, bp_treated, smoking, diabetes
+        age, sex, ascvd, fhx, ldl, apob, lpa, lpa_unit, cac, hscrp, a1c, diabetes, smoking,
+        race, tc, hdl, sbp, bp_treated
     ]])
     if contains_phi(raw_check):
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
 
     data = {
-        # Levels fields
+        # Levels core
         "age": int(age),
         "sex": sex,
         "ascvd": (ascvd == "Yes"),
@@ -104,14 +120,26 @@ if submitted:
         "cac": int(cac) if cac is not None else None,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
 
+        # Metabolic
+        "a1c": float(a1c) if a1c and a1c > 0 else None,
+        "diabetes": (diabetes == "Yes"),
+        "smoking": (smoking == "Yes"),
+
+        # Inflammation flags
+        "ra": bool(ra),
+        "psoriasis": bool(psoriasis),
+        "sle": bool(sle),
+        "ibd": bool(ibd),
+        "hiv": bool(hiv),
+        "osa": bool(osa),
+        "nafld": bool(nafld),
+
         # PCE inputs
         "race": "black" if race == "Black" else "other",
         "tc": int(tc),
         "hdl": int(hdl),
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
-        "smoking": (smoking == "Yes"),
-        "diabetes": (diabetes == "Yes"),
 
         # bleeding risk flags
         "bleed_gi": bool(bleed_gi),
@@ -122,17 +150,15 @@ if submitted:
         "bleed_ckd": bool(bleed_ckd),
     }
 
-    # remove None keys
     data = {k: v for k, v in data.items() if v is not None}
-
     patient = Patient(data)
+
     out = evaluate(patient)
     note = render_note(patient, out)
 
     st.subheader("Output (copy/paste)")
     st.code(note, language="text")
 
-    # Exports
     st.download_button(
         "Download note (.txt)",
         data=note.encode("utf-8"),
@@ -154,11 +180,11 @@ if submitted:
         asp = out["aspirin"]["status"]
 
         msg = f"**Placement:** {lvl}\n\n"
-        msg += f"**Risk Signal Score:** {rs}/100 (a numeric summary of biologic + plaque signal; not a 10-year probability).\n\n"
+        msg += f"**Risk Signal Score:** {rs}/100 (numeric summary of biologic + plaque signal; not a 10-year probability).\n\n"
         if pce_val is not None:
-            msg += f"**10-year risk estimate:** {pce_val}% (population calculator).\n\n"
-        msg += f"**Aspirin (81 mg) note:** {asp}\n\n"
-        msg += "Next steps focus on improving cholesterol particle burden (ApoB/LDL), addressing drivers (inflammation/metabolic factors), and using imaging (CAC) when it helps clarify disease substrate."
+            msg += f"**10-year risk estimate (population):** {pce_val}%.\n\n"
+        msg += f"**Aspirin note:** {asp}\n\n"
+        msg += "Next steps focus on improving cholesterol particle burden (ApoB/LDL), addressing inflammation/metabolic drivers, and using CAC when it helps clarify substrate."
         st.write(msg)
 
     if show_json:
@@ -166,3 +192,5 @@ if submitted:
         st.json(out)
 
     st.caption(f"Versions: Levels {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['pce']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
+
+
