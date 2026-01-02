@@ -5,7 +5,6 @@ from levels_engine import Patient, evaluate, render_note_quick, render_note_full
 
 st.set_page_config(page_title="LEVELS Demo", layout="wide")
 st.title(f"LEVELS™ {VERSION['levels']} — De-identified Demo")
-
 st.warning("⚠️ Do NOT enter names, MRNs, DOBs, dates, addresses, phone numbers, or free-text notes.")
 
 PHI_PATTERNS = [
@@ -43,12 +42,13 @@ with st.form("levels_form"):
         lpa_unit = st.selectbox("Lp(a) unit", ["nmol/L", "mg/dL"])
         cac_known = st.selectbox("CAC available?", ["Yes", "No"])
         cac = st.number_input("CAC score (Agatston)", 0, 5000, 0, step=1) if cac_known == "Yes" else None
-        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1)
+        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1, format="%.1f")
 
     st.subheader("Metabolic")
     m1, m2, m3 = st.columns(3)
     with m1:
-        a1c = st.number_input("A1c (%) (optional)", 0.0, 15.0, 0.0, step=0.1)
+        # Default 5.0 and tenths only
+        a1c = st.number_input("A1c (%) (optional)", 0.0, 15.0, 5.0, step=0.1, format="%.1f")
     with m2:
         diabetes = st.selectbox("Diabetes", ["No", "Yes"])
     with m3:
@@ -78,18 +78,6 @@ with st.form("levels_form"):
         bp_treated = st.selectbox("On BP meds?", ["No", "Yes"])
     with d3:
         show_json = st.checkbox("Show JSON", value=True)
-
-    with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
-        b1, b2, b3 = st.columns(3)
-        with b1:
-            bleed_gi = st.checkbox("Prior GI bleed / ulcer", value=False)
-            bleed_nsaid = st.checkbox("Chronic NSAID/steroid use", value=False)
-        with b2:
-            bleed_anticoag = st.checkbox("Anticoagulant use", value=False)
-            bleed_disorder = st.checkbox("Bleeding disorder / thrombocytopenia", value=False)
-        with b3:
-            bleed_ich = st.checkbox("Prior intracranial hemorrhage", value=False)
-            bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
 
     submitted = st.form_submit_button("Run")
 
@@ -127,13 +115,6 @@ if submitted:
         "hdl": int(hdl),
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
-
-        "bleed_gi": bool(bleed_gi),
-        "bleed_ich": bool(bleed_ich),
-        "bleed_anticoag": bool(bleed_anticoag),
-        "bleed_nsaid": bool(bleed_nsaid),
-        "bleed_disorder": bool(bleed_disorder),
-        "bleed_ckd": bool(bleed_ckd),
     }
     data = {k: v for k, v in data.items() if v is not None}
 
@@ -153,3 +134,4 @@ if submitted:
         st.json(out)
 
     st.caption(f"Versions: {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['pce']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
+
