@@ -67,17 +67,16 @@ with st.form("levels_form"):
         osa = st.checkbox("OSA", value=False)
         nafld = st.checkbox("NAFLD/MASLD", value=False)
 
-    st.subheader("PCE inputs (10-year ASCVD risk %)")
+    st.subheader("Pooled Cohort Equations (10-year ASCVD risk)")
     d1, d2, d3 = st.columns(3)
     with d1:
-        race = st.selectbox("Race (PCE)", ["Other (use non-Black coeffs)", "Black"])
+        race = st.selectbox("Race (PCE)", ["Other (use non-Black coefficients)", "Black"])
         tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, 210, step=1)
         hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, 45, step=1)
     with d2:
         sbp = st.number_input("Systolic BP (mmHg)", 60, 250, 130, step=1)
         bp_treated = st.selectbox("On BP meds?", ["No", "Yes"])
     with d3:
-        show_patient_summary = st.checkbox("Show patient-friendly summary", value=True)
         show_json = st.checkbox("Show JSON", value=True)
 
     with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
@@ -108,7 +107,6 @@ if submitted:
         st.stop()
 
     data = {
-        # Levels core
         "age": int(age),
         "sex": sex,
         "ascvd": (ascvd == "Yes"),
@@ -120,12 +118,10 @@ if submitted:
         "cac": int(cac) if cac is not None else None,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
 
-        # Metabolic
         "a1c": float(a1c) if a1c and a1c > 0 else None,
         "diabetes": (diabetes == "Yes"),
         "smoking": (smoking == "Yes"),
 
-        # Inflammation flags
         "ra": bool(ra),
         "psoriasis": bool(psoriasis),
         "sle": bool(sle),
@@ -134,14 +130,13 @@ if submitted:
         "osa": bool(osa),
         "nafld": bool(nafld),
 
-        # PCE inputs
+        # Race other -> non-Black coefficients
         "race": "black" if race == "Black" else "other",
         "tc": int(tc),
         "hdl": int(hdl),
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
 
-        # bleeding risk flags
         "bleed_gi": bool(bleed_gi),
         "bleed_ich": bool(bleed_ich),
         "bleed_anticoag": bool(bleed_anticoag),
@@ -159,38 +154,12 @@ if submitted:
     st.subheader("Output (copy/paste)")
     st.code(note, language="text")
 
-    st.download_button(
-        "Download note (.txt)",
-        data=note.encode("utf-8"),
-        file_name="levels_note.txt",
-        mime="text/plain"
-    )
-    st.download_button(
-        "Download JSON",
-        data=json.dumps(out, indent=2).encode("utf-8"),
-        file_name="levels_output.json",
-        mime="application/json"
-    )
-
-    if show_patient_summary:
-        st.subheader("Patient-friendly summary (optional)")
-        lvl = out["levels"]["label"]
-        rs = out["risk_signal"]["score"]
-        pce_val = out["pce_10y"].get("risk_pct")
-        asp = out["aspirin"]["status"]
-
-        msg = f"**Placement:** {lvl}\n\n"
-        msg += f"**Risk Signal Score:** {rs}/100 (numeric summary of biologic + plaque signal; not a 10-year probability).\n\n"
-        if pce_val is not None:
-            msg += f"**10-year risk estimate (population):** {pce_val}%.\n\n"
-        msg += f"**Aspirin note:** {asp}\n\n"
-        msg += "Next steps focus on improving cholesterol particle burden (ApoB/LDL), addressing inflammation/metabolic drivers, and using CAC when it helps clarify substrate."
-        st.write(msg)
+    st.download_button("Download note (.txt)", data=note.encode("utf-8"), file_name="levels_note.txt", mime="text/plain")
+    st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"), file_name="levels_output.json", mime="application/json")
 
     if show_json:
         st.subheader("JSON (debug / transparency)")
         st.json(out)
 
     st.caption(f"Versions: Levels {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['pce']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
-
 
