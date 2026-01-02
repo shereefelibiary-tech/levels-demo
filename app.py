@@ -1,68 +1,81 @@
+import json
+import re
 import streamlit as st
-from levels_engine import Patient, evaluate_levels_banded, render_note
+from levels_engine import Patient, evaluate, render_note, VERSION
 
-st.set_page_config(page_title="LEVELS v1.1 Demo", layout="wide")
+st.set_page_config(page_title="LEVELS Demo", layout="wide")
+st.title(f"LEVELS™ {VERSION['levels']} — Public Demo (De-identified)")
+st.warning("⚠️ Do NOT enter names, MRNs, DOBs, dates, addresses, phone numbers, or free-text notes.")
 
-st.title("LEVELS™ v1.1 — Public Demo (De-identified)")
-st.warning(
-    "⚠️ Do NOT enter names, MRNs, DOBs, addresses, dates, or free-text notes. "
-    "Use de-identified values only."
-)
+# Minimal PHI guardrails (mostly redundant since we use form fields)
+PHI_PATTERNS = [
+    r"\b\d{3}-\d{2}-\d{4}\b",
+    r"\b\d{2}/\d{2}/\d{4}\b",
+    r"\b\d{4}-\d{2}-\d{2}\b",
+    r"\bMRN\b|\bMedical Record\b",
+    r"@",
+    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"
+]
+def contains_phi(s: str) -> bool:
+    if not s:
+        return False
+    for pat in PHI_PATTERNS:
+        if re.search(pat, s, re.IGNORECASE):
+            return True
+    return False
 
 with st.form("levels_form"):
     consent = st.checkbox("I confirm this input contains no patient identifiers (PHI).")
 
-    st.subheader("Core inputs")
+    st.subheader("Core (Levels)")
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        age = st.number_input("Age (years)", 0, 120, 52)
-        sex = st.selectbox("Sex (optional)", ["", "F", "M", "Other"])
+        age = st.number_input("Age (years)", 0, 120, 52, step=1)
+        sex = st.selectbox("Sex", ["F", "M"])
         ascvd = st.selectbox("ASCVD (clinical)", ["No", "Yes"])
+        fhx = st.selectbox("Premature family history", ["No", "Yes"])
 
     with c2:
-        ldl = st.number_input("LDL-C (mg/dL)", 0.0, 400.0, 148.0)
-        apob = st.number_input("ApoB (mg/dL)", 0.0, 300.0, 112.0)
-        non_hdl = st.number_input("Non-HDL-C (mg/dL) (optional)", 0.0, 400.0, 0.0)
+        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, 148, step=1)
+        apob = st.number_input("ApoB (mg/dL)", 0, 300, 112, step=1)
+        lpa = st.number_input("Lp(a) value", 0, 1000, 165, step=1)
 
     with c3:
-        lpa = st.number_input("Lp(a) value", 0.0, 1000.0, 165.0)
         lpa_unit = st.selectbox("Lp(a) unit", ["nmol/L", "mg/dL"])
         cac_known = st.selectbox("CAC available?", ["Yes", "No"])
+        cac = st.number_input("CAC score (Agatston)", 0, 5000, 0, step=1) if cac_known == "Yes" else None
+        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1)
 
-    st.subheader("Risk enhancers / overlays")
-    c4, c5, c6 = st.columns(3)
+    st.subheader("PCE inputs (10-year ASCVD risk %)")
+    d1, d2, d3 = st.columns(3)
 
-    with c4:
-        fhx = st.selectbox("Premature family history", ["No", "Yes"])
+    with d1:
+        race = st.selectbox("Race (PCE)", ["Other (use non-Black coeffs)", "Black"])
+        tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, 210, step=1)
+        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, 45, step=1)
+
+    with d2:
+        sbp = st.number_input("Systolic BP (mmHg)", 60, 250, 130, step=1)
+        bp_treated = st.selectbox("On BP meds?", ["No", "Yes"])
         smoking = st.selectbox("Smoking (current)", ["No", "Yes"])
+
+    with d3:
         diabetes = st.selectbox("Diabetes", ["No", "Yes"])
+        show_patient_summary = st.checkbox("Show patient-friendly summary", value=True)
+        show_json = st.checkbox("Show JSON", value=True)
 
-    with c5:
-        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7)
-        # inflammatory diseases
-        ra = st.selectbox("Rheumatoid arthritis", ["No", "Yes"])
-        psoriasis = st.selectbox("Psoriasis", ["No", "Yes"])
-
-    with c6:
-        sle = st.selectbox("SLE", ["No", "Yes"])
-        ibd = st.selectbox("IBD", ["No", "Yes"])
-        hiv = st.selectbox("HIV", ["No", "Yes"])
-
-    with st.expander("Advanced (optional)"):
-        c7, c8, c9 = st.columns(3)
-        with c7:
-            osa = st.selectbox("OSA", ["No", "Yes"])
-            nafld = st.selectbox("NAFLD/MASLD", ["No", "Yes"])
-        with c8:
-            a1c = st.number_input("A1c (%) (optional)", 0.0, 15.0, 0.0)
-        with c9:
-            ccta_obstructive = st.selectbox("CCTA obstructive CAD ≥50% (optional)", ["Unknown", "No", "Yes"])
-
-    # CAC score only if available
-    cac = None
-    if cac_known == "Yes":
-        cac = st.number_input("CAC score (Agatston)", 0, 5000, 0)
+    with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            bleed_gi = st.checkbox("Prior GI bleed / ulcer", value=False)
+            bleed_nsaid = st.checkbox("Chronic NSAID/steroid use", value=False)
+        with b2:
+            bleed_anticoag = st.checkbox("Anticoagulant use", value=False)
+            bleed_disorder = st.checkbox("Bleeding disorder / thrombocytopenia", value=False)
+        with b3:
+            bleed_ich = st.checkbox("Prior intracranial hemorrhage", value=False)
+            bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
 
     submitted = st.form_submit_button("Run Levels")
 
@@ -71,51 +84,85 @@ if submitted:
         st.error("Please confirm the input contains no PHI.")
         st.stop()
 
-    # Build patient dict (no identifiers; no dates)
+    raw_check = " ".join([str(x) for x in [
+        age, sex, ascvd, fhx, ldl, apob, lpa, lpa_unit, cac, hscrp, race, tc, hdl, sbp, bp_treated, smoking, diabetes
+    ]])
+    if contains_phi(raw_check):
+        st.error("Possible identifier/date detected. Please remove PHI and retry.")
+        st.stop()
+
     data = {
+        # Levels fields
         "age": int(age),
-        "sex": sex if sex else None,
+        "sex": sex,
         "ascvd": (ascvd == "Yes"),
-        "ldl": float(ldl),
-        "apob": float(apob),
-        "non_hdl": float(non_hdl) if non_hdl and non_hdl > 0 else None,
-        "lpa": float(lpa),
-        "lpa_unit": lpa_unit,
         "fhx": (fhx == "Yes"),
+        "ldl": int(ldl),
+        "apob": int(apob),
+        "lpa": int(lpa),
+        "lpa_unit": lpa_unit,
+        "cac": int(cac) if cac is not None else None,
+        "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
+
+        # PCE inputs
+        "race": "black" if race == "Black" else "other",
+        "tc": int(tc),
+        "hdl": int(hdl),
+        "sbp": int(sbp),
+        "bp_treated": (bp_treated == "Yes"),
         "smoking": (smoking == "Yes"),
         "diabetes": (diabetes == "Yes"),
-        "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
-        "ra": (ra == "Yes"),
-        "psoriasis": (psoriasis == "Yes"),
-        "sle": (sle == "Yes"),
-        "ibd": (ibd == "Yes"),
-        "hiv": (hiv == "Yes"),
-        "osa": (osa == "Yes"),
-        "nafld": (nafld == "Yes"),
+
+        # bleeding risk flags
+        "bleed_gi": bool(bleed_gi),
+        "bleed_ich": bool(bleed_ich),
+        "bleed_anticoag": bool(bleed_anticoag),
+        "bleed_nsaid": bool(bleed_nsaid),
+        "bleed_disorder": bool(bleed_disorder),
+        "bleed_ckd": bool(bleed_ckd),
     }
 
-    if cac is not None:
-        data["cac"] = int(cac)
-
-    if a1c and a1c > 0:
-        data["a1c"] = float(a1c)
-
-    if ccta_obstructive != "Unknown":
-        data["ccta_obstructive"] = (ccta_obstructive == "Yes")
-
-    # remove None values
+    # remove None keys
     data = {k: v for k, v in data.items() if v is not None}
 
     patient = Patient(data)
-    result = evaluate_levels_banded(patient)
-    note = render_note(patient, result)
+    out = evaluate(patient)
+    note = render_note(patient, out)
 
     st.subheader("Output (copy/paste)")
     st.code(note, language="text")
 
-    with st.expander("Show parsed input + JSON"):
-        st.json(patient.data)
-        st.json(result)
+    # Exports
+    st.download_button(
+        "Download note (.txt)",
+        data=note.encode("utf-8"),
+        file_name="levels_note.txt",
+        mime="text/plain"
+    )
+    st.download_button(
+        "Download JSON",
+        data=json.dumps(out, indent=2).encode("utf-8"),
+        file_name="levels_output.json",
+        mime="application/json"
+    )
 
-    st.caption("Inputs are processed in memory only and are not stored by this app.")
+    if show_patient_summary:
+        st.subheader("Patient-friendly summary (optional)")
+        lvl = out["levels"]["label"]
+        rs = out["risk_signal"]["score"]
+        pce_val = out["pce_10y"].get("risk_pct")
+        asp = out["aspirin"]["status"]
 
+        msg = f"**Placement:** {lvl}\n\n"
+        msg += f"**Risk Signal Score:** {rs}/100 (a numeric summary of biologic + plaque signal; not a 10-year probability).\n\n"
+        if pce_val is not None:
+            msg += f"**10-year risk estimate:** {pce_val}% (population calculator).\n\n"
+        msg += f"**Aspirin (81 mg) note:** {asp}\n\n"
+        msg += "Next steps focus on improving cholesterol particle burden (ApoB/LDL), addressing drivers (inflammation/metabolic factors), and using imaging (CAC) when it helps clarify disease substrate."
+        st.write(msg)
+
+    if show_json:
+        st.subheader("JSON (debug / transparency)")
+        st.json(out)
+
+    st.caption(f"Versions: Levels {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['pce']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
