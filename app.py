@@ -47,7 +47,6 @@ with st.form("levels_form"):
     st.subheader("Metabolic")
     m1, m2, m3 = st.columns(3)
     with m1:
-        # Default 5.0 and tenths only
         a1c = st.number_input("A1c (%) (optional)", 0.0, 15.0, 5.0, step=0.1, format="%.1f")
     with m2:
         diabetes = st.selectbox("Diabetes", ["No", "Yes"])
@@ -78,6 +77,18 @@ with st.form("levels_form"):
         bp_treated = st.selectbox("On BP meds?", ["No", "Yes"])
     with d3:
         show_json = st.checkbox("Show JSON", value=True)
+
+    with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            bleed_gi = st.checkbox("Prior GI bleed / ulcer", value=False)
+            bleed_nsaid = st.checkbox("Chronic NSAID/steroid use", value=False)
+        with b2:
+            bleed_anticoag = st.checkbox("Anticoagulant use", value=False)
+            bleed_disorder = st.checkbox("Bleeding disorder / thrombocytopenia", value=False)
+        with b3:
+            bleed_ich = st.checkbox("Prior intracranial hemorrhage", value=False)
+            bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
 
     submitted = st.form_submit_button("Run")
 
@@ -115,6 +126,13 @@ if submitted:
         "hdl": int(hdl),
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
+
+        "bleed_gi": bool(bleed_gi),
+        "bleed_ich": bool(bleed_ich),
+        "bleed_anticoag": bool(bleed_anticoag),
+        "bleed_nsaid": bool(bleed_nsaid),
+        "bleed_disorder": bool(bleed_disorder),
+        "bleed_ckd": bool(bleed_ckd),
     }
     data = {k: v for k, v in data.items() if v is not None}
 
@@ -133,5 +151,5 @@ if submitted:
         st.subheader("JSON (debug)")
         st.json(out)
 
-    st.caption(f"Versions: {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['pce']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
+    st.caption(f"Versions: {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['risk_calc']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
 
