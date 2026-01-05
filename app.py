@@ -2,6 +2,7 @@ import json
 import re
 import streamlit as st
 from levels_engine import Patient, evaluate, render_note_quick, render_note_full, VERSION
+from levels_output_adapter import generateLevelsCvOutput  # NEW
 
 st.set_page_config(page_title="LEVELS Demo", layout="wide")
 st.title(f"LEVELS™ {VERSION['levels']} — De-identified Demo")
@@ -139,17 +140,33 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    note = render_note_quick(patient, out) if mode.startswith("Quick") else render_note_full(patient, out)
+    # NEW: camelCase TS-style output
+    levels_output = generateLevelsCvOutput(patient.data, out)
 
     st.subheader("Output")
-    st.code(note, language="text")
+    tab1, tab2, tab3 = st.tabs(["Quick", "Full", "TS Output (camelCase)"])
 
-    st.download_button("Download note (.txt)", data=note.encode("utf-8"), file_name="levels_note.txt", mime="text/plain")
-    st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"), file_name="levels_output.json", mime="application/json")
+    with tab1:
+        note = render_note_quick(patient, out)
+        st.code(note, language="text")
+        st.download_button("Download Quick note (.txt)", data=note.encode("utf-8"), file_name="levels_quick.txt", mime="text/plain")
+
+    with tab2:
+        note_full = render_note_full(patient, out)
+        st.code(note_full, language="text")
+        st.download_button("Download Full note (.txt)", data=note_full.encode("utf-8"), file_name="levels_full.txt", mime="text/plain")
+
+    with tab3:
+        st.code(levels_output["markdown"], language="text")
+        st.download_button("Download TS markdown (.txt)", data=levels_output["markdown"].encode("utf-8"), file_name="levels_ts_markdown.txt", mime="text/plain")
+        st.json(levels_output)
+
+    st.download_button("Download Engine JSON", data=json.dumps(out, indent=2).encode("utf-8"), file_name="levels_engine.json", mime="application/json")
 
     if show_json:
-        st.subheader("JSON (debug)")
+        st.subheader("Engine JSON (debug)")
         st.json(out)
 
     st.caption(f"Versions: {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['risk_calc']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
+
 
