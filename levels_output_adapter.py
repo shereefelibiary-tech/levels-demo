@@ -1,5 +1,5 @@
 # levels_output_adapter.py
-# Output adapter: converts your engine result into a TS-like camelCase contract.
+# CamelCase output adapter (TS-like contract)
 
 from typing import Any, Dict, List, Optional
 
@@ -40,29 +40,22 @@ def _plan_item(kind: str, text: str, timing: Optional[str]=None, priority: Optio
     return out
 
 def generateLevelsCvOutput(inputData: dict, engineOut: dict) -> dict:
-    """
-    CamelCase LevelsCvOutput-like contract.
-    Safe: if some fields are missing, fills reasonable defaults.
-    """
-
     # Pull level
     level_obj = engineOut.get("levels", engineOut)
     level = int(level_obj.get("level", engineOut.get("level", 2)))
     level_label = level_obj.get("label", f"Level {level}")
 
-    # Risk calc: "Pooled Cohort Equations (10-year ASCVD risk)"
+    # Pooled Cohort Equations (10-year ASCVD risk)
     risk10 = engineOut.get("risk10") or engineOut.get("pooled_cohort_equations_10y_ascvd_risk") or {}
     risk_pct = risk10.get("risk_pct")
     risk_cat = risk10.get("category")
 
-    # Risk signal score
+    # Risk Signal Score
     rss = engineOut.get("risk_signal") or engineOut.get("risk_signal_score") or {}
     rss_score = rss.get("score")
     rss_band = rss.get("band")
 
-    # Triggers (short, stable codes)
-    triggers: List[Dict[str, Any]] = []
-
+    # Inputs
     apob = inputData.get("apob")
     ldl = inputData.get("ldl")
     lpa = inputData.get("lpa")
@@ -70,9 +63,13 @@ def generateLevelsCvOutput(inputData: dict, engineOut: dict) -> dict:
     a1c = inputData.get("a1c")
     sbp = inputData.get("sbp")
     dbp = inputData.get("dbp")
-    fhx = inputData.get("fhx") or inputData.get("famHxPrematureAscVD") or inputData.get("famHxPrematureAscVD")
+    fhx = inputData.get("fhx") or inputData.get("famHxPrematureAscVD")
     smoker = inputData.get("smoking") or inputData.get("smoker")
     diabetes = inputData.get("diabetes")
+    ckd = inputData.get("ckd")
+
+    # Triggers
+    triggers: List[Dict[str, Any]] = []
 
     if apob is not None:
         if float(apob) >= 120:
@@ -108,6 +105,8 @@ def generateLevelsCvOutput(inputData: dict, engineOut: dict) -> dict:
         except:
             pass
 
+    if ckd is True:
+        triggers.append(_trigger("CKD", "CKD present", None, "Risk enhancer.", "high"))
     if smoker is True:
         triggers.append(_trigger("SMOKE", "Current smoker", None, "Risk enhancer.", "high"))
     if diabetes is True:
@@ -120,34 +119,26 @@ def generateLevelsCvOutput(inputData: dict, engineOut: dict) -> dict:
 
     triggers = triggers[:6]
 
-    # Targets (simple, readable)
-    def apob_target_for_level(lvl: int) -> str:
+    # Targets
+    def apob_target(lvl: int) -> str:
         if lvl >= 4: return "<60 mg/dL"
         if lvl == 3: return "<70 mg/dL"
         if lvl == 2: return "<80 mg/dL"
         return "<90 mg/dL"
 
-    def ldl_target_for_level(lvl: int) -> str:
+    def ldl_target(lvl: int) -> str:
         if lvl >= 3: return "<70 mg/dL"
         if lvl == 2: return "<100 mg/dL"
         return "<130 mg/dL"
 
     targets = [
-        {
-            "marker": "ApoB",
-            "current": _fmt_num(apob, "mg/dL"),
-            "target": apob_target_for_level(level),
-            "why": "Best proxy for plaque-driving particle burden."
-        },
-        {
-            "marker": "LDL-C",
-            "current": _fmt_num(ldl, "mg/dL"),
-            "target": ldl_target_for_level(level),
-            "why": "Treat-to-goal reduces events; proxy when ApoB missing."
-        }
+        {"marker": "ApoB", "current": _fmt_num(apob, "mg/dL"), "target": apob_target(level),
+         "why": "Best proxy for plaque-driving particle burden."},
+        {"marker": "LDL-C", "current": _fmt_num(ldl, "mg/dL"), "target": ldl_target(level),
+         "why": "Treat-to-goal reduces events; proxy when ApoB missing."},
     ]
 
-    # Plan (short, grouped)
+    # Plan (compact)
     plan_items: List[Dict[str, Any]] = []
     if level >= 3:
         plan_items.append(_plan_item("med", "Start or intensify statin therapy.", "now", 1))
@@ -158,8 +149,7 @@ def generateLevelsCvOutput(inputData: dict, engineOut: dict) -> dict:
     else:
         plan_items.append(_plan_item("lifestyle", "Lifestyle optimization; maintain favorable trajectory.", "now", 1))
 
-    # Group plan
-    grouped_plan = {
+    plan = {
         "meds": [p for p in plan_items if p["kind"] == "med"],
         "tests": [p for p in plan_items if p["kind"] == "test"],
         "lifestyle": [p for p in plan_items if p["kind"] == "lifestyle"],
@@ -167,21 +157,19 @@ def generateLevelsCvOutput(inputData: dict, engineOut: dict) -> dict:
         "followup": [p for p in plan_items if p["kind"] == "followup"],
     }
 
-    # Summary lines
     title = "LEVELS CV — ACTION SUMMARY"
     level_name = level_label.split("—", 1)[-1].strip() if "—" in level_label else level_label
     summary_line = f"Current CV Level: Level {level} — {level_name}."
 
     confidence_line = "Recommendation strength: Moderate. Evidence base: Moderate."
     if rss_score is not None:
-        confidence_line = f"Recommendation strength: {_cap('moderate')}. Evidence base: {_cap('moderate')}. Risk Signal Score: {rss_score}/100."
+        confidence_line = f"Recommendation strength: Moderate. Evidence base: Moderate. Risk Signal Score: {rss_score}/100."
 
     patient_translation = (
         "Focus is lowering plaque-driving particles (ApoB/LDL) and controlling major drivers (BP/metabolic) over time."
     )
     reassess_line = "Reassess after repeat lipids/ApoB and updated risk factors."
 
-    # Markdown
     markdown = (
         f"{title}\n"
         f"{summary_line}\n\n"
@@ -199,13 +187,11 @@ def generateLevelsCvOutput(inputData: dict, engineOut: dict) -> dict:
         "summaryLine": summary_line,
         "triggers": triggers,
         "targets": targets,
-        "plan": grouped_plan,
+        "plan": plan,
         "confidenceLine": confidence_line,
         "patientTranslation": patient_translation,
         "reassessLine": reassess_line,
         "markdown": markdown,
-        # extra context if you want it:
         "riskSignalScore": {"score": rss_score, "band": rss_band},
-        "pooledCohortEquations10yAsc vdRisk": {"riskPct": risk_pct, "category": risk_cat},
+        "pooledCohortEquations10yAscvdRisk": {"riskPct": risk_pct, "category": risk_cat},
     }
-
