@@ -312,7 +312,7 @@ with st.form("levels_form"):
     )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Vitals & metabolic")
+    st.subheader("Cardiometabolic Data")
 
     b1, b2, b3 = st.columns(3)
     with b1:
@@ -493,4 +493,5 @@ if submitted:
         st.json(out)
 
     st.caption(f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended.")
+
 
