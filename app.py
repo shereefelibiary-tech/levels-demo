@@ -3,34 +3,115 @@ import re
 import streamlit as st
 from levels_engine import Patient, evaluate, render_quick_text, VERSION
 
-# ---- Polished global styling ----
+# ============================================================
+# Page + global styling (clinical report look)
+# ============================================================
+
 st.set_page_config(page_title="LEVELS", layout="wide")
 
 st.markdown("""
 <style>
-html, body, [class*="css"]  {
+html, body, [class*="css"] {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
+  color: #1f2937;
 }
-.small-muted { color: rgba(0,0,0,0.6); font-size: 0.9rem; }
-.card {
-  border: 1px solid rgba(49,51,63,0.15);
+
+.header-card {
+  background: #ffffff;
+  border: 1px solid rgba(31,41,55,0.12);
   border-radius: 14px;
-  padding: 14px 16px;
-  background: white;
+  padding: 16px 18px;
+  margin-bottom: 10px;
 }
-.hdr { font-size: 1.15rem; font-weight: 700; margin-bottom: 6px; }
-.divline { margin: 10px 0 14px 0; border-top: 1px solid rgba(49,51,63,0.12); }
+.header-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  margin: 0 0 4px 0;
+}
+.header-sub {
+  color: rgba(31,41,55,0.60);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.hr {
+  margin: 10px 0 14px 0;
+  border-top: 1px solid rgba(31,41,55,0.12);
+}
+
+.report {
+  background: #ffffff;
+  border: 1px solid rgba(31,41,55,0.12);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.report h2 {
+  font-size: 1.15rem;
+  font-weight: 800;
+  margin: 0 0 10px 0;
+}
+
+.section {
+  margin-top: 14px;
+}
+.section-title {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: #4b5563;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(31,41,55,0.10);
+  padding-bottom: 2px;
+}
+
+.section p {
+  margin: 6px 0;
+  line-height: 1.45;
+}
+
+.section ul {
+  margin: 6px 0 6px 18px;
+}
+.section li {
+  margin: 4px 0;
+}
+
+.muted {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(37,99,235,0.08);
+  color: #1e40af;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown(f"""
-<div class="card">
-  <div class="hdr">LEVELS™ {VERSION["levels"]} — De-identified Demo</div>
-  <div class="small-muted">Fast entry layout • Radios for common choices • Polished markdown output + raw export</div>
+st.markdown(
+    f"""
+<div class="header-card">
+  <div class="header-title">LEVELS™ {VERSION["levels"]} — De-identified Demo</div>
+  <p class="header-sub">
+    Cohesive clinical entry flow • radios for faster entry • polished clinical report output + raw text export
+  </p>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True
+)
 
 st.warning("⚠️ Do NOT enter names, MRNs, DOBs, dates, addresses, phone numbers, or free-text notes.")
+
+# ============================================================
+# Guardrails
+# ============================================================
 
 PHI_PATTERNS = [
     r"\b\d{3}-\d{2}-\d{4}\b",
@@ -38,7 +119,7 @@ PHI_PATTERNS = [
     r"\b\d{4}-\d{2}-\d{2}\b",
     r"\bMRN\b|\bMedical Record\b",
     r"@",
-    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"
+    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
 ]
 def contains_phi(s: str) -> bool:
     if not s:
@@ -48,24 +129,171 @@ def contains_phi(s: str) -> bool:
             return True
     return False
 
-mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
+# ============================================================
+# Helper: render polished clinical report from engine raw text
+# ============================================================
 
-# Family history options w/ explicit definition baked in
+def render_clinical_report(note_text: str) -> str:
+    """
+    Converts the engine's raw text note into a polished HTML report.
+    Engine remains unchanged.
+    """
+    lines = [ln.rstrip() for ln in (note_text or "").splitlines()]
+
+    out = []
+    out.append('<div class="report">')
+
+    # Title line: first non-empty line
+    title = next((ln for ln in lines if ln.strip()), "LEVELS™ Output")
+    out.append(f"<h2>{title}</h2>")
+
+    def open_section(title_):
+        out.append('<div class="section">')
+        out.append(f'<div class="section-title">{title_}</div>')
+
+    def close_section():
+        out.append("</div>")
+
+    # Very lightweight parsing driven by keywords your engine already emits
+    # This keeps it robust across minor text changes.
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        i += 1
+        if not line or line == title:
+            continue
+
+        # Summary block
+        if line.startswith("Level "):
+            open_section("Summary")
+            out.append(f"<p><strong>{line}</strong></p>")
+            # keep grabbing next few labeled lines (burden/confidence/etc.) if present
+            while i < len(lines):
+                nxt = lines[i].strip()
+                if not nxt:
+                    i += 1
+                    continue
+                if nxt.startswith(("Risk Signal Score", "Pooled Cohort Equations", "Drivers:", "Targets", "Next:", "Aspirin")):
+                    break
+                if ":" in nxt:
+                    left, right = nxt.split(":", 1)
+                    out.append(f"<p><strong>{left.strip()}:</strong> {right.strip()}</p>")
+                else:
+                    out.append(f"<p>{nxt}</p>")
+                i += 1
+            close_section()
+            continue
+
+        # Key metrics
+        if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations"):
+            open_section("Key metrics")
+            # current line + subsequent metric-ish lines
+            j = i - 1
+            while j < len(lines):
+                ln = lines[j].strip()
+                if not ln:
+                    j += 1
+                    continue
+                if ln.startswith("Drivers:") or ln.startswith("Targets") or ln.startswith("Next:") or ln.startswith("Aspirin"):
+                    break
+                if ":" in ln:
+                    left, right = ln.split(":", 1)
+                    out.append(f"<p><strong>{left.strip()}:</strong> {right.strip()}</p>")
+                else:
+                    out.append(f"<p>{ln}</p>")
+                j += 1
+            i = j
+            close_section()
+            continue
+
+        # Drivers
+        if line.startswith("Drivers:"):
+            open_section("Primary drivers")
+            items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
+            out.append("<ul>")
+            for it in items:
+                out.append(f"<li>{it}</li>")
+            out.append("</ul>")
+            close_section()
+            continue
+
+        # Targets section
+        if line == "Targets" or line.startswith("Targets"):
+            open_section("Targets")
+            # subsequent target lines start with bullet "•"
+            out.append("<ul>")
+            while i < len(lines):
+                ln = lines[i].strip()
+                if not ln:
+                    i += 1
+                    continue
+                if ln.startswith(("Benefit context", "ESC/EAS", "Next:", "Aspirin")) or ln == "Targets":
+                    break
+                if ln.startswith("•"):
+                    out.append(f"<li>{ln[1:].strip()}</li>")
+                else:
+                    # sometimes targets line may not be bullet
+                    out.append(f"<li>{ln}</li>")
+                i += 1
+            out.append("</ul>")
+            # optional benefit context line
+            if i < len(lines) and lines[i].strip().startswith("Benefit context"):
+                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
+                i += 1
+            # optional ESC goals line
+            if i < len(lines) and lines[i].strip().startswith("ESC/EAS"):
+                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
+                i += 1
+            close_section()
+            continue
+
+        # Next steps
+        if line.startswith("Next:"):
+            open_section("Next steps")
+            steps = [x.strip() for x in line.split(":", 1)[1].split("/") if x.strip()]
+            out.append("<ul>")
+            for s in steps:
+                out.append(f"<li>{s}</li>")
+            out.append("</ul>")
+            close_section()
+            continue
+
+        # Aspirin
+        if line.startswith("Aspirin"):
+            open_section("Aspirin")
+            out.append(f"<p>{line}</p>")
+            close_section()
+            continue
+
+        # Fallback: dump as muted paragraph
+        open_section("Additional")
+        out.append(f"<p class='muted'>{line}</p>")
+        close_section()
+
+    out.append("</div>")
+    return "\n".join(out)
+
+# ============================================================
+# UI: Inputs (organized clinical sequence)
+# ============================================================
+
 FHX_OPTIONS = [
     "None / Unknown",
     "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55",
     "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65",
     "Sibling with premature ASCVD",
     "Multiple first-degree relatives",
-    "Other premature relative"
+    "Other premature relative",
 ]
 def fhx_to_bool(choice: str) -> bool:
     return choice is not None and choice != "None / Unknown"
 
+mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
+
 with st.form("levels_form"):
     consent = st.checkbox("I confirm this input contains no patient identifiers (PHI).", value=False)
 
-    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Patient context")
 
     a1, a2, a3 = st.columns(3)
@@ -73,15 +301,17 @@ with st.form("levels_form"):
         age = st.number_input("Age (years)", 0, 120, 52, step=1)
         sex = st.radio("Sex", ["F", "M"], horizontal=True)
     with a2:
-        # Less clicking: radio
         race = st.radio("Race (calculator)", ["Other (use non-Black coefficients)", "Black"], horizontal=False)
     with a3:
         ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True)
 
-    # FHx on its own line (so it’s readable)
-    fhx_choice = st.selectbox("Premature family history (definition: Father <55, Mother <65)", FHX_OPTIONS, index=0)
+    fhx_choice = st.selectbox(
+        "Premature family history (Father <55; Mother <65)",
+        FHX_OPTIONS,
+        index=0
+    )
 
-    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Vitals & metabolic")
 
     b1, b2, b3 = st.columns(3)
@@ -92,15 +322,14 @@ with st.form("levels_form"):
         smoking = st.radio("Smoking (current)", ["No", "Yes"], horizontal=True)
         diabetes_choice = st.radio("Diabetes (manual)", ["No", "Yes"], horizontal=True)
     with b3:
-        # A1c: default 5.0, tenths only
         a1c = st.number_input("A1c (%)", 0.0, 15.0, 5.0, step=0.1, format="%.1f")
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
-    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Labs")
 
-    # Put TC, LDL, HDL stacked vertically (same column)
+    # Stack Total Chol / LDL / HDL vertically
     c1, c2, c3 = st.columns(3)
     with c1:
         tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, 210, step=1)
@@ -111,13 +340,11 @@ with st.form("levels_form"):
         lpa = st.number_input("Lp(a) value", 0, 1000, 165, step=1)
         lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True)
     with c3:
-        # keep demo default; tenths only
         hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1, format="%.1f")
 
-    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Imaging")
 
-    # CAC box "normal size": keep in a normal column, no wide-span
     d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
         cac_known = st.radio("CAC available?", ["Yes", "No"], horizontal=True)
@@ -126,7 +353,7 @@ with st.form("levels_form"):
     with d3:
         st.caption("")
 
-    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Inflammatory states (optional)")
 
     e1, e2, e3 = st.columns(3)
@@ -156,6 +383,10 @@ with st.form("levels_form"):
     show_json = st.checkbox("Show JSON (debug)", value=True)
     submitted = st.form_submit_button("Run")
 
+# ============================================================
+# Run + output
+# ============================================================
+
 if submitted:
     if not consent:
         st.error("Please confirm no PHI is included.")
@@ -173,22 +404,22 @@ if submitted:
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
     data = {
-        # Patient context
+        # context
         "age": int(age),
         "sex": sex,
         "race": "black" if race == "Black" else "other",
         "ascvd": (ascvd == "Yes"),
         "fhx": fhx_to_bool(fhx_choice),
-        "fhx_detail": fhx_choice,  # optional; engine may ignore
+        "fhx_detail": fhx_choice,
 
-        # Vitals/metabolic
+        # vitals/metabolic
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
         "smoking": (smoking == "Yes"),
         "diabetes": diabetes_effective,
         "a1c": float(a1c) if a1c and a1c > 0 else None,
 
-        # Labs
+        # labs
         "tc": int(tc),
         "ldl": int(ldl),
         "hdl": int(hdl),
@@ -197,14 +428,14 @@ if submitted:
         "lpa_unit": lpa_unit,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
 
-        # Imaging
+        # imaging
         "cac": int(cac) if cac is not None else None,
 
-        # Inflammatory states
+        # inflammatory flags
         "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle),
         "ibd": bool(ibd), "hiv": bool(hiv), "osa": bool(osa), "nafld": bool(nafld),
 
-        # Bleeding risk flags
+        # bleeding risk flags
         "bleed_gi": bool(bleed_gi),
         "bleed_ich": bool(bleed_ich),
         "bleed_anticoag": bool(bleed_anticoag),
@@ -212,37 +443,16 @@ if submitted:
         "bleed_disorder": bool(bleed_disorder),
         "bleed_ckd": bool(bleed_ckd),
     }
-
     data = {k: v for k, v in data.items() if v is not None}
+
     patient = Patient(data)
     out = evaluate(patient)
 
+    # Always generate the engine's raw quick text (source of truth for export)
     note_text = render_quick_text(patient, out)
 
-    # Pretty markdown rendering (bold labels, bullets, headings)
-    lines = note_text.splitlines()
-    md_lines = []
-    for line in lines:
-        if line.startswith("LEVELS™"):
-            md_lines.append(f"## {line}")
-            continue
-        if line.startswith("Level ") or line.startswith("Atherosclerotic disease burden") or line.startswith("Confidence"):
-            if ":" in line:
-                left, right = line.split(":", 1)
-                md_lines.append(f"**{left.strip()}:** {right.strip()}")
-            else:
-                md_lines.append(f"**{line.strip()}**")
-            continue
-        if line.strip().startswith("•"):
-            md_lines.append(f"- {line.strip()[1:].strip()}")
-            continue
-        if ":" in line and not line.strip().startswith("-"):
-            left, right = line.split(":", 1)
-            md_lines.append(f"**{left.strip()}:** {right.strip()}")
-            continue
-        md_lines.append(line)
-
-    pretty_md = "\n".join(md_lines)
+    # Render polished clinical report
+    clinical_html = render_clinical_report(note_text)
 
     # Metrics row
     rs = out.get("riskSignal", {})
@@ -257,10 +467,10 @@ if submitted:
     else:
         m3.metric("10-year ASCVD risk", "—")
 
-    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    st.subheader("Output (polished)")
-    st.markdown(pretty_md)
+    st.subheader("Clinical report")
+    st.markdown(clinical_html, unsafe_allow_html=True)
 
     st.download_button(
         "Download raw text (.txt)",
