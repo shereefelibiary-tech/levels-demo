@@ -1,11 +1,47 @@
 import json
 import re
 import streamlit as st
-from levels_engine import Patient, evaluate, render_note_quick, render_note_full, VERSION
-from levels_output_adapter import generateLevelsCvOutput  # NEW
+from levels_engine import Patient, evaluate, render_quick_text, VERSION
 
-st.set_page_config(page_title="LEVELS Demo", layout="wide")
-st.title(f"LEVELS™ {VERSION['levels']} — De-identified Demo")
+# ---- Polished global styling ----
+st.set_page_config(page_title="LEVELS", layout="wide")
+
+st.markdown("""
+<style>
+/* Global font + spacing (best effort in Streamlit) */
+html, body, [class*="css"]  {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+}
+.small-muted { color: rgba(0,0,0,0.6); font-size: 0.9rem; }
+.card {
+  border: 1px solid rgba(49,51,63,0.15);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: white;
+}
+.hdr {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.divline { margin: 8px 0 12px 0; border-top: 1px solid rgba(49,51,63,0.12); }
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.05);
+  font-size: 0.85rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown(f"""
+<div class="card">
+  <div class="hdr">LEVELS™ {VERSION["levels"]} — De-identified Demo</div>
+  <div class="small-muted">No PHI. Integers for key labs. A1c/hsCRP to tenths. Output designed for quick clinical reference.</div>
+</div>
+""", unsafe_allow_html=True)
+
 st.warning("⚠️ Do NOT enter names, MRNs, DOBs, dates, addresses, phone numbers, or free-text notes.")
 
 PHI_PATTERNS = [
@@ -26,9 +62,11 @@ def contains_phi(s: str) -> bool:
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 with st.form("levels_form"):
-    consent = st.checkbox("I confirm this input contains no patient identifiers (PHI).")
+    consent = st.checkbox("I confirm this input contains no patient identifiers (PHI).", value=False)
 
-    st.subheader("Core (Levels)")
+    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+    st.markdown("### Core (Levels)")
+
     c1, c2, c3 = st.columns(3)
     with c1:
         age = st.number_input("Age (years)", 0, 120, 52, step=1)
@@ -45,7 +83,7 @@ with st.form("levels_form"):
         cac = st.number_input("CAC score (Agatston)", 0, 5000, 0, step=1) if cac_known == "Yes" else None
         hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1, format="%.1f")
 
-    st.subheader("Metabolic")
+    st.markdown("### Metabolic")
     m1, m2, m3 = st.columns(3)
     with m1:
         a1c = st.number_input("A1c (%) (optional)", 0.0, 15.0, 5.0, step=0.1, format="%.1f")
@@ -54,7 +92,7 @@ with st.form("levels_form"):
     with m3:
         smoking = st.selectbox("Smoking (current)", ["No", "Yes"])
 
-    st.subheader("Inflammatory states (optional)")
+    st.markdown("### Inflammatory states (optional)")
     i1, i2, i3 = st.columns(3)
     with i1:
         ra = st.checkbox("Rheumatoid arthritis", value=False)
@@ -67,7 +105,7 @@ with st.form("levels_form"):
         osa = st.checkbox("OSA", value=False)
         nafld = st.checkbox("NAFLD/MASLD", value=False)
 
-    st.subheader("Pooled Cohort Equations (10-year ASCVD risk)")
+    st.markdown("### Pooled Cohort Equations (10-year ASCVD risk)")
     d1, d2, d3 = st.columns(3)
     with d1:
         race = st.selectbox("Race (calculator)", ["Other (use non-Black coefficients)", "Black"])
@@ -114,20 +152,16 @@ if submitted:
         "lpa_unit": lpa_unit,
         "cac": int(cac) if cac is not None else None,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
-
         "a1c": float(a1c) if a1c and a1c > 0 else None,
         "diabetes": (diabetes == "Yes"),
         "smoking": (smoking == "Yes"),
-
         "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle), "ibd": bool(ibd), "hiv": bool(hiv),
         "osa": bool(osa), "nafld": bool(nafld),
-
         "race": "black" if race == "Black" else "other",
         "tc": int(tc),
         "hdl": int(hdl),
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
-
         "bleed_gi": bool(bleed_gi),
         "bleed_ich": bool(bleed_ich),
         "bleed_anticoag": bool(bleed_anticoag),
@@ -140,33 +174,77 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    # NEW: camelCase TS-style output
-    levels_output = generateLevelsCvOutput(patient.data, out)
+    # Top metrics row
+    rs = out["riskSignal"]
+    risk10 = out["pooledCohortEquations10yAscvdRisk"]
+    lvl = out["levels"]
 
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Level", f"{lvl['level']}", help=lvl["label"])
+    m2.metric("Risk Signal Score", f"{rs['score']}/100", help=rs["note"])
+    if risk10.get("risk_pct") is not None:
+        m3.metric("10-year ASCVD risk", f"{risk10['risk_pct']}%", help="Pooled Cohort Equations (population estimate)")
+    else:
+        m3.metric("10-year ASCVD risk", "—", help="Not calculated")
+
+    st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
+
+    # Output
+    note = render_quick_text(patient, out)
     st.subheader("Output")
-    tab1, tab2, tab3 = st.tabs(["Quick", "Full", "TS Output (camelCase)"])
 
-    with tab1:
-        note = render_note_quick(patient, out)
-        st.code(note, language="text")
-        st.download_button("Download Quick note (.txt)", data=note.encode("utf-8"), file_name="levels_quick.txt", mime="text/plain")
+# --- Pretty display (markdown) ---
+md = (
+    note.replace("LEVELS™", "## LEVELS™")  # make the title a markdown header
+        .replace("Level", "**Level**", 1)  # first occurrence only (light touch)
+)
 
-    with tab2:
-        note_full = render_note_full(patient, out)
-        st.code(note_full, language="text")
-        st.download_button("Download Full note (.txt)", data=note_full.encode("utf-8"), file_name="levels_full.txt", mime="text/plain")
+# Better: explicitly format the lines
+lines = note.splitlines()
+md_lines = []
+for line in lines:
+    if line.startswith("LEVELS™"):
+        md_lines.append(f"## {line}")
+        continue
+    if line.startswith("Level "):
+        md_lines.append(f"**{line}**")
+        continue
+    if ":" in line and not line.strip().startswith("•"):
+        # Bold label before colon (e.g., "Confidence: ...")
+        left, right = line.split(":", 1)
+        md_lines.append(f"**{left.strip()}:** {right.strip()}")
+        continue
+    # Keep bullets as-is (markdown bullets)
+    if line.strip().startswith("•"):
+        md_lines.append(f"- {line.strip()[1:].strip()}")
+        continue
+    if line.strip() == "":
+        md_lines.append("")
+        continue
+    md_lines.append(line)
 
-    with tab3:
-        st.code(levels_output["markdown"], language="text")
-        st.download_button("Download TS markdown (.txt)", data=levels_output["markdown"].encode("utf-8"), file_name="levels_ts_markdown.txt", mime="text/plain")
-        st.json(levels_output)
+md = "\n".join(md_lines)
 
-    st.download_button("Download Engine JSON", data=json.dumps(out, indent=2).encode("utf-8"), file_name="levels_engine.json", mime="application/json")
+st.markdown(md)
+
+# --- Copy-friendly raw text export ---
+st.download_button(
+    "Download raw text (.txt)",
+    data=note.encode("utf-8"),
+    file_name="levels_note.txt",
+    mime="text/plain"
+)
+
+# Optional: show raw text in an expander for copy/paste
+with st.expander("Show raw text (copy/paste)"):
+    st.code(note, language="text")
+
+    st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"), file_name="levels_output.json", mime="application/json")
 
     if show_json:
-        st.subheader("Engine JSON (debug)")
+        st.subheader("JSON (debug)")
         st.json(out)
 
-    st.caption(f"Versions: {VERSION['levels']} | {VERSION['risk_signal']} | {VERSION['risk_calc']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
+    st.caption(f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended.")
 
 
