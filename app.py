@@ -199,14 +199,22 @@ def render_clinical_report(note_text: str) -> str:
             continue
 
         if line.startswith("Next:"):
-            open_section("Next steps")
-            steps = [x.strip() for x in line.split(":", 1)[1].split("/") if x.strip()]
-            out.append("<ul>")
-            for s in steps:
-                out.append(f"<li>{s}</li>")
-            out.append("</ul>")
-            close_section()
-            continue
+    open_section("Next steps")
+    payload = line.split(":", 1)[1].strip()
+
+    # IMPORTANT: only split on " / " so we don't break mg/dL
+    if " / " in payload:
+        steps = [x.strip() for x in payload.split(" / ") if x.strip()]
+    else:
+        steps = [payload] if payload else []
+
+    out.append("<ul>")
+    for s in steps:
+        out.append(f"<li>{s}</li>")
+    out.append("</ul>")
+    close_section()
+    continue
+
 
         if line.startswith("Aspirin"):
             open_section("Aspirin")
@@ -419,6 +427,7 @@ if submitted:
         st.json(out)
 
     st.caption(f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended.")
+
 
 
 
