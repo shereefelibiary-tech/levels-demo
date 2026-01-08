@@ -26,13 +26,12 @@ html, body, [class*="css"]  {
 st.markdown(f"""
 <div class="card">
   <div class="hdr">LEVELS™ {VERSION["levels"]} — De-identified Demo</div>
-  <div class="small-muted">Organized for quick clinical entry. Output rendered as polished markdown + raw text export.</div>
+  <div class="small-muted">Fast entry layout • Radios for common choices • Polished markdown output + raw export</div>
 </div>
 """, unsafe_allow_html=True)
 
 st.warning("⚠️ Do NOT enter names, MRNs, DOBs, dates, addresses, phone numbers, or free-text notes.")
 
-# Minimal PHI guardrails (mostly redundant since this is structured)
 PHI_PATTERNS = [
     r"\b\d{3}-\d{2}-\d{4}\b",
     r"\b\d{2}/\d{2}/\d{4}\b",
@@ -51,16 +50,15 @@ def contains_phi(s: str) -> bool:
 
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
-# Family history choices
+# Family history options w/ explicit definition baked in
 FHX_OPTIONS = [
     "None / Unknown",
-    "Father with premature ASCVD (<55)",
-    "Mother with premature ASCVD (<65)",
+    "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55",
+    "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65",
     "Sibling with premature ASCVD",
-    "Multiple 1st-degree relatives",
+    "Multiple first-degree relatives",
     "Other premature relative"
 ]
-
 def fhx_to_bool(choice: str) -> bool:
     return choice is not None and choice != "None / Unknown"
 
@@ -73,14 +71,15 @@ with st.form("levels_form"):
     a1, a2, a3 = st.columns(3)
     with a1:
         age = st.number_input("Age (years)", 0, 120, 52, step=1)
-        sex = st.selectbox("Sex", ["F", "M"])
-        race = st.selectbox("Race (calculator)", ["Other (use non-Black coefficients)", "Black"])
+        sex = st.radio("Sex", ["F", "M"], horizontal=True)
     with a2:
-        fhx_choice = st.selectbox("Premature family history (detail)", FHX_OPTIONS, index=0)
-        ascvd = st.selectbox("ASCVD (clinical)", ["No", "Yes"])
+        # Less clicking: radio
+        race = st.radio("Race (calculator)", ["Other (use non-Black coefficients)", "Black"], horizontal=False)
     with a3:
-        # keep empty for balance; you can add optional fields later
-        st.caption("")
+        ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True)
+
+    # FHx on its own line (so it’s readable)
+    fhx_choice = st.selectbox("Premature family history (definition: Father <55, Mother <65)", FHX_OPTIONS, index=0)
 
     st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
     st.subheader("Vitals & metabolic")
@@ -88,38 +87,44 @@ with st.form("levels_form"):
     b1, b2, b3 = st.columns(3)
     with b1:
         sbp = st.number_input("Systolic BP (mmHg)", 60, 250, 130, step=1)
-        bp_treated = st.selectbox("On BP meds?", ["No", "Yes"])
+        bp_treated = st.radio("On BP meds?", ["No", "Yes"], horizontal=True)
     with b2:
-        smoking = st.selectbox("Smoking (current)", ["No", "Yes"])
-        diabetes = st.selectbox("Diabetes", ["No", "Yes"])
+        smoking = st.radio("Smoking (current)", ["No", "Yes"], horizontal=True)
+        diabetes_choice = st.radio("Diabetes (manual)", ["No", "Yes"], horizontal=True)
     with b3:
-        # A1c default 5.0, tenths
-        a1c = st.number_input("A1c (%) (optional)", 0.0, 15.0, 5.0, step=0.1, format="%.1f")
+        # A1c: default 5.0, tenths only
+        a1c = st.number_input("A1c (%)", 0.0, 15.0, 5.0, step=0.1, format="%.1f")
+        if a1c >= 6.5:
+            st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
     st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
     st.subheader("Labs")
 
+    # Put TC, LDL, HDL stacked vertically (same column)
     c1, c2, c3 = st.columns(3)
     with c1:
-        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, 148, step=1)
-        apob = st.number_input("ApoB (mg/dL)", 0, 300, 112, step=1)
-    with c2:
-        lpa = st.number_input("Lp(a) value", 0, 1000, 165, step=1)
-        lpa_unit = st.selectbox("Lp(a) unit", ["nmol/L", "mg/dL"])
-    with c3:
         tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, 210, step=1)
+        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, 148, step=1)
         hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, 45, step=1)
-        # keep hsCRP default 2.7 (demo-friendly)
+    with c2:
+        apob = st.number_input("ApoB (mg/dL)", 0, 300, 112, step=1)
+        lpa = st.number_input("Lp(a) value", 0, 1000, 165, step=1)
+        lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True)
+    with c3:
+        # keep demo default; tenths only
         hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1, format="%.1f")
 
     st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
     st.subheader("Imaging")
 
-    d1, d2 = st.columns([1, 2])
+    # CAC box "normal size": keep in a normal column, no wide-span
+    d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
-        cac_known = st.selectbox("CAC available?", ["Yes", "No"])
+        cac_known = st.radio("CAC available?", ["Yes", "No"], horizontal=True)
     with d2:
         cac = st.number_input("CAC score (Agatston)", 0, 5000, 0, step=1) if cac_known == "Yes" else None
+    with d3:
+        st.caption("")
 
     st.markdown('<div class="divline"></div>', unsafe_allow_html=True)
     st.subheader("Inflammatory states (optional)")
@@ -157,12 +162,15 @@ if submitted:
         st.stop()
 
     raw_check = " ".join([str(x) for x in [
-        age, sex, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes, a1c,
-        ldl, apob, lpa, lpa_unit, tc, hdl, hscrp, cac
+        age, sex, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
+        tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac
     ]])
     if contains_phi(raw_check):
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
+
+    # Auto-diabetes override when A1c >= 6.5
+    diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
     data = {
         # Patient context
@@ -171,22 +179,22 @@ if submitted:
         "race": "black" if race == "Black" else "other",
         "ascvd": (ascvd == "Yes"),
         "fhx": fhx_to_bool(fhx_choice),
-        "fhx_detail": fhx_choice,  # optional, engine may ignore
+        "fhx_detail": fhx_choice,  # optional; engine may ignore
 
         # Vitals/metabolic
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
         "smoking": (smoking == "Yes"),
-        "diabetes": (diabetes == "Yes"),
+        "diabetes": diabetes_effective,
         "a1c": float(a1c) if a1c and a1c > 0 else None,
 
-        # Labs (integers where appropriate)
+        # Labs
+        "tc": int(tc),
         "ldl": int(ldl),
+        "hdl": int(hdl),
         "apob": int(apob),
         "lpa": int(lpa),
         "lpa_unit": lpa_unit,
-        "tc": int(tc),
-        "hdl": int(hdl),
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
 
         # Imaging
@@ -209,10 +217,9 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    # Use the engine's text (Quick) as the single source for export
     note_text = render_quick_text(patient, out)
 
-    # Build pretty markdown from the raw text (bold labels, bullets, headings)
+    # Pretty markdown rendering (bold labels, bullets, headings)
     lines = note_text.splitlines()
     md_lines = []
     for line in lines:
@@ -230,7 +237,6 @@ if submitted:
             md_lines.append(f"- {line.strip()[1:].strip()}")
             continue
         if ":" in line and not line.strip().startswith("-"):
-            # Bold labels before colon
             left, right = line.split(":", 1)
             md_lines.append(f"**{left.strip()}:** {right.strip()}")
             continue
@@ -238,10 +244,11 @@ if submitted:
 
     pretty_md = "\n".join(md_lines)
 
-    # Metrics row (nice glance)
+    # Metrics row
     rs = out.get("riskSignal", {})
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
     lvl = out.get("levels", {})
+
     m1, m2, m3 = st.columns(3)
     m1.metric("Level", f"{lvl.get('level','—')}")
     m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
@@ -275,5 +282,5 @@ if submitted:
         st.subheader("JSON (debug)")
         st.json(out)
 
-    st.caption(f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. Inputs processed in memory only; no storage intended.")
+    st.caption(f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended.")
 
