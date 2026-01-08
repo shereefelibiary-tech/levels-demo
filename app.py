@@ -84,7 +84,10 @@ st.markdown(
 
 st.info("De-identified use only. Do not enter patient identifiers.")
 
-# Basic PHI pattern guardrail (still useful even without a checkbox)
+# ============================================================
+# Guardrails
+# ============================================================
+
 PHI_PATTERNS = [
     r"\b\d{3}-\d{2}-\d{4}\b",
     r"\b\d{2}/\d{2}/\d{4}\b",
@@ -93,6 +96,7 @@ PHI_PATTERNS = [
     r"@",
     r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
 ]
+
 def contains_phi(s: str) -> bool:
     if not s:
         return False
@@ -101,7 +105,15 @@ def contains_phi(s: str) -> bool:
             return True
     return False
 
+# ============================================================
+# Clinical report renderer (BUG FIX: don't split mg/dL)
+# ============================================================
+
 def render_clinical_report(note_text: str) -> str:
+    """
+    Converts engine raw text into a polished HTML report.
+    IMPORTANT: Next-steps split uses ' / ' (space-slash-space), so mg/dL is never broken.
+    """
     lines = [ln.rstrip() for ln in (note_text or "").splitlines()]
 
     out = []
@@ -121,12 +133,15 @@ def render_clinical_report(note_text: str) -> str:
     while i < len(lines):
         line = lines[i].strip()
         i += 1
+
         if not line or line == title:
             continue
 
+        # Summary section
         if line.startswith("Level "):
             open_section("Summary")
             out.append(f"<p><strong>{line}</strong></p>")
+            # pull labeled lines until next known section
             while i < len(lines):
                 nxt = lines[i].strip()
                 if not nxt:
@@ -143,6 +158,7 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
+        # Key metrics section
         if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations"):
             open_section("Key metrics")
             j = i - 1
@@ -163,6 +179,7 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
+        # Drivers section
         if line.startswith("Drivers:"):
             open_section("Primary drivers")
             items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
@@ -173,6 +190,7 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
+        # Targets section
         if line == "Targets" or line.startswith("Targets"):
             open_section("Targets")
             out.append("<ul>")
@@ -198,24 +216,24 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
+        # Next steps section (FIXED)
         if line.startswith("Next:"):
-    open_section("Next steps")
-    payload = line.split(":", 1)[1].strip()
+            open_section("Next steps")
+            payload = line.split(":", 1)[1].strip()
+            # Only split on " / " so mg/dL is preserved
+            if " / " in payload:
+                steps = [x.strip() for x in payload.split(" / ") if x.strip()]
+            else:
+                steps = [payload] if payload else []
 
-    # IMPORTANT: only split on " / " so we don't break mg/dL
-    if " / " in payload:
-        steps = [x.strip() for x in payload.split(" / ") if x.strip()]
-    else:
-        steps = [payload] if payload else []
+            out.append("<ul>")
+            for s in steps:
+                out.append(f"<li>{s}</li>")
+            out.append("</ul>")
+            close_section()
+            continue
 
-    out.append("<ul>")
-    for s in steps:
-        out.append(f"<li>{s}</li>")
-    out.append("</ul>")
-    close_section()
-    continue
-
-
+        # Aspirin section
         if line.startswith("Aspirin"):
             open_section("Aspirin")
             out.append(f"<p>{line}</p>")
@@ -231,7 +249,7 @@ def render_clinical_report(note_text: str) -> str:
     return "\n".join(out)
 
 # ============================================================
-# Input UI (cohesive sequence)
+# Inputs (organized clinical sequence)
 # ============================================================
 
 FHX_OPTIONS = [
@@ -242,6 +260,7 @@ FHX_OPTIONS = [
     "Multiple first-degree relatives",
     "Other premature relative",
 ]
+
 def fhx_to_bool(choice: str) -> bool:
     return choice is not None and choice != "None / Unknown"
 
@@ -427,7 +446,5 @@ if submitted:
         st.json(out)
 
     st.caption(f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended.")
-
-
 
 
