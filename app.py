@@ -130,15 +130,25 @@ st.markdown(
 st.info("De-identified use only. Do not enter patient identifiers.")
 
 # ============================================================
-# Reset button (prevents session_state weirdness across versions)
+# Reset button (robust callback-based)
 # ============================================================
+def reset_form_state():
+    # Remove all non-internal keys safely
+    for k in list(st.session_state.keys()):
+        if k.startswith("_"):
+            continue
+        del st.session_state[k]
+    st.session_state["_reset_done"] = True
+
 top_c1, top_c2 = st.columns([1, 4])
 with top_c1:
-    if st.button("Reset form", type="secondary"):
-        st.session_state.clear()
-        st.rerun()
+    st.button("Reset form", type="secondary", on_click=reset_form_state)
 with top_c2:
-    st.caption("Tip: if a widget ever looks like it disappeared after an update, click Reset form.")
+    st.caption("Tip: if a widget ever looks wrong after an update, click Reset form.")
+
+if st.session_state.get("_reset_done"):
+    st.success("Form reset.")
+    del st.session_state["_reset_done"]
 
 # ============================================================
 # Guardrails
@@ -158,480 +168,142 @@ def contains_phi(s: str) -> bool:
     return any(re.search(pat, s, re.IGNORECASE) for pat in PHI_PATTERNS)
 
 # ============================================================
-# SmartPhrase helpers
+# Parsing enhancements (parser + regex fallback)
 # ============================================================
-FHX_OPTIONS = [
-    "None / Unknown",
-    "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55",
-    "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65",
-    "Sibling with premature ASCVD",
-    "Multiple first-degree relatives",
-    "Other premature relative",
-]
+def _rx_first(patterns: List[str], text: str, flags=re.IGNORECASE):
+    for pat in patterns:
+        m = re.search(pat, text, flags)
+        if m:
+            return m
+    return None
 
-def fhx_to_bool(choice: str) -> bool:
-    return choice is not None and choice != "None / Unknown"
+def _to_int(x) -> Optional[int]:
+    try:
+        return int(round(float(str(x).strip())))
+    except:
+        return None
 
-TARGET_PARSE_FIELDS = [
-    ("age", "Age"),
-    ("sex", "Sex"),
-    ("sbp", "Systolic BP"),
-    ("tc", "Total Cholesterol"),
-    ("hdl", "HDL"),
-    ("ldl", "LDL"),
-    ("apob", "ApoB"),
-    ("lpa", "Lp(a)"),
-    ("lpa_unit", "Lp(a) unit"),
-    ("a1c", "A1c"),
-    ("hscrp", "hsCRP"),
-    ("cac", "Calcium Score"),
-    ("ascvd_10y", "ASCVD 10-year risk (if present)"),
-]
+def _to_float(x) -> Optional[float]:
+    try:
+        return float(str(x).strip())
+    except:
+        return None
 
-def apply_parsed_to_session(parsed: dict):
-    applied, missing = [], []
+def regex_extract_smartphrase(text: str) -> Dict[str, Any]:
+    """
+    Backup extractor for common Epic-ish text formats.
+    Only returns keys it confidently finds.
+    """
+    t = text or ""
+    out: Dict[str, Any] = {}
 
-    def set_if_present(src_key, state_key, transform=lambda x: x, label=None):
-        nonlocal applied, missing
-        label = label or src_key
-        if parsed.get(src_key) is not None:
-            st.session_state[state_key] = transform(parsed[src_key])
-            applied.append(label)
-        else:
-            missing.append(label)
+    # Age
+    m = _rx_first([r"\bAGE[:\s]+(\d{2,3})\b", r"\b(\d{2,3})\s*y/?o\b", r"\bAge\s+(\d{2,3})\b"], t)
+    if m: out["age"] = _to_int(m.group(1))
 
-    set_if_present("age", "age_val", lambda v: int(v), "Age")
-    set_if_present("sex", "sex_val", lambda v: v, "Sex")
-    set_if_present("sbp", "sbp_val", lambda v: int(v), "Systolic BP")
+    # Sex
+    m = _rx_first([r"\bSEX[:\s]+(M|F)\b", r"\b(\d{2,3})\s*(M|F)\b", r"\b(\d{2,3})\s*(male|female)\b"], t)
+    if m:
+        sx = m.group(1) if len(m.groups()) == 1 else m.group(len(m.groups()))
+        out["sex"] = str(sx).strip().upper()[0]
 
-    set_if_present("tc", "tc_val", lambda v: int(v), "Total Cholesterol")
-    set_if_present("hdl", "hdl_val", lambda v: int(v), "HDL")
-    set_if_present("ldl", "ldl_val", lambda v: int(v), "LDL")
-    set_if_present("apob", "apob_val", lambda v: int(v), "ApoB")
-    set_if_present("lpa", "lpa_val", lambda v: int(v), "Lp(a)")
+    # Race (only Black vs other)
+    if re.search(r"\bblack\b|\bafrican[-\s]?american\b", t, re.IGNORECASE):
+        out["africanAmerican"] = True
 
-    # A1c + hsCRP if parser provides
-    if parsed.get("a1c") is not None:
-        st.session_state["a1c_val"] = float(parsed["a1c"])
-        applied.append("A1c")
+    # SBP (try explicit, then BP 128/78)
+    m = _rx_first([r"\bSBP[:\s]+(\d{2,3})\b", r"\bSystolic\s*BP[:\s]+(\d{2,3})\b"], t)
+    if m:
+        out["sbp"] = _to_int(m.group(1))
     else:
-        missing.append("A1c")
-
-    if parsed.get("hscrp") is not None:
-        st.session_state["hscrp_val"] = float(parsed["hscrp"])
-        applied.append("hsCRP")
-    else:
-        missing.append("hsCRP")
-
-    if parsed.get("lpa_unit") is not None:
-        st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
-        applied.append("Lp(a) unit")
-    else:
-        missing.append("Lp(a) unit")
-
-    # Calcium Score: if present, mark available + set value
-    if parsed.get("cac") is not None:
-        st.session_state["cac_known_val"] = "Yes"
-        st.session_state["cac_val"] = int(parsed["cac"])
-        applied.append("Calcium Score")
-    else:
-        missing.append("Calcium Score")
-
-    # radios
-    if parsed.get("smoker") is not None:
-        st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
-        applied.append("Smoking")
-
-    if parsed.get("diabetes") is not None:
-        st.session_state["diabetes_choice_val"] = "Yes" if parsed["diabetes"] else "No"
-        applied.append("Diabetes(manual)")
-
-    if parsed.get("bpTreated") is not None:
-        st.session_state["bp_treated_val"] = "Yes" if parsed["bpTreated"] else "No"
-        applied.append("BP meds")
-
-    if parsed.get("africanAmerican") is not None:
-        st.session_state["race_val"] = "Black" if parsed["africanAmerican"] else "Other (use non-Black coefficients)"
-        applied.append("Race")
-
-    if parsed.get("ascvd_10y") is not None:
-        st.session_state["ascvd10_val"] = float(parsed["ascvd_10y"])
-        applied.append("ASCVD10y")
-
-    missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
-    return applied, missing
-
-# ============================================================
-# Report renderer FROM JSON (stable; does not parse text)
-# ============================================================
-def render_report_from_json(out: dict, patient: Patient) -> str:
-    lvl = out.get("levels", {})
-    rs = out.get("riskSignal", {})
-    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
-    t = out.get("targets", {})
-    asp = out.get("aspirin", {})
-    conf = out.get("confidence", {})
-
-    # Level
-    lvl_disp = f"{lvl.get('level','—')}"
-    if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
-        lvl_disp += f" ({lvl.get('sublevel')})"
-
-    # Calcium Score (0 valid)
-    if patient.get("ascvd") is True:
-        cs = "N/A (clinical ASCVD)"
-    elif patient.has("cac"):
-        cs = str(int(patient.get("cac")))
-    else:
-        cs = "Not available"
-
-    # PCE
-    if risk10.get("risk_pct") is not None:
-        pce = f"{risk10['risk_pct']}% ({risk10.get('category','')})"
-    else:
-        pce = risk10.get("notes") or ("Not calculated (missing inputs)" if risk10.get("missing") else "Not calculated")
-
-    drivers = out.get("drivers") or []
-    plan = out.get("nextActions") or []
-
-    asp_status = asp.get("status", "Not assessed")
-    asp_why = short_why(asp.get("rationale", []), max_items=2)
-
-    miss_top = ", ".join(conf.get("top_missing", []) or "")
-
-    html = []
-    html.append('<div class="report">')
-    html.append(f"<h2>LEVELS™ {out.get('version',{}).get('levels','')}</h2>")
-
-    html.append('<div class="section">')
-    html.append('<div class="section-title">Summary</div>')
-    html.append(f"<p><strong>Assessment:</strong> Level {lvl_disp} — {lvl.get('label','')}</p>")
-    if lvl.get("meaning"):
-        html.append(f"<p class='muted'>{lvl.get('meaning')}</p>")
-    html.append("</div>")
-
-    html.append('<div class="section">')
-    html.append('<div class="section-title">Key numbers</div>')
-    html.append(f"<p><strong>Calcium Score:</strong> {cs}</p>")
-    html.append(f"<p><strong>10-year ASCVD (PCE):</strong> {pce}</p>")
-    html.append(f"<p><strong>Risk Signal Score:</strong> {rs.get('score','—')}/100 ({rs.get('band','')})</p>")
-    if drivers:
-        html.append(f"<p><strong>Drivers:</strong> {'; '.join(drivers)}</p>")
-    html.append("</div>")
-
-    html.append('<div class="section">')
-    html.append('<div class="section-title">Plan</div>')
-    html.append(f"<p><strong>Targets:</strong> ApoB &lt;{t.get('apob','—')} mg/dL; LDL-C &lt;{t.get('ldl','—')} mg/dL</p>")
-    if plan:
-        html.append("<ul>")
-        for s in plan:
-            html.append(f"<li>{s}</li>")
-        html.append("</ul>")
-    html.append(f"<p><strong>Aspirin:</strong> {asp_status}" + (f" <span class='muted'>({asp_why})</span>" if asp_why else "") + "</p>")
-    html.append(f"<p class='muted'><strong>Data quality:</strong> {conf.get('confidence','—')} ({conf.get('pct','—')}%)" + (f" — Missing: {miss_top}" if miss_top else "") + "</p>")
-    html.append("</div>")
-
-    html.append("</div>")
-    return "\n".join(html)
-
-# ============================================================
-# Mode
-# ============================================================
-mode = st.radio("Output mode", ["Compact (default)", "Full (details)"], horizontal=True)
-
-# ============================================================
-# SmartPhrase ingest
-# ============================================================
-st.subheader("SmartPhrase ingest (optional)")
-
-with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium Score)", expanded=False):
-    st.markdown(
-        "<div class='small-help'>Paste de-identified Epic output. Click <strong>Parse & Apply</strong>. "
-        "This fills what it finds and flags missing items explicitly.</div>",
-        unsafe_allow_html=True,
-    )
-
-    smart_txt = st.text_area(
-        "SmartPhrase text (de-identified)",
-        height=260,
-        placeholder="Paste Epic output here…",
-        key="smartphrase_raw",
-    )
-
-    if smart_txt and contains_phi(smart_txt):
-        st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
-
-    parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
-
-    c1, c2, c3 = st.columns([1, 1, 3])
-    with c1:
-        if st.button("Parse & Apply", type="primary"):
-            applied, missing = apply_parsed_to_session(parsed_preview)
-            st.success("Applied: " + (", ".join(applied) if applied else "None"))
-            if missing:
-                st.warning("Missing/unparsed: " + ", ".join(missing))
-            st.rerun()
-
-    with c2:
-        if st.button("Clear pasted text"):
-            st.session_state["smartphrase_raw"] = ""
-            st.rerun()
-
-    with c3:
-        st.caption("Parsed preview")
-        st.json(parsed_preview)
-
-    st.markdown("### Parse coverage (explicit)")
-    for key, label in TARGET_PARSE_FIELDS:
-        ok = parsed_preview.get(key) is not None
-        badge = "<span class='badge ok'>parsed</span>" if ok else "<span class='badge miss'>not found</span>"
-        val = f": {parsed_preview.get(key)}" if ok else ""
-        st.markdown(f"- **{label}** {badge}{val}", unsafe_allow_html=True)
-
-# ============================================================
-# Main form
-# ============================================================
-with st.form("levels_form"):
-    st.subheader("Patient context")
-
-    a1, a2, a3 = st.columns(3)
-    with a1:
-        age = st.number_input("Age (years)", 0, 120, value=int(st.session_state.get("age_val", 52)), step=1, key="age_val")
-        sex_default = st.session_state.get("sex_val", "F")
-        sex_index = 0 if str(sex_default).upper() == "F" else 1
-        sex = st.radio("Sex", ["F", "M"], horizontal=True, index=sex_index, key="sex_val")
-
-    with a2:
-        race_options = ["Other (use non-Black coefficients)", "Black"]
-        race_default = st.session_state.get("race_val", "Other (use non-Black coefficients)")
-        race_index = 1 if race_default == "Black" else 0
-        race = st.radio("Race (calculator)", race_options, horizontal=False, index=race_index, key="race_val")
-
-    with a3:
-        ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True)
-
-    fhx_choice = st.selectbox("Premature family history (Father <55; Mother <65)", FHX_OPTIONS, index=0)
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Cardiometabolic profile")
-
-    b1, b2, b3 = st.columns(3)
-    with b1:
-        sbp = st.number_input("Systolic BP (mmHg)", 60, 250, value=int(st.session_state.get("sbp_val", 130)), step=1, key="sbp_val")
-        bp_default = st.session_state.get("bp_treated_val", "No")
-        bp_index = 1 if bp_default == "Yes" else 0
-        bp_treated = st.radio("On BP meds?", ["No", "Yes"], horizontal=True, index=bp_index, key="bp_treated_val")
-
-    with b2:
-        sm_default = st.session_state.get("smoking_val", "No")
-        sm_index = 1 if sm_default == "Yes" else 0
-        smoking = st.radio("Smoking (current)", ["No", "Yes"], horizontal=True, index=sm_index, key="smoking_val")
-
-        dm_default = st.session_state.get("diabetes_choice_val", "No")
-        dm_index = 1 if dm_default == "Yes" else 0
-        diabetes_choice = st.radio("Diabetes (manual)", ["No", "Yes"], horizontal=True, index=dm_index, key="diabetes_choice_val")
-
-    with b3:
-        a1c = st.number_input("A1c (%)", 0.0, 15.0, float(st.session_state.get("a1c_val", 5.0)), step=0.1, format="%.1f", key="a1c_val")
-        if a1c >= 6.5:
-            st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Labs")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, value=int(st.session_state.get("tc_val", 210)), step=1, key="tc_val")
-        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, value=int(st.session_state.get("ldl_val", 148)), step=1, key="ldl_val")
-        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, value=int(st.session_state.get("hdl_val", 45)), step=1, key="hdl_val")
-    with c2:
-        apob = st.number_input("ApoB (mg/dL)", 0, 300, value=int(st.session_state.get("apob_val", 112)), step=1, key="apob_val")
-        lpa = st.number_input("Lp(a) value", 0, 1000, value=int(st.session_state.get("lpa_val", 165)), step=1, key="lpa_val")
-        unit_default = st.session_state.get("lpa_unit_val", "nmol/L")
-        unit_index = 0 if str(unit_default) == "nmol/L" else 1
-        lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, index=unit_index, key="lpa_unit_val")
-    with c3:
-        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, float(st.session_state.get("hscrp_val", 0.0)), step=0.1, format="%.1f", key="hscrp_val")
-
-    # Calcium Score section (explicit; 0 allowed)
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Imaging — Calcium Score")
-
-    d1, d2 = st.columns([1, 2])
-    with d1:
-        cac_default = st.session_state.get("cac_known_val", "No")
-        cac_known = st.radio(
-            "Calcium Score available?",
-            ["Yes", "No"],
-            horizontal=True,
-            index=0 if cac_default == "Yes" else 1,
-            key="cac_known_val"
-        )
-    with d2:
-        cac = st.number_input(
-            "Calcium Score (Agatston)",
-            0, 5000,
-            value=int(st.session_state.get("cac_val", 0)),
-            step=1,
-            key="cac_val"
-        ) if cac_known == "Yes" else None
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Inflammatory states (optional)")
-
-    e1, e2, e3 = st.columns(3)
-    with e1:
-        ra = st.checkbox("Rheumatoid arthritis", value=False)
-        psoriasis = st.checkbox("Psoriasis", value=False)
-    with e2:
-        sle = st.checkbox("SLE", value=False)
-        ibd = st.checkbox("IBD", value=False)
-    with e3:
-        hiv = st.checkbox("HIV", value=False)
-        osa = st.checkbox("OSA", value=False)
-        nafld = st.checkbox("NAFLD/MASLD", value=False)
-
-    with st.expander("Bleeding risk (for aspirin) — optional"):
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            bleed_gi = st.checkbox("Prior GI bleed / ulcer", value=False)
-            bleed_nsaid = st.checkbox("Chronic NSAID/steroid use", value=False)
-        with f2:
-            bleed_anticoag = st.checkbox("Anticoagulant use", value=False)
-            bleed_disorder = st.checkbox("Bleeding disorder / thrombocytopenia", value=False)
-        with f3:
-            bleed_ich = st.checkbox("Prior intracranial hemorrhage", value=False)
-            bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
-
-    show_json = st.checkbox("Show JSON (debug)", value=True)
-    submitted = st.form_submit_button("Run")
-
-# ============================================================
-# Run + output
-# ============================================================
-if submitted:
-    raw_check = " ".join([str(x) for x in [
-        age, sex, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
-        tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac
-    ]])
-    if contains_phi(raw_check):
-        st.error("Possible identifier/date detected. Please remove PHI and retry.")
-        st.stop()
-
-    diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
-
-    # Build payload (IMPORTANT: include CAC when available even if 0)
-    data = {
-        "age": int(age),
-        "sex": sex,  # engine normalizes
-        "race": "black" if race == "Black" else "other",  # engine normalizes "other" -> non-Black
-        "ascvd": (ascvd == "Yes"),
-        "fhx": fhx_to_bool(fhx_choice),
-        "fhx_detail": fhx_choice,
-        "sbp": int(sbp),
-        "bp_treated": (bp_treated == "Yes"),
-        "smoking": (smoking == "Yes"),
-        "diabetes": diabetes_effective,
-        "a1c": float(a1c) if a1c > 0 else None,
-        "tc": int(tc),
-        "ldl": int(ldl),
-        "hdl": int(hdl),
-        "apob": int(apob),
-        "lpa": int(lpa),
-        "lpa_unit": lpa_unit,
-        "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
-        "cac": int(cac) if cac is not None else None,  # CAC=0 allowed if entered
-        "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle),
-        "ibd": bool(ibd), "hiv": bool(hiv), "osa": bool(osa), "nafld": bool(nafld),
-        "bleed_gi": bool(bleed_gi),
-        "bleed_ich": bool(bleed_ich),
-        "bleed_anticoag": bool(bleed_anticoag),
-        "bleed_nsaid": bool(bleed_nsaid),
-        "bleed_disorder": bool(bleed_disorder),
-        "bleed_ckd": bool(bleed_ckd),
-    }
-    data = {k: v for k, v in data.items() if v is not None}
-
-    patient = Patient(data)
-    out = evaluate(patient)
-
-    note_text = render_compact_text(patient, out) if mode.startswith("Compact") else render_full_text(patient, out)
-    report_html = render_report_from_json(out, patient)
-
-    # Metrics row
-    rs = out.get("riskSignal", {})
-    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
-    lvl = out.get("levels", {})
-    asp = out.get("aspirin", {})
-
-    lvl_disp = f"{lvl.get('level','—')}"
-    if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
-        lvl_disp += f" ({lvl.get('sublevel')})"
-
-    cs_disp = "—"
-    if patient.get("ascvd") is True:
-        cs_disp = "N/A"
-    elif patient.has("cac"):
-        cs_disp = str(int(patient.get("cac")))
-
-    a1, a2, a3, a4 = st.columns(4)
-    a1.metric("Level", lvl_disp)
-    a2.metric("Calcium Score", cs_disp)
-    a3.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
-    a4.metric("10-year ASCVD (PCE)", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
-
-    # Critical inputs strip (explicit)
-    def crit_pill(label: str, ok: bool) -> str:
-        cls = "crit-pill crit-ok" if ok else "crit-pill crit-miss"
-        return f"<span class='{cls}'>{label}: {'OK' if ok else 'Missing'}</span>"
-
-    apo_ok = patient.has("apob") or patient.has("ldl")
-    lpa_ok = patient.has("lpa")
-    cs_ok = patient.has("cac")
-    a1c_ok = patient.has("a1c")
-    hscrp_ok = patient.has("hscrp")
-
-    st.markdown("<div class='crit'>" +
-                crit_pill("ApoB/LDL", apo_ok) +
-                crit_pill("Lp(a)", lpa_ok) +
-                crit_pill("Calcium Score", cs_ok) +
-                crit_pill("A1c", a1c_ok) +
-                crit_pill("hsCRP", hscrp_ok) +
-                "</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
-    st.subheader("Clinical report")
-    st.markdown(report_html, unsafe_allow_html=True)
-
-    with st.expander("Copy/paste text"):
-        st.code(note_text, language="text")
-
-    st.download_button(
-        "Download raw text (.txt)",
-        data=note_text.encode("utf-8"),
-        file_name="levels_note.txt",
-        mime="text/plain",
-    )
-    st.download_button(
-        "Download JSON",
-        data=json.dumps(out, indent=2).encode("utf-8"),
-        file_name="levels_output.json",
-        mime="application/json",
-    )
-
-    # Aspirin quick visibility
-    asp_status = asp.get("status", "Not assessed")
-    asp_why = short_why(asp.get("rationale", []), max_items=2)
-    st.caption(f"Aspirin: {asp_status}" + (f" — Why: {asp_why}" if asp_why else ""))
-
-    if show_json:
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-        st.subheader("JSON (debug)")
-        st.json(out)
-
-    st.caption(
-        f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
-    )
-
+        m2 = _rx_first([r"\bBP[:\s]+(\d{2,3})\s*/\s*\d{2,3}\b", r"\b(\d{2,3})\s*/\s*\d{2,3}\b"], t)
+        if m2:
+            out["sbp"] = _to_int(m2.group(1))
+
+    # Lipids
+    m = _rx_first([r"\b(TC|TOTAL\s*CHOLESTEROL)[:\s]+(\d{2,3})\b", r"\bTotal\s*Cholesterol[:\s]+(\d{2,3})\b"], t)
+    if m:
+        out["tc"] = _to_int(m.group(m.lastindex))
+
+    m = _rx_first([r"\bHDL[:\s]+(\d{2,3})\b"], t)
+    if m:
+        out["hdl"] = _to_int(m.group(1))
+
+    m = _rx_first([r"\bLDL[-\s]*C?\b[:\s]+(\d{2,3})\b", r"\bLDL\b[:\s]+(\d{2,3})\b"], t)
+    if m:
+        out["ldl"] = _to_int(m.group(1))
+
+    m = _rx_first([r"\bApoB\b[:\s]+(\d{2,3})\b", r"\bAPOB\b[:\s]+(\d{2,3})\b"], t)
+    if m:
+        out["apob"] = _to_int(m.group(1))
+
+    # Lp(a) and units
+    m = _rx_first([r"\bLp\(a\)\b[:\s]+([\d.]+)\s*(nmol/L|mg/dL)?", r"\bLPA\b[:\s]+([\d.]+)\s*(nmol/L|mg/dL)?"], t)
+    if m:
+        out["lpa"] = _to_int(m.group(1))
+        unit = m.group(2)
+        if unit:
+            out["lpa_unit"] = unit
+
+    # Explicit unit line
+    m = _rx_first([r"\bLPA\s*UNIT[:\s]+(nmol/L|mg/dL)\b", r"\bLp\(a\)\s*unit[:\s]+(nmol/L|mg/dL)\b"], t)
+    if m:
+        out["lpa_unit"] = m.group(1)
+
+    # Calcium Score (CAC)
+    m = _rx_first([
+        r"\bCALCIUM\s*SCORE[:\s]+(\d{1,4})\b",
+        r"\bCoronary.*Calcium.*[:=]\s*(\d{1,4})\b",
+        r"\bCAC\b[:=\s]+(\d{1,4})\b",
+        r"\bAgatston[:\s]+(\d{1,4})\b",
+    ], t)
+    if m:
+        out["cac"] = _to_int(m.group(1))
+
+    # ASCVD 10y (if present)
+    m = _rx_first([r"\bASCVD\s*10[-\s]*year[:\s]+([\d.]+)\s*%?", r"\b10[-\s]*year\s*ASCVD\s*risk[:\s]+([\d.]+)\s*%?"], t)
+    if m:
+        out["ascvd_10y"] = _to_float(m.group(1))
+
+    # A1c
+    m = _rx_first([r"\bA1C\b[:\s]+([\d.]+)\b", r"\bHbA1c\b[:\s]+([\d.]+)\b"], t)
+    if m:
+        out["a1c"] = _to_float(m.group(1))
+
+    # hsCRP
+    m = _rx_first([r"\bhs\s*CRP\b[:\s]+([\d.]+)\b", r"\bhscrp\b[:\s]+([\d.]+)\b"], t)
+    if m:
+        out["hscrp"] = _to_float(m.group(1))
+
+    # Smoker / diabetes / BP treated (very light heuristics)
+    if re.search(r"\b(smoker|smoking)\b.*\b(yes|current)\b", t, re.IGNORECASE):
+        out["smoker"] = True
+    elif re.search(r"\bnon[-\s]?smoker\b|\bdenies smoking\b", t, re.IGNORECASE):
+        out["smoker"] = False
+
+    if re.search(r"\bdiabetes\b.*\b(yes|type\s*2|t2)\b", t, re.IGNORECASE):
+        out["diabetes"] = True
+    elif re.search(r"\bno (known )?diabetes\b|\bdenies diabetes\b", t, re.IGNORECASE):
+        out["diabetes"] = False
+
+    if re.search(r"\b(on|takes)\b.*\b(bp meds|antihypertensive|amlodipine|lisinopril|losartan|valsartan|hctz|chlorthalidone|metoprolol)\b", t, re.IGNORECASE):
+        out["bpTreated"] = True
+    elif re.search(r"\bnot on bp meds\b|\bno bp meds\b", t, re.IGNORECASE):
+        out["bpTreated"] = False
+
+    # Clean None
+    return {k: v for k, v in out.items() if v is not None}
+
+def merged_parse(text: str) -> Dict[str, Any]:
+    """
+    Merge parse_smartphrase() + regex fallback.
+    Parser wins; regex fills missing.
+    """
+    base = parse_smartphrase(text or "") if (text or "").strip() else {}
+    fallback = regex_extract_smartphrase(text or "")
+    merged = dict(fallback)
+    merged.update({k: v for k, v in base.items() if v is not None})
+    return merged
+
+# ==========
 
