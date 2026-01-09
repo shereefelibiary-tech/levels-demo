@@ -2,7 +2,7 @@ import json
 import re
 import streamlit as st
 
-from smartphrase_ingest.parser import parse_ascvd_block
+from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION
 
 # ============================================================
@@ -72,8 +72,8 @@ html, body, [class*="css"] {
 .section li { margin: 4px 0; }
 
 .muted { color: #6b7280; font-size: 0.9rem; }
-
 .small-help { color: rgba(31,41,55,0.70); font-size: 0.88rem; }
+
 .kv {
   display:flex; gap:10px; flex-wrap:wrap;
   border: 1px solid rgba(31,41,55,0.10);
@@ -84,6 +84,19 @@ html, body, [class*="css"] {
 }
 .kv div { font-size: 0.9rem; }
 .kv strong { font-weight: 800; }
+
+.badge {
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid rgba(31,41,55,0.15);
+  background:#fff;
+  font-size:0.82rem;
+  margin-left:6px;
+}
+.ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
+.miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -93,7 +106,7 @@ st.markdown(
     f"""
 <div class="header-card">
   <div class="header-title">LEVELS™ {VERSION["levels"]} — De-identified Demo</div>
-  <p class="header-sub">Fast entry • radios for common choices • polished clinical report output + raw text export</p>
+  <p class="header-sub">Fast entry • radios for common choices • SmartPhrase paste → auto-fill (LDL/ApoB/Lp(a)/CAC) • clinical report output</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -266,89 +279,7 @@ def render_clinical_report(note_text: str) -> str:
     return "\n".join(out)
 
 # ============================================================
-# Helpers: map parsed Epic ASCVD block -> session_state defaults
-# ============================================================
-
-def _pick(d: dict, *keys):
-    for k in keys:
-        if isinstance(d, dict) and k in d and d[k] is not None:
-            return d[k]
-    return None
-
-def apply_parsed_to_session(parsed: dict) -> list:
-    """
-    Applies parsed values into Streamlit session_state keys that back the form inputs.
-    Returns a list of what was applied (for display).
-    Works even if your parser uses slightly different key names.
-    """
-    applied = []
-
-    if not isinstance(parsed, dict):
-        return applied
-
-    # Numbers
-    age_v = _pick(parsed, "age")
-    if age_v is not None:
-        st.session_state["age_val"] = int(float(age_v))
-        applied.append(f"Age={st.session_state['age_val']}")
-
-    sbp_v = _pick(parsed, "sbp", "Systolic Blood Pressure", "systolic_bp")
-    if sbp_v is not None:
-        st.session_state["sbp_val"] = int(float(sbp_v))
-        applied.append(f"SBP={st.session_state['sbp_val']}")
-
-    tc_v = _pick(parsed, "total_chol", "totalChol", "tc", "Total Cholesterol")
-    if tc_v is not None:
-        st.session_state["tc_val"] = int(float(tc_v))
-        applied.append(f"TC={st.session_state['tc_val']}")
-
-    hdl_v = _pick(parsed, "hdl", "HDL Cholesterol", "hdl_chol")
-    if hdl_v is not None:
-        st.session_state["hdl_val"] = int(float(hdl_v))
-        applied.append(f"HDL={st.session_state['hdl_val']}")
-
-    # Optional: capture risk number into session (display only; engine uses its own calc)
-    risk_v = _pick(parsed, "ascvd_10y", "ascvd10y", "ascvd10", "risk10y", "risk_pct")
-    if risk_v is not None:
-        st.session_state["ascvd10_val"] = float(risk_v)
-        applied.append(f"ASCVD10y={st.session_state['ascvd10_val']}%")
-
-    # Sex
-    sex_v = _pick(parsed, "sex", "Clinically relevant sex")
-    if sex_v:
-        t = str(sex_v).strip().lower()
-        if "female" in t:
-            st.session_state["sex_val"] = "F"
-            applied.append("Sex=F")
-        elif "male" in t:
-            st.session_state["sex_val"] = "M"
-            applied.append("Sex=M")
-
-    # Booleans -> radios
-    smoker_v = _pick(parsed, "smoker", "Tobacco smoker")
-    if smoker_v is not None:
-        st.session_state["smoking_val"] = "Yes" if bool(smoker_v) else "No"
-        applied.append(f"Smoking={st.session_state['smoking_val']}")
-
-    dm_v = _pick(parsed, "diabetes", "Diabetic")
-    if dm_v is not None:
-        st.session_state["diabetes_choice_val"] = "Yes" if bool(dm_v) else "No"
-        applied.append(f"Diabetes(manual)={st.session_state['diabetes_choice_val']}")
-
-    bpt_v = _pick(parsed, "bpTreated", "bp_treated", "Is BP treated")
-    if bpt_v is not None:
-        st.session_state["bp_treated_val"] = "Yes" if bool(bpt_v) else "No"
-        applied.append(f"BP treated={st.session_state['bp_treated_val']}")
-
-    aa_v = _pick(parsed, "africanAmerican", "Is Non-Hispanic African American")
-    if aa_v is not None:
-        st.session_state["race_val"] = "Black" if bool(aa_v) else "Other (use non-Black coefficients)"
-        applied.append(f"Race={st.session_state['race_val']}")
-
-    return applied
-
-# ============================================================
-# Inputs (organized clinical sequence)
+# Helpers
 # ============================================================
 
 FHX_OPTIONS = [
@@ -363,63 +294,159 @@ FHX_OPTIONS = [
 def fhx_to_bool(choice: str) -> bool:
     return choice is not None and choice != "None / Unknown"
 
+TARGET_PARSE_FIELDS = [
+    ("age", "Age"),
+    ("sex", "Sex"),
+    ("sbp", "Systolic BP"),
+    ("tc", "Total Cholesterol"),
+    ("hdl", "HDL"),
+    ("ldl", "LDL"),
+    ("apob", "ApoB"),
+    ("lpa", "Lp(a)"),
+    ("lpa_unit", "Lp(a) unit"),
+    ("cac", "CAC"),
+    ("ascvd_10y", "ASCVD 10-year risk (if present)"),
+]
+
+def apply_parsed_to_session(parsed: dict):
+    """
+    Applies parsed values into Streamlit session_state keys used by the form widgets.
+    Returns (applied_list, missing_list) for explicit flagging.
+    """
+    applied = []
+    missing = []
+
+    def set_if_present(src_key, state_key, transform=lambda x: x, label=None):
+        nonlocal applied, missing
+        label = label or src_key
+        if parsed.get(src_key) is not None:
+            st.session_state[state_key] = transform(parsed[src_key])
+            applied.append(label)
+        else:
+            missing.append(label)
+
+    set_if_present("age", "age_val", lambda v: int(v), "Age")
+    set_if_present("sex", "sex_val", lambda v: v, "Sex")
+    set_if_present("sbp", "sbp_val", lambda v: int(v), "Systolic BP")
+
+    set_if_present("tc", "tc_val", lambda v: int(v), "Total Cholesterol")
+    set_if_present("hdl", "hdl_val", lambda v: int(v), "HDL")
+    set_if_present("ldl", "ldl_val", lambda v: int(v), "LDL")
+
+    set_if_present("apob", "apob_val", lambda v: int(v), "ApoB")
+    set_if_present("lpa", "lpa_val", lambda v: int(v), "Lp(a)")
+
+    # Unit is optional but we flag it separately
+    if parsed.get("lpa_unit") is not None:
+        st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
+        applied.append("Lp(a) unit")
+    else:
+        missing.append("Lp(a) unit")
+
+    # CAC: if present, set CAC available to Yes
+    if parsed.get("cac") is not None:
+        st.session_state["cac_known_val"] = "Yes"
+        st.session_state["cac_val"] = int(parsed["cac"])
+        applied.append("CAC")
+    else:
+        missing.append("CAC")
+
+    # These are not in the strict target list but help fill radios
+    if parsed.get("smoker") is not None:
+        st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
+        applied.append("Smoking")
+
+    if parsed.get("diabetes") is not None:
+        st.session_state["diabetes_choice_val"] = "Yes" if parsed["diabetes"] else "No"
+        applied.append("Diabetes(manual)")
+
+    if parsed.get("bpTreated") is not None:
+        st.session_state["bp_treated_val"] = "Yes" if parsed["bpTreated"] else "No"
+        applied.append("BP meds")
+
+    if parsed.get("africanAmerican") is not None:
+        st.session_state["race_val"] = "Black" if parsed["africanAmerican"] else "Other (use non-Black coefficients)"
+        applied.append("Race")
+
+    # Optional: store risk display
+    if parsed.get("ascvd_10y") is not None:
+        st.session_state["ascvd10_val"] = float(parsed["ascvd_10y"])
+        applied.append("ASCVD10y")
+
+    # de-dupe missing
+    missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
+    return applied, missing
+
+# ============================================================
+# Top-level mode
+# ============================================================
+
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest (textbox + apply)
+# SmartPhrase ingest (paste -> parse -> apply + flag missing)
 # ============================================================
 
 st.subheader("SmartPhrase ingest (optional)")
 
-with st.expander("Paste Epic output to auto-fill fields", expanded=False):
+with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/CAC)", expanded=False):
     st.markdown(
-        "<div class='small-help'>Paste the rendered Epic text (e.g., the ASCVD risk block). "
-        "Click <strong>Parse & Apply</strong> to load values into the form below.</div>",
+        "<div class='small-help'>Paste rendered Epic output (SmartPhrase text, ASCVD block, lipid panel, etc). "
+        "Click <strong>Parse & Apply</strong>. This will auto-fill as many fields as possible, and explicitly flag what was not found.</div>",
         unsafe_allow_html=True,
     )
 
     smart_txt = st.text_area(
         "SmartPhrase text (de-identified)",
-        height=220,
+        height=260,
         placeholder="Paste Epic output here…",
         key="smartphrase_raw",
     )
 
-    # PHI guardrail on the pasted text (soft warning; you decide if you want hard-stop)
     if smart_txt and contains_phi(smart_txt):
-        st.warning("Possible identifier/date detected in pasted text. Please remove PHI.")
+        st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
 
-    b1, b2, b3 = st.columns([1, 1, 3])
-    with b1:
+    parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
+
+    c1, c2, c3 = st.columns([1, 1, 3])
+    with c1:
         if st.button("Parse & Apply", type="primary"):
-            parsed = parse_ascvd_block(smart_txt or "")
-            applied = apply_parsed_to_session(parsed)
-            st.success("Applied: " + (", ".join(applied) if applied else "No fields recognized."))
+            applied, missing = apply_parsed_to_session(parsed_preview)
+            st.success("Applied: " + (", ".join(applied) if applied else "None"))
+            if missing:
+                st.warning("Missing/unparsed: " + ", ".join(missing))
             st.rerun()
 
-    with b2:
+    with c2:
         if st.button("Clear pasted text"):
             st.session_state["smartphrase_raw"] = ""
             st.rerun()
 
-    with b3:
-        st.caption("Parsed preview (from your parser):")
-        st.json(parse_ascvd_block(smart_txt or "") if (smart_txt or "").strip() else {})
+    with c3:
+        st.caption("Parsed preview")
+        st.json(parsed_preview)
 
-    # Optional: show what’s currently loaded into defaults
+    st.markdown("### Parse coverage (explicit)")
+    for key, label in TARGET_PARSE_FIELDS:
+        ok = parsed_preview.get(key) is not None
+        badge = "<span class='badge ok'>parsed</span>" if ok else "<span class='badge miss'>not found</span>"
+        val = f": {parsed_preview.get(key)}" if ok else ""
+        st.markdown(f"- **{label}** {badge}{val}", unsafe_allow_html=True)
+
     st.markdown(
         f"""
 <div class="kv">
-  <div><strong>Defaults loaded:</strong></div>
+  <div><strong>Loaded defaults:</strong></div>
   <div>Age: {st.session_state.get("age_val", "—")}</div>
   <div>Sex: {st.session_state.get("sex_val", "—")}</div>
   <div>Race: {st.session_state.get("race_val", "—")}</div>
   <div>SBP: {st.session_state.get("sbp_val", "—")}</div>
   <div>TC: {st.session_state.get("tc_val", "—")}</div>
   <div>HDL: {st.session_state.get("hdl_val", "—")}</div>
-  <div>Smoking: {st.session_state.get("smoking_val", "—")}</div>
-  <div>BP meds: {st.session_state.get("bp_treated_val", "—")}</div>
-  <div>Diabetes(manual): {st.session_state.get("diabetes_choice_val", "—")}</div>
+  <div>LDL: {st.session_state.get("ldl_val", "—")}</div>
+  <div>ApoB: {st.session_state.get("apob_val", "—")}</div>
+  <div>Lp(a): {st.session_state.get("lpa_val", "—")} {st.session_state.get("lpa_unit_val", "")}</div>
+  <div>CAC: {st.session_state.get("cac_val", "—")} ({st.session_state.get("cac_known_val", "No")})</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -439,7 +466,6 @@ with st.form("levels_form"):
             value=int(st.session_state.get("age_val", 52)),
             step=1, key="age_val"
         )
-        # Sex is stored as "F" or "M"
         sex_default = st.session_state.get("sex_val", "F")
         sex_index = 0 if sex_default == "F" else 1
         sex = st.radio("Sex", ["F", "M"], horizontal=True, index=sex_index, key="sex_val")
@@ -493,16 +519,30 @@ with st.form("levels_form"):
             value=int(st.session_state.get("tc_val", 210)),
             step=1, key="tc_val"
         )
-        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, 148, step=1)
+        ldl = st.number_input(
+            "LDL-C (mg/dL)", 0, 400,
+            value=int(st.session_state.get("ldl_val", 148)),
+            step=1, key="ldl_val"
+        )
         hdl = st.number_input(
             "HDL cholesterol (mg/dL)", 0, 150,
             value=int(st.session_state.get("hdl_val", 45)),
             step=1, key="hdl_val"
         )
     with c2:
-        apob = st.number_input("ApoB (mg/dL)", 0, 300, 112, step=1)
-        lpa = st.number_input("Lp(a) value", 0, 1000, 165, step=1)
-        lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True)
+        apob = st.number_input(
+            "ApoB (mg/dL)", 0, 300,
+            value=int(st.session_state.get("apob_val", 112)),
+            step=1, key="apob_val"
+        )
+        lpa = st.number_input(
+            "Lp(a) value", 0, 1000,
+            value=int(st.session_state.get("lpa_val", 165)),
+            step=1, key="lpa_val"
+        )
+        unit_default = st.session_state.get("lpa_unit_val", "nmol/L")
+        unit_index = 0 if unit_default == "nmol/L" else 1
+        lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, index=unit_index, key="lpa_unit_val")
     with c3:
         hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1, format="%.1f")
 
@@ -511,9 +551,15 @@ with st.form("levels_form"):
 
     d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
-        cac_known = st.radio("CAC available?", ["Yes", "No"], horizontal=True)
+        cac_default = st.session_state.get("cac_known_val", "No")
+        cac_index = 0 if cac_default == "Yes" else 1
+        cac_known = st.radio("CAC available?", ["Yes", "No"], horizontal=True, index=cac_index, key="cac_known_val")
     with d2:
-        cac = st.number_input("CAC score (Agatston)", 0, 5000, 0, step=1) if cac_known == "Yes" else None
+        cac = st.number_input(
+            "CAC score (Agatston)", 0, 5000,
+            value=int(st.session_state.get("cac_val", 0)),
+            step=1, key="cac_val"
+        ) if cac_known == "Yes" else None
     with d3:
         st.caption("")
 
