@@ -1,20 +1,20 @@
 # levels_engine.py
-# LEVELS v2.2 — Adds Level 2 sub-stratification (2A/2B/2C), tightens Level 1 sensitivity,
-# and introduces Level 5 (extreme/progressive ASCVD) while preserving existing modules:
-# - Risk Signal Score (RSS)
-# - Pooled Cohort Equations (10-year ASCVD risk)
-# - A1c / inflammation / aspirin
-# - ESC numeric goals + ACC/AHA context + near-term vs lifetime framing
+# LEVELS v2.2 — Level 2 sub-stratification (2A/2B/2C), tightened Level 1 sensitivity,
+# Level 5 support, ACC/AHA context + near-term/lifetime framing, RSS, PCE, aspirin, ESC goals.
+#
+# Update in this version:
+# - Aspirin output simplified to: Recommend / Consider (shared decision) / Would not recommend / Not assessed
+# - Quick text now adds "Why:" (top 1–2 rationale items)
 
 import math
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 VERSION = {
     "levels": "v2.2",
     "riskSignal": "RSS v1.0",
     "riskCalc": "Pooled Cohort Equations (ACC/AHA 2013; Race other→non-Black)",
-    "aspirin": "Aspirin v1.0 (CAC≥100 OR 10y risk≥10%, age 40–69, low bleed risk)",
+    "aspirin": "Aspirin v1.1 (clean status labels + rationale)",
 }
 
 # ----------------------------
@@ -38,17 +38,29 @@ def fmt_int(x):
 
 def safe_float(x, default=None) -> Optional[float]:
     try:
-        if x is None: return default
+        if x is None:
+            return default
         return float(x)
     except:
         return default
 
 def safe_int(x, default=None) -> Optional[int]:
     try:
-        if x is None: return default
+        if x is None:
+            return default
         return int(round(float(x)))
     except:
         return default
+
+def short_why(reasons: List[str], max_items: int = 2) -> str:
+    if not reasons:
+        return ""
+    cleaned = [str(r).strip() for r in reasons if str(r).strip()]
+    # Drop low-signal reassurance if other reasons exist
+    drop = {"Bleeding risk low by available flags"}
+    if len(cleaned) > 1:
+        cleaned = [r for r in cleaned if r not in drop]
+    return "; ".join(cleaned[:max_items])
 
 def a1c_status(p: Patient) -> Optional[str]:
     if not p.has("a1c"):
@@ -93,10 +105,10 @@ def lpa_elevated(p: Patient) -> bool:
 def premature_fhx(p: Patient) -> bool:
     """
     Backward compatible:
-      - fhx=True assumed "premature FHx" in your existing UI
+      - fhx=True assumed "premature FHx" in existing UI
     Optional richer fields if present:
       - fhx_premature (bool)
-      - fhx_relation (e.g., father/mother/sibling/child/other)
+      - fhx_relation (father/mother/sibling/child/other)
       - fhx_sex (male/female), fhx_age_event (int)
     """
     if p.get("fhx_premature") is True:
@@ -109,37 +121,44 @@ def premature_fhx(p: Patient) -> bool:
     if age_evt is None or sex not in ("male", "m", "female", "f"):
         return False
     is_male = sex in ("male", "m")
-    # Premature ASCVD: male <55, female <65 (first-degree)
-    # If relation present, we only treat first-degree as qualifying; otherwise assume first-degree is unknown -> do not promote.
+
     rel = str(p.get("fhx_relation", "")).lower()
     if rel and rel not in ("father", "mother", "brother", "sister", "son", "daughter", "parent", "sibling", "child"):
         return False
 
-    if is_male and age_evt < 55: return True
-    if (not is_male) and age_evt < 65: return True
+    # Premature ASCVD: male <55, female <65 (first-degree)
+    if is_male and age_evt < 55:
+        return True
+    if (not is_male) and age_evt < 65:
+        return True
     return False
 
 def metabolic_syndrome(p: Patient) -> bool:
     # Allow either explicit boolean or an inferred proxy if present
     if p.get("metabolic_syndrome") is True:
         return True
-    # Proxy: TG high + low HDL or elevated waist (if provided) or treated HTN or prediabetes
+
     tg = safe_float(p.get("tg"))
     hdl = safe_float(p.get("hdl"))
     waist = safe_float(p.get("waist_cm"))
     treated_htn = bool(p.get("bp_treated")) is True
-    a1c_stat = a1c_status(p)
+    a1 = a1c_status(p)
+
     criteria = 0
-    if tg is not None and tg >= 150: criteria += 1
+    if tg is not None and tg >= 150:
+        criteria += 1
     if hdl is not None:
         sex = str(p.get("sex", "")).lower()
         male = sex in ("m", "male")
         if (male and hdl < 40) or ((not male) and hdl < 50):
             criteria += 1
-    if waist is not None and waist >= 102:  # rough; if female may differ, but keep as loose proxy
+    if waist is not None and waist >= 102:
         criteria += 1
-    if treated_htn: criteria += 1
-    if a1c_stat in ("prediabetes", "diabetes_range"): criteria += 1
+    if treated_htn:
+        criteria += 1
+    if a1 in ("prediabetes", "diabetes_range"):
+        criteria += 1
+
     return criteria >= 3
 
 def enhancer_list(p: Patient) -> List[str]:
@@ -148,7 +167,8 @@ def enhancer_list(p: Patient) -> List[str]:
     if lpa_elevated(p): enh.append("Lp(a)")
     if has_chronic_inflammatory_disease(p): enh.append("chronic_inflammation")
     if p.get("ckd") is True: enh.append("CKD")
-    if p.has("egfr") and safe_float(p.get("egfr")) is not None and safe_float(p.get("egfr")) < 60: enh.append("CKD(eGFR<60)")
+    if p.has("egfr") and safe_float(p.get("egfr")) is not None and safe_float(p.get("egfr")) < 60:
+        enh.append("CKD(eGFR<60)")
     if p.get("high_risk_ethnicity") is True: enh.append("high_risk_ethnicity")
     if metabolic_syndrome(p): enh.append("metabolic_syndrome")
     tg = safe_float(p.get("tg"))
@@ -322,7 +342,7 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient) -> Dict[str, Any]:
 
 
 # ----------------------------
-# Aspirin module
+# Aspirin module (clean labels + rationale + "why" supported in quick text)
 # ----------------------------
 def aspirin_advice(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
     age = safe_int(p.get("age")) if p.has("age") else None
@@ -341,19 +361,24 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
         if p.get(k) is True:
             bleed_flags.append(label)
 
+    # Secondary prevention
     if ascvd:
         if bleed_flags:
-            return {"status": "Secondary prevention: typically indicated, but bleeding risk flags present", "rationale": bleed_flags}
-        return {"status": "Secondary prevention: typically indicated if no contraindication", "rationale": ["ASCVD present"]}
+            return {
+                "status": "Consider aspirin (shared decision)",
+                "rationale": ["Clinical ASCVD present"] + ["Bleeding risk flags: " + "; ".join(bleed_flags)]
+            }
+        return {"status": "Recommend aspirin", "rationale": ["Clinical ASCVD present (no bleeding risk flags identified)"]}
 
+    # Primary prevention
     if age is None:
         return {"status": "Not assessed", "rationale": ["Age missing"]}
 
     if age < 40 or age >= 70:
-        return {"status": "Avoid (primary prevention)", "rationale": [f"Age {age} (bleeding risk likely outweighs benefit)"]}
+        return {"status": "Would not recommend aspirin", "rationale": [f"Age {age} (primary prevention net benefit unlikely)"]}
 
     if bleed_flags:
-        return {"status": "Avoid (primary prevention)", "rationale": ["High bleeding risk: " + "; ".join(bleed_flags)]}
+        return {"status": "Would not recommend aspirin", "rationale": ["Bleeding risk flags: " + "; ".join(bleed_flags)]}
 
     risk_pct = risk10.get("risk_pct")
     risk_ok = (risk_pct is not None and risk_pct >= 10.0)
@@ -363,9 +388,9 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
         reasons = []
         if cac_ok: reasons.append("CAC ≥100")
         if risk_ok: reasons.append(f"Pooled Cohort Equations 10-year risk ≥10% ({risk_pct}%)")
-        return {"status": "Consider (shared decision)", "rationale": reasons + ["Bleeding risk low by available flags"]}
+        return {"status": "Consider aspirin (shared decision)", "rationale": reasons + ["Bleeding risk low by available flags"]}
 
-    return {"status": "Avoid / individualize", "rationale": ["Primary prevention benefit likely small at current risk level"]}
+    return {"status": "Would not recommend aspirin", "rationale": ["Primary prevention benefit likely small at current risk level"]}
 
 
 # ----------------------------
@@ -378,22 +403,18 @@ def _domains_abnormal(p: Patient) -> int:
     apob = safe_float(p.get("apob"))
     ldl = safe_float(p.get("ldl"))
     if apob is not None:
-        if apob >= 90:  # "moderate" signal
+        if apob >= 90:
             domains += 1
-        elif apob >= 80:  # mild (used elsewhere)
-            pass
     elif ldl is not None:
         if ldl >= 130:
             domains += 1
-        elif ldl >= 100:
-            pass
 
     # BP domain
     sbp = safe_float(p.get("sbp"))
     if sbp is not None and sbp >= 130:
         domains += 1
     if p.get("bp_treated") is True:
-        domains += 1  # treated HTN counts as BP-domain signal
+        domains += 1
 
     # Glycemia domain
     if p.get("diabetes") is True:
@@ -405,7 +426,6 @@ def _domains_abnormal(p: Patient) -> int:
             if a1c is not None and a1c >= 6.0:
                 domains += 1
 
-    # Clamp to 3-ish
     return min(domains, 3)
 
 def _mild_abnormalities_count(p: Patient) -> int:
@@ -428,26 +448,17 @@ def _mild_abnormalities_count(p: Patient) -> int:
 
     # Mild BP
     if sbp is not None and 130 <= sbp <= 139: count += 1
-    if p.get("bp_treated") is True: count += 1  # controlled treated HTN still a signal
+    if p.get("bp_treated") is True: count += 1
 
-    # Mild A1c (confirmed)
+    # Mild A1c
     if a1c is not None and 5.7 <= a1c <= 5.9: count += 1
 
     return count
 
 def levels_band(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Deterministic top-down assignment (first match wins).
-    Returns:
-      - level: int 0–5
-      - sublevel: None or "2A"/"2B"/"2C"
-      - label: human label
-      - triggers: list of reasons
-    """
     triggers: List[str] = []
     sublevel: Optional[str] = None
 
-    # Convenience pulls
     cac = safe_int(p.get("cac")) if p.has("cac") else None
     apob = safe_float(p.get("apob")) if p.has("apob") else None
     ldl = safe_float(p.get("ldl")) if p.has("ldl") else None
@@ -458,245 +469,124 @@ def levels_band(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
     # Level 5 — extreme/progressive ASCVD (optional flags)
     if p.get("ascvd") is True and any(p.get(k) is True for k in ["recurrent_ascvd", "polyvascular", "event_on_therapy"]):
         triggers.append("ASCVD (progressive/extreme features)")
-        return {
-            "level": 5,
-            "sublevel": None,
-            "label": "Level 5 — Extreme / progressive ASCVD risk",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 5, "sublevel": None, "label": "Level 5 — Extreme / progressive ASCVD risk", "triggers": sorted(set(triggers))}
 
     # Level 4 — clinical ASCVD or major risk-equivalent
     if p.get("ascvd") is True:
         triggers.append("ASCVD")
-        return {
-            "level": 4,
-            "sublevel": None,
-            "label": "Level 4 — Clinical ASCVD / risk-equivalent disease",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 4, "sublevel": None, "label": "Level 4 — Clinical ASCVD / risk-equivalent disease", "triggers": sorted(set(triggers))}
 
     if ldl is not None and ldl >= 190:
         triggers.append("LDL≥190")
-        return {
-            "level": 4,
-            "sublevel": None,
-            "label": "Level 4 — Severe hypercholesterolemia (risk-equivalent)",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 4, "sublevel": None, "label": "Level 4 — Severe hypercholesterolemia (risk-equivalent)", "triggers": sorted(set(triggers))}
 
     if p.get("diabetes") is True and any(p.get(k) is True for k in ["ckd", "retinopathy", "neuropathy", "albuminuria", "target_organ_damage"]):
         triggers.append("Diabetes + target organ damage")
-        return {
-            "level": 4,
-            "sublevel": None,
-            "label": "Level 4 — Diabetes with target organ damage (risk-equivalent)",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 4, "sublevel": None, "label": "Level 4 — Diabetes with target organ damage (risk-equivalent)", "triggers": sorted(set(triggers))}
 
     # Level 3 — subclinical atherosclerotic disease established
     if cac is not None and (cac >= 100 or p.get("cac_ge_75pctl") is True):
         triggers.append("CAC≥100 or ≥75th percentile")
-        return {
-            "level": 3,
-            "sublevel": None,
-            "label": "Level 3 — Subclinical atherosclerotic disease (imaging+)",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 3, "sublevel": None, "label": "Level 3 — Subclinical atherosclerotic disease (imaging+)", "triggers": sorted(set(triggers))}
     if any(p.get(k) is True for k in ["carotid_plaque", "femoral_plaque"]):
         triggers.append("Carotid/femoral plaque")
-        return {
-            "level": 3,
-            "sublevel": None,
-            "label": "Level 3 — Subclinical atherosclerotic disease (plaque)",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 3, "sublevel": None, "label": "Level 3 — Subclinical atherosclerotic disease (plaque)", "triggers": sorted(set(triggers))}
     abi = safe_float(p.get("abi")) if p.has("abi") else None
     if abi is not None and abi < 0.9:
         triggers.append("ABI<0.9")
-        return {
-            "level": 3,
-            "sublevel": None,
-            "label": "Level 3 — Subclinical atherosclerotic disease (ABI+)",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 3, "sublevel": None, "label": "Level 3 — Subclinical atherosclerotic disease (ABI+)", "triggers": sorted(set(triggers))}
 
     # Level 2C — silent disease probability
-    # Any CAC 1–99 OR (PCE≥7.5% and ≥2 domains abnormal)
     if cac is not None and 1 <= cac <= 99:
         sublevel = "2C"
         triggers.append(f"CAC {cac} (1–99)")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2C — Silent disease probability",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2C — Silent disease probability", "triggers": sorted(set(triggers))}
 
     domains = _domains_abnormal(p)
     if pce is not None and pce >= 7.5 and domains >= 2:
         sublevel = "2C"
         triggers.append(f"PCE≥7.5% ({pce}%) + ≥2 abnormal domains")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2C — Silent disease probability",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2C — Silent disease probability", "triggers": sorted(set(triggers))}
 
     # Level 2B — enhancer-driven acceleration
     discordance = (apob is not None and apob >= 90 and ldl is not None and ldl < 100)
     if lpa_elevated(p):
         sublevel = "2B"
         triggers.append("Lp(a) elevated (enhancer)")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2B — Enhancer-driven acceleration",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
     if premature_fhx(p):
         sublevel = "2B"
         triggers.append("Premature family history (enhancer)")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2B — Enhancer-driven acceleration",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
     if has_chronic_inflammatory_disease(p):
         sublevel = "2B"
         triggers.append("Chronic inflammatory disease (enhancer)")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2B — Enhancer-driven acceleration",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
     if discordance:
         sublevel = "2B"
         triggers.append("ApoB discordance (ApoB≥90 with LDL<100)")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2B — Enhancer-driven acceleration",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
     if p.get("ckd") is True or (p.has("egfr") and safe_float(p.get("egfr")) is not None and safe_float(p.get("egfr")) < 60):
         sublevel = "2B"
         triggers.append("CKD (enhancer)")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2B — Enhancer-driven acceleration",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
 
     # Level 2A — biologic risk, low structural risk
     if apob is not None and 90 <= apob <= 99:
         sublevel = "2A"
         triggers.append("ApoB 90–99")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2A — Biologic risk, low structural risk",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
     if ldl is not None and 130 <= ldl <= 159:
         sublevel = "2A"
         triggers.append("LDL 130–159")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2A — Biologic risk, low structural risk",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
     if a1c is not None and 6.0 <= a1c < 6.5:
         sublevel = "2A"
         triggers.append("A1c 6.0–6.4")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2A — Biologic risk, low structural risk",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
     if metabolic_syndrome(p):
         sublevel = "2A"
         triggers.append("Metabolic syndrome")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2A — Biologic risk, low structural risk",
-            "triggers": sorted(set(triggers)),
-        }
-    # PCE borderline/intermediate can qualify for 2A when not 2C
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
+
     if pce is not None and (5.0 <= pce < 20.0):
         sublevel = "2A"
         triggers.append(f"PCE {pce}% ({risk10.get('category','')})")
-        return {
-            "level": 2,
-            "sublevel": sublevel,
-            "label": "Level 2A — Biologic risk, low structural risk",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
 
     # Level 1 — early drift (tightened sensitivity)
     mild_count = _mild_abnormalities_count(p)
-    # Optional persistence flags if UI adds them later
-    persistent = (p.get("persistent_signals") is True) or (p.get("trend_up") is True)
-    if (mild_count >= 2 and (persistent or True)) or (mild_count >= 1 and len(enh) >= 1):
-        # NOTE: we accept clustering alone as "persistence proxy" if trend flags absent,
-        # which keeps Level 1 meaningful without requiring historical data.
+    if (mild_count >= 2) or (mild_count >= 1 and len(enh) >= 1):
         triggers.append(f"≥2 mild abnormalities (count={mild_count})" if mild_count >= 2 else "Mild abnormality + enhancer")
         if enh:
             triggers.append("Enhancers: " + ", ".join(sorted(set(enh))))
-        return {
-            "level": 1,
-            "sublevel": None,
-            "label": "Level 1 — Early drift (low structural risk)",
-            "triggers": sorted(set(triggers)),
-        }
+        return {"level": 1, "sublevel": None, "label": "Level 1 — Early drift (low structural risk)", "triggers": sorted(set(triggers))}
 
-    # Level 0 — optimal/green (explicit)
-    # Criteria: no diabetes, no smoking, no enhancers, and ApoB<80 OR LDL<100
+    # Level 0 — optimal
     diabetes = (p.get("diabetes") is True) or (a1c_status(p) == "diabetes_range")
     if (not diabetes) and (p.get("smoking") is not True) and (len(enh) == 0):
         ok_lipids = False
-        if apob is not None and apob < 80: ok_lipids = True
-        if apob is None and ldl is not None and ldl < 100: ok_lipids = True
+        if apob is not None and apob < 80:
+            ok_lipids = True
+        if apob is None and ldl is not None and ldl < 100:
+            ok_lipids = True
         if ok_lipids:
             if cac == 0:
                 triggers.append("CAC=0")
             triggers.append("No enhancers; lipids optimal")
-            return {
-                "level": 0,
-                "sublevel": None,
-                "label": "Level 0 — Optimal / no major atherosclerotic signal",
-                "triggers": sorted(set(triggers)),
-            }
+            return {"level": 0, "sublevel": None, "label": "Level 0 — Optimal / no major atherosclerotic signal", "triggers": sorted(set(triggers))}
 
-    # Default to Level 1 if there is any meaningful non-optimal signal not captured above
-    # (prevents falling through to Level 0 when data incomplete or borderline).
+    # Fallback to Level 1 if incomplete data but not clearly optimal
     triggers.append("Non-optimal signal(s) without higher-level criteria")
     if enh:
         triggers.append("Enhancers: " + ", ".join(sorted(set(enh))))
-    return {
-        "level": 1,
-        "sublevel": None,
-        "label": "Level 1 — Early drift (low structural risk)",
-        "triggers": sorted(set(triggers)),
-    }
+    return {"level": 1, "sublevel": None, "label": "Level 1 — Early drift (low structural risk)", "triggers": sorted(set(triggers))}
 
 
 # ----------------------------
-# Targets + ESC text (now aware of Level 2 sublevels and Level 5)
+# Targets + ESC + ACC + time horizon
 # ----------------------------
 def levels_targets(level: int, sublevel: Optional[str]) -> Dict[str, int]:
-    """
-    Defaults:
-      - 2A: modest prevention targets
-      - 2B/2C: tighter targets (enhancer-driven or CAC+ probability)
-      - 3+: disease/secondary-prevention mindset
-    """
     if level <= 0:
         return {"apob": 80, "ldl": 100}
     if level == 1:
@@ -704,13 +594,11 @@ def levels_targets(level: int, sublevel: Optional[str]) -> Dict[str, int]:
     if level == 2:
         if sublevel in ("2B", "2C"):
             return {"apob": 70, "ldl": 70}
-        # 2A default
         return {"apob": 80, "ldl": 100}
     if level == 3:
         return {"apob": 70, "ldl": 70}
     if level == 4:
         return {"apob": 60, "ldl": 70}
-    # Level 5
     return {"apob": 55, "ldl": 55}
 
 def esc_numeric_goals(level: int, sublevel: Optional[str]) -> str:
@@ -727,7 +615,6 @@ def esc_numeric_goals(level: int, sublevel: Optional[str]) -> str:
     return "ESC/EAS goals: individualized by risk tier."
 
 def acc_context(p: Patient, lvl: Dict[str, Any], risk10: Dict[str, Any]) -> str:
-    # One-line, non-redundant, now aware of sublevels + CAC rules
     if p.get("ascvd") is True:
         return "ACC/AHA context: Secondary prevention—high-intensity lipid lowering typical; add-on therapy considered when LDL-C remains ≥70 mg/dL despite statin."
 
@@ -756,22 +643,20 @@ def acc_context(p: Patient, lvl: Dict[str, Any], risk10: Dict[str, Any]) -> str:
     return f"ACC/AHA context: Risk enhancers ({enh_txt}); CAC can be used to refine intensity."
 
 def time_horizon(p: Patient, lvl: Dict[str, Any]) -> str:
-    # Near-term driven by CAC/ASCVD, lifetime driven by biology/enhancers
     if p.get("ascvd") is True:
         return "Time horizon: Near-term and lifetime risk elevated (clinical ASCVD)."
 
     sub = lvl.get("sublevel")
     if p.has("cac"):
-        cac = safe_int(p.get("cac"), default=0) or 0
+        cac = safe_int(p.get("cac",0), default=0) or 0
         if cac == 0:
-            if lvl["level"] >= 2 and sub in ("2B","2A","2C"):
+            if lvl["level"] >= 2 and sub in ("2A","2B","2C"):
                 return "Time horizon: Near-term risk low (CAC=0); lifetime risk elevated (biology/enhancers)."
             return "Time horizon: Near-term risk low (CAC=0); lifetime risk likely low–moderate."
         if cac >= 100:
             return "Time horizon: Near-term and lifetime risk elevated (CAC≥100)."
         return "Time horizon: Near-term risk moderate; lifetime risk elevated (CAC>0)."
 
-    # CAC unknown
     if sub == "2B":
         return "Time horizon: Near-term risk uncertain (CAC unavailable); lifetime risk elevated (enhancers)."
     if sub in ("2A","2C"):
@@ -796,6 +681,9 @@ def completeness(p: Patient) -> Dict[str, Any]:
 
 def top_drivers(p: Patient, lvl: Dict[str, Any]) -> List[str]:
     d: List[str] = []
+    if lvl.get("level") == 2 and lvl.get("sublevel"):
+        d.append(f"Level {lvl['sublevel']} pattern")
+
     if p.get("ascvd") is True:
         d.append("Clinical ASCVD")
     elif p.has("cac") and (safe_int(p.get("cac", 0), default=0) or 0) > 0:
@@ -811,17 +699,8 @@ def top_drivers(p: Patient, lvl: Dict[str, Any]) -> List[str]:
 
     if lpa_elevated(p): d.append("Lp(a) elevated")
     if premature_fhx(p): d.append("Premature family history")
-    if a1c_status(p) == "prediabetes":
-        a1c = safe_float(p.get("a1c"))
-        if a1c is not None:
-            d.append(f"Prediabetes A1c {a1c}")
-        else:
-            d.append("Prediabetes A1c")
+    if a1c_status(p) == "prediabetes": d.append("Prediabetes A1c")
     if inflammation_flags(p) or has_chronic_inflammatory_disease(p): d.append("Inflammatory signal")
-
-    # Encode 2A/2B/2C as a driver for UI clarity
-    if lvl.get("level") == 2 and lvl.get("sublevel"):
-        d.insert(0, f"Level {lvl['sublevel']} pattern")
 
     return d[:3]
 
@@ -829,13 +708,11 @@ def next_actions(p: Patient, lvl: Dict[str, Any], targets: Dict[str, int]) -> Li
     acts: List[str] = []
     sub = lvl.get("sublevel")
 
-    # Lipid targets
     if p.has("apob") and fmt_int(p.get("apob")) > targets["apob"]:
         acts.append(f"Reduce ApoB toward <{targets['apob']} mg/dL.")
     if (not p.has("apob")) and p.has("ldl") and fmt_int(p.get("ldl")) > targets["ldl"]:
         acts.append(f"Reduce LDL-C toward <{targets['ldl']} mg/dL (or measure ApoB to guide intensity).")
 
-    # CAC guidance
     if p.has("cac"):
         cac = safe_int(p.get("cac"), default=0) or 0
         if cac == 0:
@@ -849,7 +726,6 @@ def next_actions(p: Patient, lvl: Dict[str, Any], targets: Dict[str, int]) -> Li
         if lvl["level"] >= 2:
             acts.append("Consider CAC to clarify disease burden and refine intensity.")
 
-    # Lp(a)
     if lpa_elevated(p) and not p.has("apob"):
         acts.append("Lp(a) elevated: measure ApoB (preferred) or non–HDL-C to quantify atherogenic burden and guide intensity.")
 
@@ -860,7 +736,6 @@ def next_actions(p: Patient, lvl: Dict[str, Any], targets: Dict[str, int]) -> Li
 # Public API
 # ----------------------------
 def evaluate(p: Patient) -> Dict[str, Any]:
-    # Compute risk10 early because Level 2C/2A logic references it
     risk10 = pooled_cohort_equations_10y_ascvd_risk(p)
     lvl = levels_band(p, risk10)
     rs  = risk_signal_score(p)
@@ -895,7 +770,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines: List[str] = []
     lines.append(f"LEVELS™ {out['version']['levels']} — Quick Reference")
 
-    # Level line with sublevel
     if lvl.get("level") == 2 and lvl.get("sublevel"):
         lines.append(f"Level 2 ({lvl['sublevel']}): {lvl['label'].split('—',1)[1].strip()}")
     else:
@@ -940,6 +814,11 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     if out["nextActions"]:
         lines.append("Next: " + " / ".join(out["nextActions"]))
 
-    lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
+    asp = out.get("aspirin", {})
+    lines.append(f"Aspirin 81 mg: {asp.get('status','Not assessed')}")
+    why = short_why(asp.get("rationale", []), max_items=2)
+    if why:
+        lines.append(f"Why: {why}")
+
     return "\n".join(lines)
 
