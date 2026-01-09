@@ -1,29 +1,12 @@
-# appy.py
-# LEVELS UI (Streamlit) — preserves your prior UI features + adds Level reason cards + Level 2 explainer
-#
-# Preserved from prior UI:
-# - SmartPhrase ingest (paste → parse → apply) with explicit coverage flags
-# - PHI guardrails
-# - Output mode (Quick vs Full)
-# - Clinical report HTML renderer (mg/dL-safe Next steps splitting)
-# - Downloads (raw text + JSON)
-# - Raw text expander + JSON debug
-# - Header styling and de-identified warning
-#
-# Added:
-# - Uses engine v2.3 Level explanation fields: meaning / why / defaultPosture
-# - Level 2A/2B/2C explainer mini-card + “What to do next” row
-# - Aspirin section now displays status + Why line inside report (via quick text) and as metrics
-
 import json
 import re
 import streamlit as st
 
 from smartphrase_ingest.parser import parse_smartphrase
-from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
+from levels_engine import Patient, evaluate, render_compact_text, render_full_text, VERSION, short_why
 
 # ============================================================
-# Page + “clinical report” styling
+# Page + styling
 # ============================================================
 st.set_page_config(page_title="LEVELS", layout="wide")
 
@@ -66,17 +49,17 @@ html, body, [class*="css"] {
 }
 
 .report h2 {
-  font-size: 1.15rem;
-  font-weight: 800;
+  font-size: 1.10rem;
+  font-weight: 900;
   margin: 0 0 10px 0;
 }
 
-.section { margin-top: 14px; }
+.section { margin-top: 12px; }
 .section-title {
   font-variant-caps: all-small-caps;
   letter-spacing: 0.08em;
-  font-weight: 800;
-  font-size: 0.85rem;
+  font-weight: 900;
+  font-size: 0.82rem;
   color: #4b5563;
   margin-bottom: 6px;
   border-bottom: 1px solid rgba(31,41,55,0.10);
@@ -90,17 +73,6 @@ html, body, [class*="css"] {
 .muted { color: #6b7280; font-size: 0.9rem; }
 .small-help { color: rgba(31,41,55,0.70); font-size: 0.88rem; }
 
-.kv {
-  display:flex; gap:10px; flex-wrap:wrap;
-  border: 1px solid rgba(31,41,55,0.10);
-  background:#fbfbfb;
-  border-radius:12px;
-  padding:10px 12px;
-  margin-top:10px;
-}
-.kv div { font-size: 0.9rem; }
-.kv strong { font-weight: 800; }
-
 .badge {
   display:inline-block;
   padding:2px 8px;
@@ -113,43 +85,33 @@ html, body, [class*="css"] {
 .ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
-.level-card {
+.kv {
+  display:flex; gap:10px; flex-wrap:wrap;
   border: 1px solid rgba(31,41,55,0.10);
-  border-radius: 12px;
-  padding: 12px 12px;
-  background: rgba(31,41,55,0.03);
-  margin-top: 10px;
+  background:#fbfbfb;
+  border-radius:12px;
+  padding:10px 12px;
+  margin-top:10px;
 }
-.level-card h3 {
-  font-size: 0.95rem;
-  margin: 0 0 6px 0;
-  font-weight: 800;
-}
-.pill {
-  display:inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border:1px solid rgba(31,41,55,0.16);
-  background:#fff;
-  font-size:0.80rem;
-  font-weight:800;
-}
-.pill-green { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
-.pill-yellow { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
-.pill-red { border-color: rgba(239,68,68,0.28); background: rgba(239,68,68,0.09); }
+.kv div { font-size: 0.9rem; }
+.kv strong { font-weight: 800; }
 
-.next-row {
+.crit {
   display:flex; gap:8px; flex-wrap:wrap;
   margin-top: 8px;
 }
-.next-chip {
+.crit-pill {
   display:inline-block;
-  padding: 6px 10px;
-  border-radius: 10px;
+  padding:6px 10px;
+  border-radius: 999px;
   border:1px solid rgba(31,41,55,0.14);
   background:#fff;
-  font-size:0.86rem;
+  font-size:0.85rem;
+  font-weight:800;
 }
+.crit-ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
+.crit-miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -159,7 +121,7 @@ st.markdown(
     f"""
 <div class="header-card">
   <div class="header-title">LEVELS™ {VERSION["levels"]} — De-identified Demo</div>
-  <p class="header-sub">Fast entry • radios for common choices • SmartPhrase paste → auto-fill (LDL/ApoB/Lp(a)/CAC) • clinical report output</p>
+  <p class="header-sub">SmartPhrase paste → auto-fill • compact professional output • no storage intended</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -168,170 +130,35 @@ st.markdown(
 st.info("De-identified use only. Do not enter patient identifiers.")
 
 # ============================================================
+# Reset button (prevents session_state weirdness across versions)
+# ============================================================
+top_c1, top_c2 = st.columns([1, 4])
+with top_c1:
+    if st.button("Reset form", type="secondary"):
+        st.session_state.clear()
+        st.rerun()
+with top_c2:
+    st.caption("Tip: if a widget ever looks like it disappeared after an update, click Reset form.")
+
+# ============================================================
 # Guardrails
 # ============================================================
 PHI_PATTERNS = [
-    r"\b\d{3}-\d{2}-\d{4}\b",              # SSN-like
-    r"\b\d{2}/\d{2}/\d{4}\b",              # date
-    r"\b\d{4}-\d{2}-\d{2}\b",              # ISO date
+    r"\b\d{3}-\d{2}-\d{4}\b",
+    r"\b\d{2}/\d{2}/\d{4}\b",
+    r"\b\d{4}-\d{2}-\d{2}\b",
     r"\bMRN\b|\bMedical Record\b",
-    r"@",                                  # email-ish
-    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",  # phone
+    r"@",
+    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
 ]
 
 def contains_phi(s: str) -> bool:
     if not s:
         return False
-    for pat in PHI_PATTERNS:
-        if re.search(pat, s, re.IGNORECASE):
-            return True
-    return False
+    return any(re.search(pat, s, re.IGNORECASE) for pat in PHI_PATTERNS)
 
 # ============================================================
-# Clinical report renderer (mg/dL-safe Next split)
-# ============================================================
-def render_clinical_report(note_text: str) -> str:
-    """
-    Converts engine raw text into a polished HTML report.
-    IMPORTANT: Next-steps split uses ' / ' (space-slash-space), so mg/dL is never broken.
-    """
-    lines = [ln.rstrip() for ln in (note_text or "").splitlines()]
-
-    out = []
-    out.append('<div class="report">')
-
-    title = next((ln for ln in lines if ln.strip()), "LEVELS™ Output")
-    out.append(f"<h2>{title}</h2>")
-
-    def open_section(title_):
-        out.append('<div class="section">')
-        out.append(f'<div class="section-title">{title_}</div>')
-
-    def close_section():
-        out.append("</div>")
-
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        i += 1
-
-        if not line or line == title:
-            continue
-
-        # Summary section
-        if line.startswith("Level "):
-            open_section("Summary")
-            out.append(f"<p><strong>{line}</strong></p>")
-            while i < len(lines):
-                nxt = lines[i].strip()
-                if not nxt:
-                    i += 1
-                    continue
-                if nxt.startswith(("Risk Signal Score", "Pooled Cohort Equations", "Drivers:", "Targets", "Next:", "Aspirin")):
-                    break
-                if ":" in nxt:
-                    left, right = nxt.split(":", 1)
-                    out.append(f"<p><strong>{left.strip()}:</strong> {right.strip()}</p>")
-                else:
-                    out.append(f"<p>{nxt}</p>")
-                i += 1
-            close_section()
-            continue
-
-        # Key metrics section
-        if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations"):
-            open_section("Key metrics")
-            j = i - 1
-            while j < len(lines):
-                ln = lines[j].strip()
-                if not ln:
-                    j += 1
-                    continue
-                if ln.startswith(("Drivers:", "Targets", "Next:", "Aspirin")):
-                    break
-                if ":" in ln:
-                    left, right = ln.split(":", 1)
-                    out.append(f"<p><strong>{left.strip()}:</strong> {right.strip()}</p>")
-                else:
-                    out.append(f"<p>{ln}</p>")
-                j += 1
-            i = j
-            close_section()
-            continue
-
-        # Drivers section
-        if line.startswith("Drivers:"):
-            open_section("Primary drivers")
-            items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
-            out.append("<ul>")
-            for it in items:
-                out.append(f"<li>{it}</li>")
-            out.append("</ul>")
-            close_section()
-            continue
-
-        # Targets section
-        if line == "Targets" or line.startswith("Targets"):
-            open_section("Targets")
-            out.append("<ul>")
-            while i < len(lines):
-                ln = lines[i].strip()
-                if not ln:
-                    i += 1
-                    continue
-                if ln.startswith(("Benefit context", "ESC/EAS", "Next:", "Aspirin")) or ln == "Targets":
-                    break
-                if ln.startswith("•"):
-                    out.append(f"<li>{ln[1:].strip()}</li>")
-                else:
-                    out.append(f"<li>{ln}</li>")
-                i += 1
-            out.append("</ul>")
-            if i < len(lines) and lines[i].strip().startswith("Benefit context"):
-                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
-                i += 1
-            if i < len(lines) and lines[i].strip().startswith("ESC/EAS"):
-                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
-                i += 1
-            close_section()
-            continue
-
-        # Next steps section (FIXED)
-        if line.startswith("Next:"):
-            open_section("Next steps")
-            payload = line.split(":", 1)[1].strip()
-            if " / " in payload:
-                steps = [x.strip() for x in payload.split(" / ") if x.strip()]
-            else:
-                steps = [payload] if payload else []
-            out.append("<ul>")
-            for s in steps:
-                out.append(f"<li>{s}</li>")
-            out.append("</ul>")
-            close_section()
-            continue
-
-        # Aspirin section (now includes Why line if present in quick text)
-        if line.startswith("Aspirin") or line.startswith("Why:"):
-            open_section("Aspirin")
-            out.append(f"<p>{line}</p>")
-            # If next line is "Why:", include it too
-            if i < len(lines) and lines[i].strip().startswith("Why:"):
-                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
-                i += 1
-            close_section()
-            continue
-
-        # Fallback
-        open_section("Additional")
-        out.append(f"<p class='muted'>{line}</p>")
-        close_section()
-
-    out.append("</div>")
-    return "\n".join(out)
-
-# ============================================================
-# Helpers
+# SmartPhrase helpers
 # ============================================================
 FHX_OPTIONS = [
     "None / Unknown",
@@ -355,17 +182,14 @@ TARGET_PARSE_FIELDS = [
     ("apob", "ApoB"),
     ("lpa", "Lp(a)"),
     ("lpa_unit", "Lp(a) unit"),
-    ("cac", "CAC"),
+    ("a1c", "A1c"),
+    ("hscrp", "hsCRP"),
+    ("cac", "Calcium Score"),
     ("ascvd_10y", "ASCVD 10-year risk (if present)"),
 ]
 
 def apply_parsed_to_session(parsed: dict):
-    """
-    Applies parsed values into Streamlit session_state keys used by the form widgets.
-    Returns (applied_list, missing_list) for explicit flagging.
-    """
-    applied = []
-    missing = []
+    applied, missing = [], []
 
     def set_if_present(src_key, state_key, transform=lambda x: x, label=None):
         nonlocal applied, missing
@@ -383,9 +207,21 @@ def apply_parsed_to_session(parsed: dict):
     set_if_present("tc", "tc_val", lambda v: int(v), "Total Cholesterol")
     set_if_present("hdl", "hdl_val", lambda v: int(v), "HDL")
     set_if_present("ldl", "ldl_val", lambda v: int(v), "LDL")
-
     set_if_present("apob", "apob_val", lambda v: int(v), "ApoB")
     set_if_present("lpa", "lpa_val", lambda v: int(v), "Lp(a)")
+
+    # A1c + hsCRP if parser provides
+    if parsed.get("a1c") is not None:
+        st.session_state["a1c_val"] = float(parsed["a1c"])
+        applied.append("A1c")
+    else:
+        missing.append("A1c")
+
+    if parsed.get("hscrp") is not None:
+        st.session_state["hscrp_val"] = float(parsed["hscrp"])
+        applied.append("hsCRP")
+    else:
+        missing.append("hsCRP")
 
     if parsed.get("lpa_unit") is not None:
         st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
@@ -393,13 +229,15 @@ def apply_parsed_to_session(parsed: dict):
     else:
         missing.append("Lp(a) unit")
 
+    # Calcium Score: if present, mark available + set value
     if parsed.get("cac") is not None:
         st.session_state["cac_known_val"] = "Yes"
         st.session_state["cac_val"] = int(parsed["cac"])
-        applied.append("CAC")
+        applied.append("Calcium Score")
     else:
-        missing.append("CAC")
+        missing.append("Calcium Score")
 
+    # radios
     if parsed.get("smoker") is not None:
         st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
         applied.append("Smoking")
@@ -423,50 +261,93 @@ def apply_parsed_to_session(parsed: dict):
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
-def level_pill_class(level: int) -> str:
-    if level <= 0:
-        return "pill pill-green"
-    if level == 1 or level == 2:
-        return "pill pill-yellow"
-    return "pill pill-red"
+# ============================================================
+# Report renderer FROM JSON (stable; does not parse text)
+# ============================================================
+def render_report_from_json(out: dict, patient: Patient) -> str:
+    lvl = out.get("levels", {})
+    rs = out.get("riskSignal", {})
+    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
+    t = out.get("targets", {})
+    asp = out.get("aspirin", {})
+    conf = out.get("confidence", {})
 
-def level2_explainer(sub: str):
-    """
-    One-line explanation + suggested next steps chips.
-    UI-only (doesn't affect engine).
-    """
-    if sub == "2A":
-        return (
-            "Biology is drifting (lipids/glycemia/metabolic), but no proof of plaque yet.",
-            ["Confirm & trend labs", "Lifestyle sprint 8–12 wks", "Shared statin decision", "Consider CAC if unknown"],
-        )
-    if sub == "2B":
-        return (
-            "Risk enhancers (Lp(a)/FHx/inflammation/CKD) suggest accelerated lifetime risk.",
-            ["Consider statin default", "Address enhancer drivers", "Consider CAC if unknown", "ApoB-guided targets"],
-        )
-    if sub == "2C":
-        return (
-            "Higher probability of silent disease (often CAC 1–99 or multi-domain intermediate risk).",
-            ["Treat like early disease", "Statin default", "Intensify to targets", "Recheck response 6–12 wks"],
-        )
-    return ("Level 2 prevention zone.", ["Refine with CAC", "ApoB-guided targets", "Shared decisions"])
+    # Level
+    lvl_disp = f"{lvl.get('level','—')}"
+    if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
+        lvl_disp += f" ({lvl.get('sublevel')})"
 
+    # Calcium Score (0 valid)
+    if patient.get("ascvd") is True:
+        cs = "N/A (clinical ASCVD)"
+    elif patient.has("cac"):
+        cs = str(int(patient.get("cac")))
+    else:
+        cs = "Not available"
+
+    # PCE
+    if risk10.get("risk_pct") is not None:
+        pce = f"{risk10['risk_pct']}% ({risk10.get('category','')})"
+    else:
+        pce = risk10.get("notes") or ("Not calculated (missing inputs)" if risk10.get("missing") else "Not calculated")
+
+    drivers = out.get("drivers") or []
+    plan = out.get("nextActions") or []
+
+    asp_status = asp.get("status", "Not assessed")
+    asp_why = short_why(asp.get("rationale", []), max_items=2)
+
+    miss_top = ", ".join(conf.get("top_missing", []) or "")
+
+    html = []
+    html.append('<div class="report">')
+    html.append(f"<h2>LEVELS™ {out.get('version',{}).get('levels','')}</h2>")
+
+    html.append('<div class="section">')
+    html.append('<div class="section-title">Summary</div>')
+    html.append(f"<p><strong>Assessment:</strong> Level {lvl_disp} — {lvl.get('label','')}</p>")
+    if lvl.get("meaning"):
+        html.append(f"<p class='muted'>{lvl.get('meaning')}</p>")
+    html.append("</div>")
+
+    html.append('<div class="section">')
+    html.append('<div class="section-title">Key numbers</div>')
+    html.append(f"<p><strong>Calcium Score:</strong> {cs}</p>")
+    html.append(f"<p><strong>10-year ASCVD (PCE):</strong> {pce}</p>")
+    html.append(f"<p><strong>Risk Signal Score:</strong> {rs.get('score','—')}/100 ({rs.get('band','')})</p>")
+    if drivers:
+        html.append(f"<p><strong>Drivers:</strong> {'; '.join(drivers)}</p>")
+    html.append("</div>")
+
+    html.append('<div class="section">')
+    html.append('<div class="section-title">Plan</div>')
+    html.append(f"<p><strong>Targets:</strong> ApoB &lt;{t.get('apob','—')} mg/dL; LDL-C &lt;{t.get('ldl','—')} mg/dL</p>")
+    if plan:
+        html.append("<ul>")
+        for s in plan:
+            html.append(f"<li>{s}</li>")
+        html.append("</ul>")
+    html.append(f"<p><strong>Aspirin:</strong> {asp_status}" + (f" <span class='muted'>({asp_why})</span>" if asp_why else "") + "</p>")
+    html.append(f"<p class='muted'><strong>Data quality:</strong> {conf.get('confidence','—')} ({conf.get('pct','—')}%)" + (f" — Missing: {miss_top}" if miss_top else "") + "</p>")
+    html.append("</div>")
+
+    html.append("</div>")
+    return "\n".join(html)
 
 # ============================================================
-# Top-level mode
+# Mode
 # ============================================================
-mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
+mode = st.radio("Output mode", ["Compact (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest (paste -> parse -> apply + flag missing)
+# SmartPhrase ingest
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
 
-with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/CAC)", expanded=False):
+with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium Score)", expanded=False):
     st.markdown(
-        "<div class='small-help'>Paste rendered Epic output (SmartPhrase text, ASCVD block, lipid panel, etc). "
-        "Click <strong>Parse & Apply</strong>. This will auto-fill as many fields as possible, and explicitly flag what was not found.</div>",
+        "<div class='small-help'>Paste de-identified Epic output. Click <strong>Parse & Apply</strong>. "
+        "This fills what it finds and flags missing items explicitly.</div>",
         unsafe_allow_html=True,
     )
 
@@ -507,25 +388,6 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/CAC)", e
         val = f": {parsed_preview.get(key)}" if ok else ""
         st.markdown(f"- **{label}** {badge}{val}", unsafe_allow_html=True)
 
-    st.markdown(
-        f"""
-<div class="kv">
-  <div><strong>Loaded defaults:</strong></div>
-  <div>Age: {st.session_state.get("age_val", "—")}</div>
-  <div>Sex: {st.session_state.get("sex_val", "—")}</div>
-  <div>Race: {st.session_state.get("race_val", "—")}</div>
-  <div>SBP: {st.session_state.get("sbp_val", "—")}</div>
-  <div>TC: {st.session_state.get("tc_val", "—")}</div>
-  <div>HDL: {st.session_state.get("hdl_val", "—")}</div>
-  <div>LDL: {st.session_state.get("ldl_val", "—")}</div>
-  <div>ApoB: {st.session_state.get("apob_val", "—")}</div>
-  <div>Lp(a): {st.session_state.get("lpa_val", "—")} {st.session_state.get("lpa_unit_val", "")}</div>
-  <div>CAC: {st.session_state.get("cac_val", "—")} ({st.session_state.get("cac_known_val", "No")})</div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
 # ============================================================
 # Main form
 # ============================================================
@@ -534,13 +396,9 @@ with st.form("levels_form"):
 
     a1, a2, a3 = st.columns(3)
     with a1:
-        age = st.number_input(
-            "Age (years)", 0, 120,
-            value=int(st.session_state.get("age_val", 52)),
-            step=1, key="age_val"
-        )
+        age = st.number_input("Age (years)", 0, 120, value=int(st.session_state.get("age_val", 52)), step=1, key="age_val")
         sex_default = st.session_state.get("sex_val", "F")
-        sex_index = 0 if sex_default == "F" else 1
+        sex_index = 0 if str(sex_default).upper() == "F" else 1
         sex = st.radio("Sex", ["F", "M"], horizontal=True, index=sex_index, key="sex_val")
 
     with a2:
@@ -559,11 +417,7 @@ with st.form("levels_form"):
 
     b1, b2, b3 = st.columns(3)
     with b1:
-        sbp = st.number_input(
-            "Systolic BP (mmHg)", 60, 250,
-            value=int(st.session_state.get("sbp_val", 130)),
-            step=1, key="sbp_val"
-        )
+        sbp = st.number_input("Systolic BP (mmHg)", 60, 250, value=int(st.session_state.get("sbp_val", 130)), step=1, key="sbp_val")
         bp_default = st.session_state.get("bp_treated_val", "No")
         bp_index = 1 if bp_default == "Yes" else 0
         bp_treated = st.radio("On BP meds?", ["No", "Yes"], horizontal=True, index=bp_index, key="bp_treated_val")
@@ -578,7 +432,7 @@ with st.form("levels_form"):
         diabetes_choice = st.radio("Diabetes (manual)", ["No", "Yes"], horizontal=True, index=dm_index, key="diabetes_choice_val")
 
     with b3:
-        a1c = st.number_input("A1c (%)", 0.0, 15.0, 5.0, step=0.1, format="%.1f")
+        a1c = st.number_input("A1c (%)", 0.0, 15.0, float(st.session_state.get("a1c_val", 5.0)), step=0.1, format="%.1f", key="a1c_val")
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
@@ -587,54 +441,40 @@ with st.form("levels_form"):
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        tc = st.number_input(
-            "Total cholesterol (mg/dL)", 0, 500,
-            value=int(st.session_state.get("tc_val", 210)),
-            step=1, key="tc_val"
-        )
-        ldl = st.number_input(
-            "LDL-C (mg/dL)", 0, 400,
-            value=int(st.session_state.get("ldl_val", 148)),
-            step=1, key="ldl_val"
-        )
-        hdl = st.number_input(
-            "HDL cholesterol (mg/dL)", 0, 150,
-            value=int(st.session_state.get("hdl_val", 45)),
-            step=1, key="hdl_val"
-        )
+        tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, value=int(st.session_state.get("tc_val", 210)), step=1, key="tc_val")
+        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, value=int(st.session_state.get("ldl_val", 148)), step=1, key="ldl_val")
+        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, value=int(st.session_state.get("hdl_val", 45)), step=1, key="hdl_val")
     with c2:
-        apob = st.number_input(
-            "ApoB (mg/dL)", 0, 300,
-            value=int(st.session_state.get("apob_val", 112)),
-            step=1, key="apob_val"
-        )
-        lpa = st.number_input(
-            "Lp(a) value", 0, 1000,
-            value=int(st.session_state.get("lpa_val", 165)),
-            step=1, key="lpa_val"
-        )
+        apob = st.number_input("ApoB (mg/dL)", 0, 300, value=int(st.session_state.get("apob_val", 112)), step=1, key="apob_val")
+        lpa = st.number_input("Lp(a) value", 0, 1000, value=int(st.session_state.get("lpa_val", 165)), step=1, key="lpa_val")
         unit_default = st.session_state.get("lpa_unit_val", "nmol/L")
-        unit_index = 0 if unit_default == "nmol/L" else 1
+        unit_index = 0 if str(unit_default) == "nmol/L" else 1
         lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, index=unit_index, key="lpa_unit_val")
     with c3:
-        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 2.7, step=0.1, format="%.1f")
+        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, float(st.session_state.get("hscrp_val", 0.0)), step=0.1, format="%.1f", key="hscrp_val")
 
+    # Calcium Score section (explicit; 0 allowed)
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Imaging")
+    st.subheader("Imaging — Calcium Score")
 
-    d1, d2, d3 = st.columns([1, 1, 1])
+    d1, d2 = st.columns([1, 2])
     with d1:
         cac_default = st.session_state.get("cac_known_val", "No")
-        cac_index = 0 if cac_default == "Yes" else 1
-        cac_known = st.radio("CAC available?", ["Yes", "No"], horizontal=True, index=cac_index, key="cac_known_val")
+        cac_known = st.radio(
+            "Calcium Score available?",
+            ["Yes", "No"],
+            horizontal=True,
+            index=0 if cac_default == "Yes" else 1,
+            key="cac_known_val"
+        )
     with d2:
         cac = st.number_input(
-            "CAC score (Agatston)", 0, 5000,
+            "Calcium Score (Agatston)",
+            0, 5000,
             value=int(st.session_state.get("cac_val", 0)),
-            step=1, key="cac_val"
+            step=1,
+            key="cac_val"
         ) if cac_known == "Yes" else None
-    with d3:
-        st.caption("")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Inflammatory states (optional)")
@@ -651,7 +491,7 @@ with st.form("levels_form"):
         osa = st.checkbox("OSA", value=False)
         nafld = st.checkbox("NAFLD/MASLD", value=False)
 
-    with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
+    with st.expander("Bleeding risk (for aspirin) — optional"):
         f1, f2, f3 = st.columns(3)
         with f1:
             bleed_gi = st.checkbox("Prior GI bleed / ulcer", value=False)
@@ -670,34 +510,29 @@ with st.form("levels_form"):
 # Run + output
 # ============================================================
 if submitted:
-    raw_check = " ".join(
-        [str(x) for x in [
-            age, sex, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
-            tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac
-        ]]
-    )
+    raw_check = " ".join([str(x) for x in [
+        age, sex, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
+        tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac
+    ]])
     if contains_phi(raw_check):
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
+    # Build payload (IMPORTANT: include CAC when available even if 0)
     data = {
         "age": int(age),
-        "sex": sex,  # PCE handler accepts F/M? It lower() and maps; keep as in your old UI
-        "race": "black" if race == "Black" else "other",
+        "sex": sex,  # engine normalizes
+        "race": "black" if race == "Black" else "other",  # engine normalizes "other" -> non-Black
         "ascvd": (ascvd == "Yes"),
-
-        # Backward compatible FHx boolean + detail
         "fhx": fhx_to_bool(fhx_choice),
         "fhx_detail": fhx_choice,
-
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
         "smoking": (smoking == "Yes"),
         "diabetes": diabetes_effective,
-        "a1c": float(a1c) if a1c and a1c > 0 else None,
-
+        "a1c": float(a1c) if a1c > 0 else None,
         "tc": int(tc),
         "ldl": int(ldl),
         "hdl": int(hdl),
@@ -705,12 +540,9 @@ if submitted:
         "lpa": int(lpa),
         "lpa_unit": lpa_unit,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
-
-        "cac": int(cac) if cac is not None else None,
-
+        "cac": int(cac) if cac is not None else None,  # CAC=0 allowed if entered
         "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle),
         "ibd": bool(ibd), "hiv": bool(hiv), "osa": bool(osa), "nafld": bool(nafld),
-
         "bleed_gi": bool(bleed_gi),
         "bleed_ich": bool(bleed_ich),
         "bleed_anticoag": bool(bleed_anticoag),
@@ -723,62 +555,57 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    note_text = render_quick_text(patient, out)
-    clinical_html = render_clinical_report(note_text)
+    note_text = render_compact_text(patient, out) if mode.startswith("Compact") else render_full_text(patient, out)
+    report_html = render_report_from_json(out, patient)
 
     # Metrics row
     rs = out.get("riskSignal", {})
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
     lvl = out.get("levels", {})
+    asp = out.get("aspirin", {})
 
-    m1, m2, m3 = st.columns(3)
-    lvl_display = f"{lvl.get('level','—')}"
+    lvl_disp = f"{lvl.get('level','—')}"
     if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
-        lvl_display += f" ({lvl.get('sublevel')})"
-    m1.metric("Level", lvl_display)
-    m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
-    if risk10.get("risk_pct") is not None:
-        m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%")
-    else:
-        m3.metric("10-year ASCVD risk", "—")
+        lvl_disp += f" ({lvl.get('sublevel')})"
 
-    # NEW: Level reason card + Level 2 explainer (UI)
-    st.markdown("<div class='level-card'>", unsafe_allow_html=True)
-    st.markdown(f"<h3>Level interpretation <span class='{level_pill_class(int(lvl.get('level',0) or 0))}'>{lvl_display}</span></h3>", unsafe_allow_html=True)
+    cs_disp = "—"
+    if patient.get("ascvd") is True:
+        cs_disp = "N/A"
+    elif patient.has("cac"):
+        cs_disp = str(int(patient.get("cac")))
 
-    if lvl.get("meaning"):
-        st.markdown(f"<p class='small-help'><strong>What this means:</strong> {lvl['meaning']}</p>", unsafe_allow_html=True)
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("Level", lvl_disp)
+    a2.metric("Calcium Score", cs_disp)
+    a3.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
+    a4.metric("10-year ASCVD (PCE)", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
-    why_list = (lvl.get("why") or [])[:3]
-    if why_list:
-        st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
-        st.markdown("<ul>", unsafe_allow_html=True)
-        for w in why_list:
-            st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
-        st.markdown("</ul>", unsafe_allow_html=True)
+    # Critical inputs strip (explicit)
+    def crit_pill(label: str, ok: bool) -> str:
+        cls = "crit-pill crit-ok" if ok else "crit-pill crit-miss"
+        return f"<span class='{cls}'>{label}: {'OK' if ok else 'Missing'}</span>"
 
-    if lvl.get("defaultPosture"):
-        st.markdown(f"<p class='small-help'><strong>Default posture:</strong> {lvl['defaultPosture']}</p>", unsafe_allow_html=True)
+    apo_ok = patient.has("apob") or patient.has("ldl")
+    lpa_ok = patient.has("lpa")
+    cs_ok = patient.has("cac")
+    a1c_ok = patient.has("a1c")
+    hscrp_ok = patient.has("hscrp")
 
-    if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
-        expl, chips = level2_explainer(lvl.get("sublevel"))
-        st.markdown(f"<p class='small-help'><strong>Level 2 {lvl.get('sublevel')} explainer:</strong> {expl}</p>", unsafe_allow_html=True)
-        st.markdown("<div class='next-row'>", unsafe_allow_html=True)
-        for c in chips:
-            st.markdown(f"<span class='next-chip'>{c}</span>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div class='crit'>" +
+                crit_pill("ApoB/LDL", apo_ok) +
+                crit_pill("Lp(a)", lpa_ok) +
+                crit_pill("Calcium Score", cs_ok) +
+                crit_pill("A1c", a1c_ok) +
+                crit_pill("hsCRP", hscrp_ok) +
+                "</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    if mode.startswith("Quick"):
-        st.subheader("Quick output (raw text)")
-        st.code(note_text, language="text")
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
     st.subheader("Clinical report")
-    st.markdown(clinical_html, unsafe_allow_html=True)
+    st.markdown(report_html, unsafe_allow_html=True)
+
+    with st.expander("Copy/paste text"):
+        st.code(note_text, language="text")
 
     st.download_button(
         "Download raw text (.txt)",
@@ -793,24 +620,18 @@ if submitted:
         mime="application/json",
     )
 
-    with st.expander("Show raw text (copy/paste)"):
-        st.code(note_text, language="text")
-
-    if show_json:
-        st.subheader("JSON (debug)")
-        st.json(out)
-
-    # Aspirin quick visibility (UI-level)
-    asp = out.get("aspirin", {})
+    # Aspirin quick visibility
     asp_status = asp.get("status", "Not assessed")
     asp_why = short_why(asp.get("rationale", []), max_items=2)
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Aspirin summary")
-    st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
+    st.caption(f"Aspirin: {asp_status}" + (f" — Why: {asp_why}" if asp_why else ""))
+
+    if show_json:
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        st.subheader("JSON (debug)")
+        st.json(out)
 
     st.caption(
         f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
     )
-
 
 
