@@ -1,17 +1,22 @@
 # levels_engine.py
-# LEVELS v2.2 — Level 2 sub-stratification (2A/2B/2C), tightened Level 1 sensitivity,
-# Level 5 support, ACC/AHA context + near-term/lifetime framing, RSS, PCE, aspirin, ESC goals.
+# LEVELS v2.3 — Engine + structured explanations for UI (Meaning / Why / Default posture)
+# Includes:
+# - Levels 0–5 with Level 2A/2B/2C sublevels
+# - Risk Signal Score (RSS)
+# - Pooled Cohort Equations (10-year ASCVD risk)
+# - Aspirin module with clean status labels + rationale
+# - ESC numeric goals, ACC/AHA context, time horizon framing
 #
-# Update in this version:
-# - Aspirin output simplified to: Recommend / Consider (shared decision) / Would not recommend / Not assessed
-# - Quick text now adds "Why:" (top 1–2 rationale items)
+# New in v2.3:
+# - levels_band() returns:
+#   levels: { level, sublevel, label, triggers, meaning, why, defaultPosture }
 
 import math
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 
 VERSION = {
-    "levels": "v2.2",
+    "levels": "v2.3",
     "riskSignal": "RSS v1.0",
     "riskCalc": "Pooled Cohort Equations (ACC/AHA 2013; Race other→non-Black)",
     "aspirin": "Aspirin v1.1 (clean status labels + rationale)",
@@ -56,7 +61,6 @@ def short_why(reasons: List[str], max_items: int = 2) -> str:
     if not reasons:
         return ""
     cleaned = [str(r).strip() for r in reasons if str(r).strip()]
-    # Drop low-signal reassurance if other reasons exist
     drop = {"Bleeding risk low by available flags"}
     if len(cleaned) > 1:
         cleaned = [r for r in cleaned if r not in drop]
@@ -106,10 +110,9 @@ def premature_fhx(p: Patient) -> bool:
     """
     Backward compatible:
       - fhx=True assumed "premature FHx" in existing UI
-    Optional richer fields if present:
+    Optional richer fields:
       - fhx_premature (bool)
-      - fhx_relation (father/mother/sibling/child/other)
-      - fhx_sex (male/female), fhx_age_event (int)
+      - fhx_relation, fhx_sex, fhx_age_event
     """
     if p.get("fhx_premature") is True:
         return True
@@ -126,7 +129,6 @@ def premature_fhx(p: Patient) -> bool:
     if rel and rel not in ("father", "mother", "brother", "sister", "son", "daughter", "parent", "sibling", "child"):
         return False
 
-    # Premature ASCVD: male <55, female <65 (first-degree)
     if is_male and age_evt < 55:
         return True
     if (not is_male) and age_evt < 65:
@@ -134,7 +136,6 @@ def premature_fhx(p: Patient) -> bool:
     return False
 
 def metabolic_syndrome(p: Patient) -> bool:
-    # Allow either explicit boolean or an inferred proxy if present
     if p.get("metabolic_syndrome") is True:
         return True
 
@@ -145,20 +146,15 @@ def metabolic_syndrome(p: Patient) -> bool:
     a1 = a1c_status(p)
 
     criteria = 0
-    if tg is not None and tg >= 150:
-        criteria += 1
+    if tg is not None and tg >= 150: criteria += 1
     if hdl is not None:
         sex = str(p.get("sex", "")).lower()
         male = sex in ("m", "male")
         if (male and hdl < 40) or ((not male) and hdl < 50):
             criteria += 1
-    if waist is not None and waist >= 102:
-        criteria += 1
-    if treated_htn:
-        criteria += 1
-    if a1 in ("prediabetes", "diabetes_range"):
-        criteria += 1
-
+    if waist is not None and waist >= 102: criteria += 1
+    if treated_htn: criteria += 1
+    if a1 in ("prediabetes", "diabetes_range"): criteria += 1
     return criteria >= 3
 
 def enhancer_list(p: Patient) -> List[str]:
@@ -190,7 +186,6 @@ def rss_band(score: int) -> str:
     return "Very high"
 
 def risk_signal_score(p: Patient) -> Dict[str, Any]:
-    # Atherosclerotic disease burden (0–55)
     burden = 0
     if p.get("ascvd") is True:
         burden = 55
@@ -202,7 +197,6 @@ def risk_signal_score(p: Patient) -> Dict[str, Any]:
         elif 100 <= cac <= 399: burden = 45
         else: burden = 55
 
-    # Atherogenic burden (0–25): ApoB preferred, else LDL
     athero = 0
     if p.has("apob"):
         apob = safe_float(p.get("apob", 0), default=0.0)
@@ -219,7 +213,6 @@ def risk_signal_score(p: Patient) -> Dict[str, Any]:
         elif ldl <= 189: athero = 15
         else: athero = 20
 
-    # Genetics (0–15): Lp(a) + FHx capped
     genetics = 0
     if p.has("lpa"):
         unit = str(p.get("lpa_unit", "")).lower()
@@ -232,7 +225,6 @@ def risk_signal_score(p: Patient) -> Dict[str, Any]:
         genetics += 5
     genetics = min(genetics, 15)
 
-    # Inflammation (0–10)
     infl = 0
     if p.has("hscrp"):
         h = safe_float(p.get("hscrp", 0), default=0.0)
@@ -243,7 +235,6 @@ def risk_signal_score(p: Patient) -> Dict[str, Any]:
         infl += 5
     infl = min(infl, 10)
 
-    # Metabolic (0–10)
     metab = 0
     if p.get("diabetes") is True: metab += 6
     if p.get("smoking") is True: metab += 4
@@ -342,7 +333,7 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient) -> Dict[str, Any]:
 
 
 # ----------------------------
-# Aspirin module (clean labels + rationale + "why" supported in quick text)
+# Aspirin module (clean labels + rationale)
 # ----------------------------
 def aspirin_advice(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
     age = safe_int(p.get("age")) if p.has("age") else None
@@ -368,7 +359,10 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "Consider aspirin (shared decision)",
                 "rationale": ["Clinical ASCVD present"] + ["Bleeding risk flags: " + "; ".join(bleed_flags)]
             }
-        return {"status": "Recommend aspirin", "rationale": ["Clinical ASCVD present (no bleeding risk flags identified)"]}
+        return {
+            "status": "Recommend aspirin",
+            "rationale": ["Clinical ASCVD present (no bleeding risk flags identified)"]
+        }
 
     # Primary prevention
     if age is None:
@@ -394,29 +388,22 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ----------------------------
-# Levels: 0–5 with Level 2A/2B/2C sublevels
+# Levels assignment helpers
 # ----------------------------
 def _domains_abnormal(p: Patient) -> int:
     domains = 0
 
-    # Lipids domain: ApoB preferred, else LDL
     apob = safe_float(p.get("apob"))
     ldl = safe_float(p.get("ldl"))
     if apob is not None:
-        if apob >= 90:
-            domains += 1
+        if apob >= 90: domains += 1
     elif ldl is not None:
-        if ldl >= 130:
-            domains += 1
+        if ldl >= 130: domains += 1
 
-    # BP domain
     sbp = safe_float(p.get("sbp"))
-    if sbp is not None and sbp >= 130:
-        domains += 1
-    if p.get("bp_treated") is True:
-        domains += 1
+    if sbp is not None and sbp >= 130: domains += 1
+    if p.get("bp_treated") is True: domains += 1
 
-    # Glycemia domain
     if p.get("diabetes") is True:
         domains += 1
     else:
@@ -437,24 +424,145 @@ def _mild_abnormalities_count(p: Patient) -> int:
     sbp = safe_float(p.get("sbp"))
     a1c = safe_float(p.get("a1c"))
 
-    # Mild lipid abnormality
     if apob is not None:
         if 80 <= apob <= 89: count += 1
     elif ldl is not None:
         if 100 <= ldl <= 129: count += 1
 
-    # Mild TG
     if tg is not None and 150 <= tg <= 199: count += 1
 
-    # Mild BP
     if sbp is not None and 130 <= sbp <= 139: count += 1
     if p.get("bp_treated") is True: count += 1
 
-    # Mild A1c
     if a1c is not None and 5.7 <= a1c <= 5.9: count += 1
 
     return count
 
+def _humanize_triggers(triggers: List[str]) -> List[str]:
+    """
+    Convert technical triggers into patient/clinician-friendly "why" bullets.
+    Keep short and high-signal.
+    """
+    bullets: List[str] = []
+    for t in triggers:
+        tt = t.strip()
+
+        if tt.startswith("CAC "):
+            bullets.append(tt.replace("(1–99)", "").strip())
+            continue
+        if "CAC≥100" in tt:
+            bullets.append("CAC indicates established plaque burden")
+            continue
+        if "ASCVD" == tt:
+            bullets.append("Clinical ASCVD history")
+            continue
+        if "LDL≥190" in tt:
+            bullets.append("Very high LDL-C (possible familial hypercholesterolemia)")
+            continue
+        if "ApoB 90–99" in tt:
+            bullets.append("ApoB suggests elevated atherogenic particle burden")
+            continue
+        if "LDL 130–159" in tt:
+            bullets.append("LDL-C is moderately elevated")
+            continue
+        if "A1c 6.0–6.4" in tt:
+            bullets.append("A1c suggests higher-risk prediabetes")
+            continue
+        if "Metabolic syndrome" in tt:
+            bullets.append("Metabolic syndrome increases long-term risk")
+            continue
+        if "Lp(a)" in tt:
+            bullets.append("Lp(a) is elevated (inherited risk enhancer)")
+            continue
+        if "Premature family history" in tt or "premature" in tt.lower():
+            bullets.append("Premature family history suggests earlier plaque development")
+            continue
+        if "Chronic inflammatory disease" in tt:
+            bullets.append("Chronic inflammation accelerates atherosclerosis risk")
+            continue
+        if "CKD" in tt:
+            bullets.append("Kidney disease increases cardiovascular risk")
+            continue
+        if "ApoB discordance" in tt:
+            bullets.append("ApoB is high despite lower LDL (hidden particle burden)")
+            continue
+        if "PCE" in tt:
+            bullets.append(tt.replace("PCE", "10-year risk estimate"))
+            continue
+        if "mild abnormalities" in tt:
+            bullets.append("Multiple mild risk signals cluster together")
+            continue
+        if "Enhancers:" in tt:
+            bullets.append(tt.replace("Enhancers:", "Risk enhancers:").strip())
+            continue
+
+        # Default: include as-is but shorten
+        bullets.append(tt)
+
+    # De-duplicate while preserving order
+    seen = set()
+    out = []
+    for b in bullets:
+        if b not in seen:
+            out.append(b)
+            seen.add(b)
+    return out[:4]
+
+def _meaning_and_posture(level: int, sublevel: Optional[str]) -> Dict[str, str]:
+    """
+    Short meaning + default posture, used by UI and exported text.
+    """
+    if level == 0:
+        return {
+            "meaning": "No major atherosclerotic risk signal detected based on available data.",
+            "posture": "Maintain healthy habits; periodic re-check."
+        }
+    if level == 1:
+        return {
+            "meaning": "Early drift: mild, low-grade risk signals without evidence of plaque.",
+            "posture": "Lifestyle-first; repeat/confirm outliers; monitor trajectory."
+        }
+    if level == 2:
+        if sublevel == "2A":
+            return {
+                "meaning": "Biologic risk is present, but structural disease is not established.",
+                "posture": "Aggressive lifestyle; shared decision on medication based on exposure, preferences, and trend."
+            }
+        if sublevel == "2B":
+            return {
+                "meaning": "Risk is driven by enhancers (inherited/inflammatory/CKD) that can accelerate plaque even when short-term risk looks modest.",
+                "posture": "Statin favored; address enhancers; consider CAC if unknown to refine intensity."
+            }
+        if sublevel == "2C":
+            return {
+                "meaning": "Probability of silent/subclinical disease is higher (often CAC 1–99 or multi-domain intermediate risk).",
+                "posture": "Treat more like early disease: statin default; use CAC/structure to guide intensity and follow-up."
+            }
+        return {
+            "meaning": "Moderate prevention zone (Level 2).",
+            "posture": "Escalate prevention intensity based on biology, enhancers, and/or structure."
+        }
+    if level == 3:
+        return {
+            "meaning": "Subclinical atherosclerosis is established (imaging/plaque evidence).",
+            "posture": "Secondary-prevention mindset: statin strong default; intensify to reach targets."
+        }
+    if level == 4:
+        return {
+            "meaning": "Clinical ASCVD or risk-equivalent disease is present.",
+            "posture": "High-intensity lipid lowering typical; add-on therapy based on response/thresholds."
+        }
+    if level >= 5:
+        return {
+            "meaning": "Extreme/progressive ASCVD risk (recurrent events or polyvascular disease).",
+            "posture": "Maximal risk reduction strategy; combination lipid therapy often appropriate."
+        }
+    return {"meaning": "Risk tier assigned.", "posture": "Individualize management."}
+
+
+# ----------------------------
+# Levels banding (v2.3)
+# ----------------------------
 def levels_band(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
     triggers: List[str] = []
     sublevel: Optional[str] = None
@@ -469,90 +577,262 @@ def levels_band(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
     # Level 5 — extreme/progressive ASCVD (optional flags)
     if p.get("ascvd") is True and any(p.get(k) is True for k in ["recurrent_ascvd", "polyvascular", "event_on_therapy"]):
         triggers.append("ASCVD (progressive/extreme features)")
-        return {"level": 5, "sublevel": None, "label": "Level 5 — Extreme / progressive ASCVD risk", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(5, None)
+        return {
+            "level": 5,
+            "sublevel": None,
+            "label": "Level 5 — Extreme / progressive ASCVD risk",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     # Level 4 — clinical ASCVD or major risk-equivalent
     if p.get("ascvd") is True:
         triggers.append("ASCVD")
-        return {"level": 4, "sublevel": None, "label": "Level 4 — Clinical ASCVD / risk-equivalent disease", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(4, None)
+        return {
+            "level": 4,
+            "sublevel": None,
+            "label": "Level 4 — Clinical ASCVD / risk-equivalent disease",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     if ldl is not None and ldl >= 190:
         triggers.append("LDL≥190")
-        return {"level": 4, "sublevel": None, "label": "Level 4 — Severe hypercholesterolemia (risk-equivalent)", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(4, None)
+        return {
+            "level": 4,
+            "sublevel": None,
+            "label": "Level 4 — Severe hypercholesterolemia (risk-equivalent)",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     if p.get("diabetes") is True and any(p.get(k) is True for k in ["ckd", "retinopathy", "neuropathy", "albuminuria", "target_organ_damage"]):
         triggers.append("Diabetes + target organ damage")
-        return {"level": 4, "sublevel": None, "label": "Level 4 — Diabetes with target organ damage (risk-equivalent)", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(4, None)
+        return {
+            "level": 4,
+            "sublevel": None,
+            "label": "Level 4 — Diabetes with target organ damage (risk-equivalent)",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     # Level 3 — subclinical atherosclerotic disease established
     if cac is not None and (cac >= 100 or p.get("cac_ge_75pctl") is True):
         triggers.append("CAC≥100 or ≥75th percentile")
-        return {"level": 3, "sublevel": None, "label": "Level 3 — Subclinical atherosclerotic disease (imaging+)", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(3, None)
+        return {
+            "level": 3,
+            "sublevel": None,
+            "label": "Level 3 — Subclinical atherosclerotic disease (imaging+)",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if any(p.get(k) is True for k in ["carotid_plaque", "femoral_plaque"]):
         triggers.append("Carotid/femoral plaque")
-        return {"level": 3, "sublevel": None, "label": "Level 3 — Subclinical atherosclerotic disease (plaque)", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(3, None)
+        return {
+            "level": 3,
+            "sublevel": None,
+            "label": "Level 3 — Subclinical atherosclerotic disease (plaque)",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     abi = safe_float(p.get("abi")) if p.has("abi") else None
     if abi is not None and abi < 0.9:
         triggers.append("ABI<0.9")
-        return {"level": 3, "sublevel": None, "label": "Level 3 — Subclinical atherosclerotic disease (ABI+)", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(3, None)
+        return {
+            "level": 3,
+            "sublevel": None,
+            "label": "Level 3 — Subclinical atherosclerotic disease (ABI+)",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     # Level 2C — silent disease probability
     if cac is not None and 1 <= cac <= 99:
         sublevel = "2C"
         triggers.append(f"CAC {cac} (1–99)")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2C — Silent disease probability", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2C — Silent disease probability",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     domains = _domains_abnormal(p)
     if pce is not None and pce >= 7.5 and domains >= 2:
         sublevel = "2C"
         triggers.append(f"PCE≥7.5% ({pce}%) + ≥2 abnormal domains")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2C — Silent disease probability", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2C — Silent disease probability",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     # Level 2B — enhancer-driven acceleration
     discordance = (apob is not None and apob >= 90 and ldl is not None and ldl < 100)
+
     if lpa_elevated(p):
         sublevel = "2B"
         triggers.append("Lp(a) elevated (enhancer)")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2B — Enhancer-driven acceleration",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if premature_fhx(p):
         sublevel = "2B"
         triggers.append("Premature family history (enhancer)")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2B — Enhancer-driven acceleration",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if has_chronic_inflammatory_disease(p):
         sublevel = "2B"
         triggers.append("Chronic inflammatory disease (enhancer)")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2B — Enhancer-driven acceleration",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if discordance:
         sublevel = "2B"
         triggers.append("ApoB discordance (ApoB≥90 with LDL<100)")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2B — Enhancer-driven acceleration",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if p.get("ckd") is True or (p.has("egfr") and safe_float(p.get("egfr")) is not None and safe_float(p.get("egfr")) < 60):
         sublevel = "2B"
         triggers.append("CKD (enhancer)")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2B — Enhancer-driven acceleration", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2B — Enhancer-driven acceleration",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     # Level 2A — biologic risk, low structural risk
     if apob is not None and 90 <= apob <= 99:
         sublevel = "2A"
         triggers.append("ApoB 90–99")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2A — Biologic risk, low structural risk",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if ldl is not None and 130 <= ldl <= 159:
         sublevel = "2A"
         triggers.append("LDL 130–159")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2A — Biologic risk, low structural risk",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if a1c is not None and 6.0 <= a1c < 6.5:
         sublevel = "2A"
         triggers.append("A1c 6.0–6.4")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2A — Biologic risk, low structural risk",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
     if metabolic_syndrome(p):
         sublevel = "2A"
         triggers.append("Metabolic syndrome")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2A — Biologic risk, low structural risk",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     if pce is not None and (5.0 <= pce < 20.0):
         sublevel = "2A"
         triggers.append(f"PCE {pce}% ({risk10.get('category','')})")
-        return {"level": 2, "sublevel": sublevel, "label": "Level 2A — Biologic risk, low structural risk", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(2, sublevel)
+        return {
+            "level": 2,
+            "sublevel": sublevel,
+            "label": "Level 2A — Biologic risk, low structural risk",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     # Level 1 — early drift (tightened sensitivity)
     mild_count = _mild_abnormalities_count(p)
@@ -560,7 +840,16 @@ def levels_band(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
         triggers.append(f"≥2 mild abnormalities (count={mild_count})" if mild_count >= 2 else "Mild abnormality + enhancer")
         if enh:
             triggers.append("Enhancers: " + ", ".join(sorted(set(enh))))
-        return {"level": 1, "sublevel": None, "label": "Level 1 — Early drift (low structural risk)", "triggers": sorted(set(triggers))}
+        m = _meaning_and_posture(1, None)
+        return {
+            "level": 1,
+            "sublevel": None,
+            "label": "Level 1 — Early drift (low structural risk)",
+            "triggers": sorted(set(triggers)),
+            "meaning": m["meaning"],
+            "why": _humanize_triggers(triggers),
+            "defaultPosture": m["posture"],
+        }
 
     # Level 0 — optimal
     diabetes = (p.get("diabetes") is True) or (a1c_status(p) == "diabetes_range")
@@ -574,13 +863,31 @@ def levels_band(p: Patient, risk10: Dict[str, Any]) -> Dict[str, Any]:
             if cac == 0:
                 triggers.append("CAC=0")
             triggers.append("No enhancers; lipids optimal")
-            return {"level": 0, "sublevel": None, "label": "Level 0 — Optimal / no major atherosclerotic signal", "triggers": sorted(set(triggers))}
+            m = _meaning_and_posture(0, None)
+            return {
+                "level": 0,
+                "sublevel": None,
+                "label": "Level 0 — Optimal / no major atherosclerotic signal",
+                "triggers": sorted(set(triggers)),
+                "meaning": m["meaning"],
+                "why": _humanize_triggers(triggers),
+                "defaultPosture": m["posture"],
+            }
 
-    # Fallback to Level 1 if incomplete data but not clearly optimal
+    # Fallback: Level 1 when not clearly optimal
     triggers.append("Non-optimal signal(s) without higher-level criteria")
     if enh:
         triggers.append("Enhancers: " + ", ".join(sorted(set(enh))))
-    return {"level": 1, "sublevel": None, "label": "Level 1 — Early drift (low structural risk)", "triggers": sorted(set(triggers))}
+    m = _meaning_and_posture(1, None)
+    return {
+        "level": 1,
+        "sublevel": None,
+        "label": "Level 1 — Early drift (low structural risk)",
+        "triggers": sorted(set(triggers)),
+        "meaning": m["meaning"],
+        "why": _humanize_triggers(triggers),
+        "defaultPosture": m["posture"],
+    }
 
 
 # ----------------------------
@@ -791,6 +1098,12 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
     lines.append(f"Time horizon: {out['timeHorizon'].split(':',1)[1].strip() if out['timeHorizon'].startswith('Time horizon:') else out['timeHorizon']}")
     lines.append(f"ACC/AHA context: {out['accContext'].split(':',1)[1].strip() if out['accContext'].startswith('ACC/AHA context:') else out['accContext']}")
+
+    # NEW: include meaning + default posture (brief)
+    if lvl.get("meaning"):
+        lines.append(f"Meaning: {lvl['meaning']}")
+    if lvl.get("defaultPosture"):
+        lines.append(f"Default posture: {lvl['defaultPosture']}")
 
     if out["drivers"]:
         lines.append("Drivers: " + "; ".join(out["drivers"]))
