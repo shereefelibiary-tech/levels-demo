@@ -1,4 +1,7 @@
 import json
+
+from smartphrase_ingest.parser import parse_ascvd_block
+
 import re
 import streamlit as st
 from levels_engine import Patient, evaluate, render_quick_text, VERSION
@@ -446,5 +449,6 @@ if submitted:
         st.json(out)
 
     st.caption(f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended.")
+
 
 
