@@ -1,18 +1,21 @@
 # app.py
 # LEVELS UI (Streamlit) — restores your prior UI and fixes the bugs you listed.
 #
-# Key updates in THIS version (no layout redesign):
-# 1) SmartPhrase parsing now ALSO applies A1c (if parsed)
-# 2) Added a "Clear auto-filled fields" button (resets parsed/applied defaults)
-# 3) Removed numeric defaults (start at 0 = "no value yet")
-# 4) Clinical report is the PRIMARY output shown first; everything else is below in expanders
-# 5) Terminology updates:
-#    - Sex → Gender (UI label)
-#    - Black → African American (UI label)
+# This version fixes the Streamlit Session State error by:
+# - For any widget with a `key=...`, we DO NOT pass `value=` or `index=`.
+# - We control defaults ONLY via st.session_state.setdefault(...).
 #
-# Notes:
-# - Streamlit number_input cannot be truly blank, so we use 0 as "empty".
-# - On submit, required fields are validated (e.g., Age must be > 0).
+# Preserves everything you asked for up to now:
+# - Same wide layout + same UI sections + same styling + PHI guardrails
+# - SmartPhrase ingest (paste → parse → apply) with explicit coverage flags
+# - Added: A1c parsed + applied
+# - Added: Clear auto-filled fields button
+# - Defaults now mean "no value yet" (numeric fields default to 0 / 0.0 and are treated as empty)
+# - Output: Clinical report is primary; others moved into expanders
+# - Terminology: Sex → Gender, Black → African American (UI labels)
+# - HDL max widened to avoid StreamlitValueAboveMaxError
+#
+# NOTE: Streamlit number_input cannot be blank, so 0 is used as empty placeholder.
 
 import json
 import re
@@ -217,7 +220,6 @@ def render_clinical_report(note_text: str) -> str:
         if not line or line == title:
             continue
 
-        # Summary section
         if line.startswith("Level "):
             open_section("Summary")
             out.append(f"<p><strong>{line}</strong></p>")
@@ -237,7 +239,6 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        # Key metrics section
         if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations"):
             open_section("Key metrics")
             j = i - 1
@@ -258,7 +259,6 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        # Drivers section
         if line.startswith("Drivers:"):
             open_section("Primary drivers")
             items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
@@ -269,7 +269,6 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        # Targets section
         if line == "Targets" or line.startswith("Targets"):
             open_section("Targets")
             out.append("<ul>")
@@ -295,7 +294,6 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        # Next steps section (FIXED)
         if line.startswith("Next:"):
             open_section("Next steps")
             payload = line.split(":", 1)[1].strip()
@@ -310,7 +308,6 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        # Aspirin section
         if line.startswith("Aspirin") or line.startswith("Why:"):
             open_section("Aspirin")
             out.append(f"<p>{line}</p>")
@@ -320,7 +317,6 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        # Fallback
         open_section("Additional")
         out.append(f"<p class='muted'>{line}</p>")
         close_section()
@@ -392,7 +388,6 @@ def apply_parsed_to_session(parsed: dict):
     else:
         missing.append("Lp(a) unit")
 
-    # NEW: apply A1c (float)
     if parsed.get("a1c") is not None:
         st.session_state["a1c_val"] = float(parsed["a1c"])
         applied.append("A1c")
@@ -456,29 +451,26 @@ def level2_explainer(sub: str):
         )
     return ("Level 2 prevention zone.", ["Refine with CAC", "ApoB-guided targets", "Shared decisions"])
 
-
 # ============================================================
-# Defaults: keep numeric fields empty (0) until user/parse fills them
+# Session defaults (ONLY via session_state, to avoid widget conflicts)
 # ============================================================
-# These are widget keys used throughout; if not present, we treat as empty.
 st.session_state.setdefault("age_val", 0)
+st.session_state.setdefault("sex_val", "F")
+st.session_state.setdefault("race_val", "Other (use non-African American coefficients)")
 st.session_state.setdefault("sbp_val", 0)
 st.session_state.setdefault("tc_val", 0)
 st.session_state.setdefault("ldl_val", 0)
 st.session_state.setdefault("hdl_val", 0)
 st.session_state.setdefault("apob_val", 0)
 st.session_state.setdefault("lpa_val", 0)
-st.session_state.setdefault("cac_val", 0)
+st.session_state.setdefault("lpa_unit_val", "nmol/L")
 st.session_state.setdefault("a1c_val", 0.0)
-
-st.session_state.setdefault("sex_val", "F")
-st.session_state.setdefault("race_val", "Other (use non-African American coefficients)")
 st.session_state.setdefault("bp_treated_val", "No")
 st.session_state.setdefault("smoking_val", "No")
 st.session_state.setdefault("diabetes_choice_val", "No")
 st.session_state.setdefault("cac_known_val", "No")
-st.session_state.setdefault("lpa_unit_val", "nmol/L")
-
+st.session_state.setdefault("cac_val", 0)
+st.session_state.setdefault("smartphrase_raw", "")
 
 # ============================================================
 # Top-level mode
@@ -523,7 +515,6 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/CAC/A1c)
             st.session_state["smartphrase_raw"] = ""
             st.rerun()
 
-    # NEW: clear auto-filled fields (resets "defaults" back to empty)
     with c3:
         if st.button("Clear auto-filled fields"):
             for k in [
@@ -532,23 +523,25 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/CAC/A1c)
                 "smoking_val", "diabetes_choice_val", "bp_treated_val", "ascvd10_val", "a1c_val",
             ]:
                 st.session_state.pop(k, None)
-            # re-seed empties
+
+            # Re-seed empties (and common radio defaults)
             st.session_state["age_val"] = 0
+            st.session_state["sex_val"] = "F"
+            st.session_state["race_val"] = "Other (use non-African American coefficients)"
             st.session_state["sbp_val"] = 0
             st.session_state["tc_val"] = 0
             st.session_state["ldl_val"] = 0
             st.session_state["hdl_val"] = 0
             st.session_state["apob_val"] = 0
             st.session_state["lpa_val"] = 0
-            st.session_state["cac_val"] = 0
+            st.session_state["lpa_unit_val"] = "nmol/L"
             st.session_state["a1c_val"] = 0.0
-            st.session_state["sex_val"] = "F"
-            st.session_state["race_val"] = "Other (use non-African American coefficients)"
             st.session_state["bp_treated_val"] = "No"
             st.session_state["smoking_val"] = "No"
             st.session_state["diabetes_choice_val"] = "No"
             st.session_state["cac_known_val"] = "No"
-            st.session_state["lpa_unit_val"] = "nmol/L"
+            st.session_state["cac_val"] = 0
+
             st.rerun()
 
     with c4:
@@ -590,20 +583,12 @@ with st.form("levels_form"):
 
     a1, a2, a3 = st.columns(3)
     with a1:
-        age = st.number_input(
-            "Age (years)", 0, 120,
-            value=int(st.session_state.get("age_val") or 0),
-            step=1, key="age_val"
-        )
-        gender_default = st.session_state.get("sex_val", "F")
-        gender_index = 0 if gender_default == "F" else 1
-        gender = st.radio("Gender", ["F", "M"], horizontal=True, index=gender_index, key="sex_val")
+        age = st.number_input("Age (years)", 0, 120, step=1, key="age_val")
+        gender = st.radio("Gender", ["F", "M"], horizontal=True, key="sex_val")
 
     with a2:
         race_options = ["Other (use non-African American coefficients)", "African American"]
-        race_default = st.session_state.get("race_val", race_options[0])
-        race_index = 1 if race_default == "African American" else 0
-        race = st.radio("Race (calculator)", race_options, horizontal=False, index=race_index, key="race_val")
+        race = st.radio("Race (calculator)", race_options, horizontal=False, key="race_val")
 
     with a3:
         ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True)
@@ -615,30 +600,15 @@ with st.form("levels_form"):
 
     b1, b2, b3 = st.columns(3)
     with b1:
-        sbp = st.number_input(
-            "Systolic BP (mmHg)", 0, 250,
-            value=int(st.session_state.get("sbp_val") or 0),
-            step=1, key="sbp_val"
-        )
-        bp_default = st.session_state.get("bp_treated_val", "No")
-        bp_index = 1 if bp_default == "Yes" else 0
-        bp_treated = st.radio("On BP meds?", ["No", "Yes"], horizontal=True, index=bp_index, key="bp_treated_val")
+        sbp = st.number_input("Systolic BP (mmHg)", 0, 250, step=1, key="sbp_val")
+        bp_treated = st.radio("On BP meds?", ["No", "Yes"], horizontal=True, key="bp_treated_val")
 
     with b2:
-        sm_default = st.session_state.get("smoking_val", "No")
-        sm_index = 1 if sm_default == "Yes" else 0
-        smoking = st.radio("Smoking (current)", ["No", "Yes"], horizontal=True, index=sm_index, key="smoking_val")
-
-        dm_default = st.session_state.get("diabetes_choice_val", "No")
-        dm_index = 1 if dm_default == "Yes" else 0
-        diabetes_choice = st.radio("Diabetes (manual)", ["No", "Yes"], horizontal=True, index=dm_index, key="diabetes_choice_val")
+        smoking = st.radio("Smoking (current)", ["No", "Yes"], horizontal=True, key="smoking_val")
+        diabetes_choice = st.radio("Diabetes (manual)", ["No", "Yes"], horizontal=True, key="diabetes_choice_val")
 
     with b3:
-        a1c = st.number_input(
-            "A1c (%)", 0.0, 15.0,
-            value=float(st.session_state.get("a1c_val") or 0.0),
-            step=0.1, format="%.1f", key="a1c_val"
-        )
+        a1c = st.number_input("A1c (%)", 0.0, 15.0, step=0.1, format="%.1f", key="a1c_val")
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
@@ -647,35 +617,15 @@ with st.form("levels_form"):
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        tc = st.number_input(
-            "Total cholesterol (mg/dL)", 0, 500,
-            value=int(st.session_state.get("tc_val") or 0),
-            step=1, key="tc_val"
-        )
-        ldl = st.number_input(
-            "LDL-C (mg/dL)", 0, 400,
-            value=int(st.session_state.get("ldl_val") or 0),
-            step=1, key="ldl_val"
-        )
-        hdl = st.number_input(
-            "HDL cholesterol (mg/dL)", 0, 300,
-            value=int(st.session_state.get("hdl_val") or 0),
-            step=1, key="hdl_val"
-        )
+        tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, step=1, key="tc_val")
+        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, step=1, key="ldl_val")
+        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 300, step=1, key="hdl_val")  # widened max
+
     with c2:
-        apob = st.number_input(
-            "ApoB (mg/dL)", 0, 300,
-            value=int(st.session_state.get("apob_val") or 0),
-            step=1, key="apob_val"
-        )
-        lpa = st.number_input(
-            "Lp(a) value", 0, 2000,
-            value=int(st.session_state.get("lpa_val") or 0),
-            step=1, key="lpa_val"
-        )
-        unit_default = st.session_state.get("lpa_unit_val", "nmol/L")
-        unit_index = 0 if unit_default == "nmol/L" else 1
-        lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, index=unit_index, key="lpa_unit_val")
+        apob = st.number_input("ApoB (mg/dL)", 0, 300, step=1, key="apob_val")
+        lpa = st.number_input("Lp(a) value", 0, 2000, step=1, key="lpa_val")
+        lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, key="lpa_unit_val")
+
     with c3:
         hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, 0.0, step=0.1, format="%.1f")
 
@@ -684,15 +634,9 @@ with st.form("levels_form"):
 
     d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
-        cac_default = st.session_state.get("cac_known_val", "No")
-        cac_index = 0 if cac_default == "Yes" else 1
-        cac_known = st.radio("CAC available?", ["Yes", "No"], horizontal=True, index=cac_index, key="cac_known_val")
+        cac_known = st.radio("CAC available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
     with d2:
-        cac = st.number_input(
-            "CAC score (Agatston)", 0, 5000,
-            value=int(st.session_state.get("cac_val") or 0),
-            step=1, key="cac_val"
-        ) if cac_known == "Yes" else None
+        cac = st.number_input("CAC score (Agatston)", 0, 5000, step=1, key="cac_val") if cac_known == "Yes" else None
     with d3:
         st.caption("")
 
@@ -740,7 +684,7 @@ if submitted:
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
 
-    # Validate required numeric fields (since defaults are "empty=0")
+    # Required fields (since empty placeholders are 0)
     req_errors = []
     if age <= 0:
         req_errors.append("Age is required (must be > 0).")
@@ -759,7 +703,7 @@ if submitted:
 
     data = {
         "age": int(age),
-        "sex": gender,  # engine expects F/M
+        "sex": gender,
         "race": "black" if race == "African American" else "other",
         "ascvd": (ascvd == "Yes"),
 
@@ -800,13 +744,11 @@ if submitted:
     note_text = render_quick_text(patient, out)
     clinical_html = render_clinical_report(note_text)
 
-    # ============================================================
-    # OUTPUT: Clinical report FIRST; everything else below in expanders
-    # ============================================================
+    # Clinical report FIRST
     st.subheader("Clinical report")
     st.markdown(clinical_html, unsafe_allow_html=True)
 
-    # Downloads immediately below the main report
+    # Downloads below main report
     d1, d2 = st.columns(2)
     with d1:
         st.download_button(
@@ -906,3 +848,4 @@ if submitted:
     st.caption(
         f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
     )
+
