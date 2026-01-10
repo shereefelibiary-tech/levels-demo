@@ -18,7 +18,6 @@ html, body, [class*="css"] {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
-
 .header-card {
   background: #ffffff;
   border: 1px solid rgba(31,41,55,0.12);
@@ -26,21 +25,9 @@ html, body, [class*="css"] {
   padding: 16px 18px;
   margin-bottom: 10px;
 }
-.header-title {
-  font-size: 1.15rem;
-  font-weight: 800;
-  margin: 0 0 4px 0;
-}
-.header-sub {
-  color: rgba(31,41,55,0.60);
-  font-size: 0.9rem;
-  margin: 0;
-}
-
-.hr {
-  margin: 10px 0 14px 0;
-  border-top: 1px solid rgba(31,41,55,0.12);
-}
+.header-title { font-size: 1.15rem; font-weight: 800; margin: 0 0 4px 0; }
+.header-sub { color: rgba(31,41,55,0.60); font-size: 0.9rem; margin: 0; }
+.hr { margin: 10px 0 14px 0; border-top: 1px solid rgba(31,41,55,0.12); }
 
 .report {
   background: #ffffff;
@@ -48,12 +35,7 @@ html, body, [class*="css"] {
   border-radius: 14px;
   padding: 18px 20px;
 }
-
-.report h2 {
-  font-size: 1.10rem;
-  font-weight: 900;
-  margin: 0 0 10px 0;
-}
+.report h2 { font-size: 1.10rem; font-weight: 900; margin: 0 0 10px 0; }
 
 .section { margin-top: 12px; }
 .section-title {
@@ -66,7 +48,6 @@ html, body, [class*="css"] {
   border-bottom: 1px solid rgba(31,41,55,0.10);
   padding-bottom: 2px;
 }
-
 .section p { margin: 6px 0; line-height: 1.45; }
 .section ul { margin: 6px 0 6px 18px; }
 .section li { margin: 4px 0; }
@@ -75,29 +56,18 @@ html, body, [class*="css"] {
 .small-help { color: rgba(31,41,55,0.70); font-size: 0.88rem; }
 
 .badge {
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  border:1px solid rgba(31,41,55,0.15);
-  background:#fff;
-  font-size:0.82rem;
-  margin-left:6px;
+  display:inline-block; padding:2px 8px; border-radius:999px;
+  border:1px solid rgba(31,41,55,0.15); background:#fff;
+  font-size:0.82rem; margin-left:6px;
 }
 .ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
-.crit {
-  display:flex; gap:8px; flex-wrap:wrap;
-  margin-top: 8px;
-}
+.crit { display:flex; gap:8px; flex-wrap:wrap; margin-top: 8px; }
 .crit-pill {
-  display:inline-block;
-  padding:6px 10px;
-  border-radius: 999px;
-  border:1px solid rgba(31,41,55,0.14);
-  background:#fff;
-  font-size:0.85rem;
-  font-weight:800;
+  display:inline-block; padding:6px 10px; border-radius: 999px;
+  border:1px solid rgba(31,41,55,0.14); background:#fff;
+  font-size:0.85rem; font-weight:800;
 }
 .crit-ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .crit-miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
@@ -119,7 +89,7 @@ st.markdown(
 st.info("De-identified use only. Do not enter patient identifiers.")
 
 # ============================================================
-# Reset button (robust callback-based)
+# Reset + clear callbacks (MUST be callbacks)
 # ============================================================
 def reset_form_state():
     for k in list(st.session_state.keys()):
@@ -127,6 +97,11 @@ def reset_form_state():
             continue
         del st.session_state[k]
     st.session_state["_reset_done"] = True
+
+def clear_pasted_text():
+    # Safe because runs before widget is recreated on rerun
+    st.session_state["smartphrase_raw"] = ""
+    st.session_state["_cleared_done"] = True
 
 c_reset, c_tip = st.columns([1, 4])
 with c_reset:
@@ -142,12 +117,12 @@ if st.session_state.get("_reset_done"):
 # Guardrails
 # ============================================================
 PHI_PATTERNS: List[str] = [
-    r"\b\d{3}-\d{2}-\d{4}\b",              # SSN-like
-    r"\b\d{2}/\d{2}/\d{4}\b",              # date
-    r"\b\d{4}-\d{2}-\d{2}\b",              # ISO date
+    r"\b\d{3}-\d{2}-\d{4}\b",
+    r"\b\d{2}/\d{2}/\d{4}\b",
+    r"\b\d{4}-\d{2}-\d{2}\b",
     r"\bMRN\b|\bMedical Record\b",
-    r"@",                                  # email-ish
-    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",  # phone
+    r"@",
+    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
 ]
 
 def contains_phi(s: str) -> bool:
@@ -181,21 +156,15 @@ def regex_extract_smartphrase(text: str) -> Dict[str, Any]:
     t = text or ""
     out: Dict[str, Any] = {}
 
-    # AGE
     m = _rx_first([r"\bAGE[:\s]+(\d{2,3})\b", r"\bAge[:\s]+(\d{2,3})\b", r"\b(\d{2,3})\s*y/?o\b"], t)
-    if m:
-        out["age"] = _to_int(m.group(1))
+    if m: out["age"] = _to_int(m.group(1))
 
-    # SEX
-    m = _rx_first([r"\bSEX[:\s]+(M|F)\b", r"\bSex[:\s]+(M|F)\b", r"\b(\d{2,3})\s*(M|F)\b"], t)
-    if m:
-        out["sex"] = str(m.group(m.lastindex)).strip().upper()[0]
+    m = _rx_first([r"\bSEX[:\s]+(M|F)\b", r"\bSex[:\s]+(M|F)\b"], t)
+    if m: out["sex"] = str(m.group(1)).upper()
 
-    # Race (Black)
     if re.search(r"\bblack\b|\bafrican[-\s]?american\b", t, re.IGNORECASE):
         out["africanAmerican"] = True
 
-    # SBP
     m = _rx_first([r"\bSBP[:\s]+(\d{2,3})\b", r"\bSystolic\s*BP[:\s]+(\d{2,3})\b"], t)
     if m:
         out["sbp"] = _to_int(m.group(1))
@@ -204,58 +173,35 @@ def regex_extract_smartphrase(text: str) -> Dict[str, Any]:
         if m2:
             out["sbp"] = _to_int(m2.group(1))
 
-    # Lipids
     m = _rx_first([r"\b(TC|TOTAL\s*CHOLESTEROL)[:\s]+(\d{2,3})\b", r"\bTotal\s*Cholesterol[:\s]+(\d{2,3})\b"], t)
-    if m:
-        out["tc"] = _to_int(m.group(m.lastindex))
+    if m: out["tc"] = _to_int(m.group(m.lastindex))
 
     m = _rx_first([r"\bHDL[:\s]+(\d{2,3})\b"], t)
-    if m:
-        out["hdl"] = _to_int(m.group(1))
+    if m: out["hdl"] = _to_int(m.group(1))
 
     m = _rx_first([r"\bLDL[-\s]*C?\b[:\s]+(\d{2,3})\b", r"\bLDL\b[:\s]+(\d{2,3})\b"], t)
-    if m:
-        out["ldl"] = _to_int(m.group(1))
+    if m: out["ldl"] = _to_int(m.group(1))
 
     m = _rx_first([r"\bApoB\b[:\s]+(\d{2,3})\b", r"\bAPOB\b[:\s]+(\d{2,3})\b"], t)
-    if m:
-        out["apob"] = _to_int(m.group(1))
+    if m: out["apob"] = _to_int(m.group(1))
 
-    # Lp(a)
     m = _rx_first([r"\bLp\(a\)\b[:\s]+([\d.]+)\s*(nmol/L|mg/dL)?", r"\bLPA\b[:\s]+([\d.]+)\s*(nmol/L|mg/dL)?"], t)
     if m:
         out["lpa"] = _to_int(m.group(1))
-        unit = m.group(2)
-        if unit:
-            out["lpa_unit"] = unit
+        if m.group(2):
+            out["lpa_unit"] = m.group(2)
 
-    m = _rx_first([r"\bLPA\s*UNIT[:\s]+(nmol/L|mg/dL)\b", r"\bLp\(a\)\s*unit[:\s]+(nmol/L|mg/dL)\b"], t)
-    if m:
-        out["lpa_unit"] = m.group(1)
+    m = _rx_first([r"\bLPA\s*UNIT[:\s]+(nmol/L|mg/dL)\b"], t)
+    if m: out["lpa_unit"] = m.group(1)
 
-    # Calcium Score (CAC)
-    m = _rx_first([
-        r"\bCALCIUM\s*SCORE[:\s]+(\d{1,4})\b",
-        r"\bCalcium\s*Score[:\s]+(\d{1,4})\b",
-        r"\bCAC\b[:=\s]+(\d{1,4})\b",
-        r"\bAgatston[:\s]+(\d{1,4})\b",
-    ], t)
-    if m:
-        out["cac"] = _to_int(m.group(1))
+    m = _rx_first([r"\bCALCIUM\s*SCORE[:\s]+(\d{1,4})\b", r"\bCAC\b[:=\s]+(\d{1,4})\b", r"\bAgatston[:\s]+(\d{1,4})\b"], t)
+    if m: out["cac"] = _to_int(m.group(1))
 
-    # ASCVD 10y
-    m = _rx_first([r"\bASCVD\s*10[-\s]*year[:\s]+([\d.]+)\s*%?", r"\b10[-\s]*year\s*ASCVD\s*risk[:\s]+([\d.]+)\s*%?"], t)
-    if m:
-        out["ascvd_10y"] = _to_float(m.group(1))
-
-    # A1c / hsCRP
     m = _rx_first([r"\bA1C\b[:\s]+([\d.]+)\b", r"\bHbA1c\b[:\s]+([\d.]+)\b"], t)
-    if m:
-        out["a1c"] = _to_float(m.group(1))
+    if m: out["a1c"] = _to_float(m.group(1))
 
     m = _rx_first([r"\bhs\s*CRP\b[:\s]+([\d.]+)\b", r"\bhscrp\b[:\s]+([\d.]+)\b"], t)
-    if m:
-        out["hscrp"] = _to_float(m.group(1))
+    if m: out["hscrp"] = _to_float(m.group(1))
 
     return {k: v for k, v in out.items() if v is not None}
 
@@ -282,7 +228,6 @@ TARGET_PARSE_FIELDS = [
     ("a1c", "A1c"),
     ("hscrp", "hsCRP"),
     ("cac", "Calcium Score"),
-    ("ascvd_10y", "ASCVD 10-year risk (if present)"),
 ]
 
 def apply_parsed_to_session(parsed: Dict[str, Any]):
@@ -301,11 +246,9 @@ def apply_parsed_to_session(parsed: Dict[str, Any]):
     set_if_present("age", "age_val", lambda v: int(float(v)), "Age")
     set_if_present("sex", "sex_val", lambda v: str(v).strip().upper()[0], "Sex")
     set_if_present("sbp", "sbp_val", lambda v: int(float(v)), "Systolic BP")
-
     set_if_present("tc", "tc_val", lambda v: int(float(v)), "Total Cholesterol")
     set_if_present("hdl", "hdl_val", lambda v: int(float(v)), "HDL")
     set_if_present("ldl", "ldl_val", lambda v: int(float(v)), "LDL")
-
     set_if_present("apob", "apob_val", lambda v: int(float(v)), "ApoB")
     set_if_present("lpa", "lpa_val", lambda v: int(float(v)), "Lp(a)")
 
@@ -334,7 +277,6 @@ def apply_parsed_to_session(parsed: Dict[str, Any]):
     else:
         missing.append("Calcium Score")
 
-    # de-dupe missing
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
@@ -370,7 +312,6 @@ def render_report_from_json(out: Dict[str, Any], patient: Patient) -> str:
 
     asp_status = asp.get("status", "Not assessed")
     asp_why = short_why(asp.get("rationale", []), max_items=2)
-
     miss_top = ", ".join(conf.get("top_missing", []) or [])
 
     html: List[str] = []
@@ -421,7 +362,7 @@ st.subheader("SmartPhrase ingest (optional)")
 with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium Score)", expanded=False):
     st.markdown(
         "<div class='small-help'>Paste de-identified Epic output. Click <strong>Parse & Apply</strong>. "
-        "This uses the parser plus a backup extractor to improve fill-rate.</div>",
+        "Parser + fallback extractor improves fill-rate.</div>",
         unsafe_allow_html=True,
     )
 
@@ -447,13 +388,15 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium 
             st.rerun()
 
     with c2:
-        if st.button("Clear pasted text"):
-            st.session_state["smartphrase_raw"] = ""
-            st.rerun()
+        st.button("Clear pasted text", on_click=clear_pasted_text)
 
     with c3:
         st.caption("Parsed preview (merged)")
         st.json(parsed_preview)
+
+    if st.session_state.get("_cleared_done"):
+        st.success("Pasted text cleared.")
+        del st.session_state["_cleared_done"]
 
     st.markdown("### Parse coverage (explicit)")
     for key, label in TARGET_PARSE_FIELDS:
@@ -540,21 +483,12 @@ with st.form("levels_form"):
     d1, d2 = st.columns([1, 2])
     with d1:
         cac_default = st.session_state.get("cac_known_val", "No")
-        cac_known = st.radio(
-            "Calcium Score available?",
-            ["Yes", "No"],
-            horizontal=True,
-            index=0 if cac_default == "Yes" else 1,
-            key="cac_known_val"
-        )
+        cac_known = st.radio("Calcium Score available?", ["Yes", "No"], horizontal=True,
+                             index=0 if cac_default == "Yes" else 1, key="cac_known_val")
     with d2:
-        cac = st.number_input(
-            "Calcium Score (Agatston)",
-            0, 5000,
-            value=int(st.session_state.get("cac_val", 0)),
-            step=1,
-            key="cac_val"
-        ) if cac_known == "Yes" else None
+        cac = st.number_input("Calcium Score (Agatston)", 0, 5000,
+                              value=int(st.session_state.get("cac_val", 0)),
+                              step=1, key="cac_val") if cac_known == "Yes" else None
 
     with st.expander("Bleeding risk (for aspirin) — optional"):
         f1, f2, f3 = st.columns(3)
@@ -575,10 +509,8 @@ with st.form("levels_form"):
 # Run + output
 # ============================================================
 if submitted:
-    raw_check = " ".join([str(x) for x in [
-        age, sex, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
-        tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac
-    ]])
+    raw_check = " ".join([str(x) for x in [age, sex, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
+                                          tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac]])
     if contains_phi(raw_check):
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
@@ -648,18 +580,10 @@ if submitted:
     with st.expander("Copy/paste text"):
         st.code(note_text, language="text")
 
-    st.download_button(
-        "Download raw text (.txt)",
-        data=note_text.encode("utf-8"),
-        file_name="levels_note.txt",
-        mime="text/plain",
-    )
-    st.download_button(
-        "Download JSON",
-        data=json.dumps(out, indent=2).encode("utf-8"),
-        file_name="levels_output.json",
-        mime="application/json",
-    )
+    st.download_button("Download raw text (.txt)", data=note_text.encode("utf-8"),
+                       file_name="levels_note.txt", mime="text/plain")
+    st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"),
+                       file_name="levels_output.json", mime="application/json")
 
     asp_status = asp.get("status", "Not assessed")
     asp_why = short_why(asp.get("rationale", []), max_items=2)
@@ -673,3 +597,5 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
+
+
