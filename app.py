@@ -223,6 +223,22 @@ def render_clinical_report(note_text: str) -> str:
     return "\n".join(out)
 
 # ============================================================
+# Debug helpers (safe + properly indented)
+# ============================================================
+def _find_paths(obj, needle: str, path: str = "root"):
+    found = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{path}.{k}"
+            if needle.lower() in str(k).lower():
+                found.append(p)
+            found += _find_paths(v, needle, p)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            found += _find_paths(v, needle, f"{path}[{i}]")
+    return found
+
+# ============================================================
 # Helpers
 # ============================================================
 FHX_OPTIONS = [
@@ -366,7 +382,6 @@ def cb_clear_pasted_text():
     st.session_state["smartphrase_raw"] = ""
 
 def cb_clear_autofilled_fields():
-    # Reset auto-filled widget keys to empty defaults
     st.session_state["age_val"] = 0
     st.session_state["sex_val"] = "F"
     st.session_state["race_val"] = "Other (use non-African American coefficients)"
@@ -383,7 +398,6 @@ def cb_clear_autofilled_fields():
     st.session_state["diabetes_choice_val"] = "No"
     st.session_state["cac_known_val"] = "No"
     st.session_state["cac_val"] = 0
-    # optional output
     st.session_state.pop("ascvd10_val", None)
 
 # ============================================================
@@ -616,26 +630,14 @@ if submitted:
 
     patient = Patient(data)
     out = evaluate(patient)
-# --- DEBUG: locate drivers anywhere in output ---
-st.write("Debug keys:", list(out.keys()))
-st.write("riskSignal keys:", list((out.get("riskSignal") or {}).keys()))
 
-# Search recursively for anything named "drivers" or containing "Lp(a)"
-def _find_paths(obj, needle, path="root"):
-    found = []
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            p = f"{path}.{k}"
-            if needle.lower() in str(k).lower():
-                found.append(p)
-            found += _find_paths(v, needle, p)
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            found += _find_paths(v, needle, f"{path}[{i}]")
-    return found
-
-st.write("Paths containing 'drivers':", _find_paths(out, "drivers"))
-st.write("Paths containing 'lpa':", _find_paths(out, "lpa"))
+    # ---- DEBUG (fixed indentation; collapsed by default) ----
+    with st.expander("Debug: locate drivers/lpa in output (temporary)", expanded=False):
+        st.write("Top-level keys:", list(out.keys()))
+        st.write("riskSignal keys:", list((out.get("riskSignal") or {}).keys()))
+        st.write("Paths containing 'drivers':", _find_paths(out, "drivers"))
+        st.write("Paths containing 'lpa':", _find_paths(out, "lpa"))
+    # --------------------------------------------------------
 
     note_text = render_quick_text(patient, out)
     clinical_html = render_clinical_report(note_text)
@@ -646,11 +648,21 @@ st.write("Paths containing 'lpa':", _find_paths(out, "lpa"))
 
     d1, d2 = st.columns(2)
     with d1:
-        st.download_button("Download clinical text (.txt)", data=note_text.encode("utf-8"),
-                           file_name="levels_note.txt", mime="text/plain", use_container_width=True)
+        st.download_button(
+            "Download clinical text (.txt)",
+            data=note_text.encode("utf-8"),
+            file_name="levels_note.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
     with d2:
-        st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"),
-                           file_name="levels_output.json", mime="application/json", use_container_width=True)
+        st.download_button(
+            "Download JSON",
+            data=json.dumps(out, indent=2).encode("utf-8"),
+            file_name="levels_output.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -724,6 +736,5 @@ st.write("Paths containing 'lpa':", _find_paths(out, "lpa"))
     st.caption(
         f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
     )
-
 
 
