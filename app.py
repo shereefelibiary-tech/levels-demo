@@ -104,16 +104,16 @@ def contains_phi(s: str) -> bool:
     return False
 
 # ============================================================
-# Small parsing helpers for inflammatory + hsCRP from pasted text
+# UI-side parsing helpers (hsCRP + inflammatory flags + diabetes negation)
 # ============================================================
 def parse_hscrp_from_text(txt: str):
     if not txt:
         return None
-    m2 = re.search(r"\b(?:hs\s*crp|hscrp)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", txt, flags=re.I)
-    if not m2:
+    m = re.search(r"\b(?:hs\s*crp|hscrp)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", txt, flags=re.I)
+    if not m:
         return None
     try:
-        return float(m2.group(1))
+        return float(m.group(1))
     except Exception:
         return None
 
@@ -122,8 +122,10 @@ def parse_inflammatory_flags_from_text(txt: str) -> dict:
         return {}
     t = txt.lower()
     flags = {}
+
     def has_yes(term: str) -> bool:
         return bool(re.search(rf"\b{re.escape(term)}\b\s*[:=]?\s*(yes|true|present)\b", t))
+
     for key, term in [
         ("ra", "ra"),
         ("ra", "rheumatoid arthritis"),
@@ -137,6 +139,7 @@ def parse_inflammatory_flags_from_text(txt: str) -> dict:
     ]:
         if has_yes(term):
             flags[key] = True
+
     return flags
 
 def diabetes_negation_guard(txt: str):
@@ -281,7 +284,7 @@ def render_clinical_report(note_text: str) -> str:
     return "\n".join(out)
 
 # ============================================================
-# Debug helpers
+# Debug path finder
 # ============================================================
 def _find_paths(obj, needle: str, path: str = "root"):
     found = []
@@ -297,7 +300,7 @@ def _find_paths(obj, needle: str, path: str = "root"):
     return found
 
 # ============================================================
-# Helpers / options
+# Options
 # ============================================================
 FHX_OPTIONS = [
     "None / Unknown",
@@ -344,6 +347,95 @@ def level_explainer(sub: str):
     if sub == "3C":
         return ("Intermediate pooled-risk phenotype (near-term risk elevated) despite no proven plaque.", ["Treat risk seriously", "Statin default often reasonable", "Confirm BP/lipids", "Consider calcium score if unknown"])
     return ("Prevention zone.", ["Refine with calcium score", "ApoB-guided targets", "Shared decisions"])
+
+# ============================================================
+# ✅ DEFINE apply_parsed_to_session BEFORE UI USE
+# ============================================================
+def apply_parsed_to_session(parsed: dict, raw_txt: str):
+    applied, missing = [], []
+
+    def set_if_present(src_key, state_key, transform=lambda x: x, label=None):
+        nonlocal applied, missing
+        label = label or src_key
+        if parsed.get(src_key) is not None:
+            st.session_state[state_key] = transform(parsed[src_key])
+            applied.append(label)
+        else:
+            missing.append(label)
+
+    set_if_present("age", "age_val", int, "Age")
+    set_if_present("sex", "sex_val", lambda v: v, "Gender")
+    set_if_present("sbp", "sbp_val", int, "Systolic BP")
+
+    set_if_present("tc", "tc_val", int, "Total Cholesterol")
+    set_if_present("hdl", "hdl_val", int, "HDL")
+    set_if_present("ldl", "ldl_val", int, "LDL")
+
+    set_if_present("apob", "apob_val", int, "ApoB")
+    set_if_present("lpa", "lpa_val", lambda v: int(float(v)), "Lp(a)")
+
+    if parsed.get("lpa_unit") is not None:
+        st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
+        applied.append("Lp(a) unit")
+    else:
+        missing.append("Lp(a) unit")
+
+    if parsed.get("a1c") is not None:
+        st.session_state["a1c_val"] = float(parsed["a1c"])
+        applied.append("A1c")
+    else:
+        missing.append("A1c")
+
+    if parsed.get("cac") is not None:
+        st.session_state["cac_known_val"] = "Yes"
+        st.session_state["cac_val"] = int(float(parsed["cac"]))
+        applied.append("Calcium score")
+    else:
+        missing.append("Calcium score")
+
+    if parsed.get("smoker") is not None:
+        st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
+        applied.append("Smoking")
+
+    # Diabetes negation guard
+    dm_guard = diabetes_negation_guard(raw_txt)
+    if dm_guard is False:
+        st.session_state["diabetes_choice_val"] = "No"
+        applied.append("Diabetes(manual) (negation)")
+    elif parsed.get("diabetes") is not None:
+        st.session_state["diabetes_choice_val"] = "Yes" if parsed["diabetes"] else "No"
+        applied.append("Diabetes(manual)")
+    else:
+        missing.append("Diabetes(manual)")
+
+    if parsed.get("bpTreated") is not None:
+        st.session_state["bp_treated_val"] = "Yes" if parsed["bpTreated"] else "No"
+        applied.append("BP meds")
+
+    if parsed.get("africanAmerican") is not None:
+        st.session_state["race_val"] = (
+            "African American" if parsed["africanAmerican"] else "Other (use non-African American coefficients)"
+        )
+        applied.append("Race")
+
+    if parsed.get("ascvd_10y") is not None:
+        st.session_state["ascvd10_val"] = float(parsed["ascvd_10y"])
+        applied.append("ASCVD10y")
+
+    # hsCRP
+    h = parse_hscrp_from_text(raw_txt)
+    if h is not None:
+        st.session_state["hscrp_val"] = float(h)
+        applied.append("hsCRP")
+
+    # inflammatory flags
+    infl = parse_inflammatory_flags_from_text(raw_txt)
+    for k, v in infl.items():
+        st.session_state[f"infl_{k}_val"] = bool(v)
+        applied.append(k.upper())
+
+    missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
+    return applied, missing
 
 # ============================================================
 # Session defaults
@@ -675,7 +767,7 @@ if submitted:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    # Clinical report SECOND (also visible immediately)
+    # Clinical report SECOND
     st.subheader("Clinical report")
     st.markdown(clinical_html, unsafe_allow_html=True)
 
