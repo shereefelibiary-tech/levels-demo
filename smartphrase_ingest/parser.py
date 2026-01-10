@@ -1,246 +1,236 @@
 # smartphrase_ingest/parser.py
+from __future__ import annotations
+
 import re
-from typing import Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple, List
 
 
-def _norm(s: str) -> str:
-    return (s or "").strip()
+# ----------------------------
+# Public result object
+# ----------------------------
+@dataclass
+class ParseReport:
+    extracted: Dict[str, Any]
+    warnings: List[str]
+    conflicts: List[str]
 
 
-def _to_float(s: str) -> Optional[float]:
-    if not s:
-        return None
-    m = re.search(r"-?\d+(?:\.\d+)?", s.replace(",", ""))
-    return float(m.group(0)) if m else None
-
-
-def _to_int(s: str) -> Optional[int]:
-    v = _to_float(s)
-    return int(round(v)) if v is not None else None
-
-
-def _yesno(s: str) -> Optional[bool]:
-    if s is None:
-        return None
-    t = _norm(str(s)).lower()
-    if t.startswith("yes"):
-        return True
-    if t.startswith("no"):
-        return False
-    return None
-
-
-def _line_value(text: str, label_regex: str) -> Optional[str]:
-    """
-    Extracts 'Label: value' lines (case-insensitive, multiline).
-    label_regex should be regex-safe (e.g., r"ApoB", r"Lp\\(a\\)").
-    """
-    pat = re.compile(rf"^\s*{label_regex}\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-    m = pat.search(text or "")
-    return _norm(m.group(1)) if m else None
-
-
-def _find_number_near(text: str, label_patterns) -> Optional[float]:
-    """
-    Scan lines; if a line matches any label pattern, return first numeric on that line.
-    label_patterns: list of compiled regex or strings.
-    """
-    if not text:
-        return None
-    lines = (text or "").splitlines()
-    for ln in lines:
-        for lp in label_patterns:
-            rx = re.compile(lp, re.IGNORECASE) if isinstance(lp, str) else lp
-            if rx.search(ln):
-                v = _to_float(ln)
-                if v is not None:
-                    return v
-    return None
-
-
-def _find_lpa(text: str) -> Tuple[Optional[float], Optional[str]]:
-    """
-    Lp(a) appears as:
-      - "Lp(a): 114 nmol/L"
-      - "Lipoprotein(a) 87.8 mg/dL"
-      - "LPA 120"
-    Return (value, unit) where unit is "nmol/L", "mg/dL", or None.
-    """
-    if not text:
-        return (None, None)
-
-    patterns = [
-        r"^\s*Lp\(a\)\s*:\s*(.+)$",
-        r"^\s*Lipoprotein\s*\(a\)\s*:\s*(.+)$",
-        r"^\s*LPA\s*:\s*(.+)$",
-    ]
-    for p in patterns:
-        m = re.search(p, text, flags=re.IGNORECASE | re.MULTILINE)
-        if not m:
-            continue
-        rhs = _norm(m.group(1))
-        val = _to_float(rhs)
-        unit = None
-        if rhs:
-            if re.search(r"\bnmol\/l\b", rhs, re.IGNORECASE):
-                unit = "nmol/L"
-            elif re.search(r"\bmg\/dl\b", rhs, re.IGNORECASE):
-                unit = "mg/dL"
-        return (val, unit)
-
-    # fallback: any line containing Lp(a) variants
-    val = _find_number_near(text, [r"\bLp\(a\)\b", r"\bLipoprotein\s*\(a\)\b", r"\bLPA\b"])
-    if val is None:
-        return (None, None)
-
-    # try to infer unit by nearby tokens in that line
-    unit = None
-    for ln in (text or "").splitlines():
-        if re.search(r"\bLp\(a\)\b|\bLipoprotein\s*\(a\)\b|\bLPA\b", ln, re.IGNORECASE):
-            if re.search(r"\bnmol\/l\b", ln, re.IGNORECASE):
-                unit = "nmol/L"
-            elif re.search(r"\bmg\/dl\b", ln, re.IGNORECASE):
-                unit = "mg/dL"
-            break
-
-    return (val, unit)
-
-
-def _find_cac(text: str) -> Optional[int]:
-    """
-    CAC appears as:
-      - "Coronary artery calcium (CAC) score: 0"
-      - "CAC score: 12"
-      - "Agatston: 43"
-    """
-    if not text:
+# ----------------------------
+# Small helpers
+# ----------------------------
+def _to_float(x: str) -> Optional[float]:
+    try:
+        return float(x)
+    except Exception:
         return None
 
-    # Direct label:value lines
-    v = _line_value(text, r"Coronary artery calcium\s*\(CAC\)\s*score")
-    if v:
-        return _to_int(v)
 
-    v = _line_value(text, r"CAC\s*score")
-    if v:
-        return _to_int(v)
-
-    # Line contains "Agatston"
-    n = _find_number_near(text, [r"\bAgatston\b", r"\bCAC\b.*\bscore\b"])
-    return int(round(n)) if n is not None else None
+def _first_float(pattern: str, text: str) -> Optional[float]:
+    m = re.search(pattern, text, flags=re.I)
+    if not m:
+        return None
+    return _to_float(m.group(1))
 
 
-def parse_smartphrase(text: str) -> Dict[str, Any]:
+def _first_int(pattern: str, text: str) -> Optional[int]:
+    m = re.search(pattern, text, flags=re.I)
+    if not m:
+        return None
+    try:
+        return int(float(m.group(1)))
+    except Exception:
+        return None
+
+
+# ----------------------------
+# Extractors
+# ----------------------------
+def extract_sex(raw: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Best-effort extraction from pasted Epic text (SmartPhrase output, risk blocks, RESUFAST).
-    Returns normalized keys used by the Streamlit app for auto-fill.
-
-    Keys:
-      age, sex, africanAmerican, smoker, diabetes, bpTreated, sbp
-      tc, hdl, ldl, apob, lpa, lpa_unit, a1c, cac
-      ascvd_10y
+    Returns (sex, warning)
+      sex: "M" | "F" | None
+      warning: None | "Sex not detected" | "Sex conflict ..."
     """
-    t = text or ""
-    out: Dict[str, Any] = {}
+    if not raw or not raw.strip():
+        return None, "Sex not detected (empty text)"
 
-    # ---------- ASCVD risk block ----------
-    m = re.search(r"10-year ASCVD risk score.*?is:\s*([0-9]+(?:\.[0-9]+)?)\s*%", t, re.IGNORECASE | re.DOTALL)
-    if m:
-        out["ascvd_10y"] = float(m.group(1))
+    t = raw.lower()
+    hits: list[str] = []
 
-    age = _line_value(t, r"Age")
-    if age:
-        out["age"] = _to_int(age)
+    # 1) Explicit: Sex: Male, Gender=f
+    explicit = re.findall(r"\b(sex|gender)\s*[:=]\s*(male|female|m|f|man|woman)\b", t)
+    for _, val in explicit:
+        hits.append(val)
 
-    sex = _line_value(t, r"Clinically relevant sex") or _line_value(t, r"Sex")
-    if sex:
-        s = _norm(sex).lower()
-        if "female" in s:
-            out["sex"] = "F"
-        elif "male" in s:
-            out["sex"] = "M"
+    # 2) Compressed: 57M / 63F and M57
+    hits += re.findall(r"\b\d{1,3}\s*([mf])\b", t)
+    hits += re.findall(r"\b([mf])\s*\d{1,3}\b", t)
 
-    aa = _line_value(t, r"Is Non-Hispanic African American")
-    if aa is not None:
-        out["africanAmerican"] = _yesno(aa)
+    # 3) Free text words
+    if re.search(r"\b(male|man)\b", t):
+        hits.append("male")
+    if re.search(r"\b(female|woman)\b", t):
+        hits.append("female")
 
-    dm = _line_value(t, r"Diabetic") or _line_value(t, r"Diabetes mellitus")
-    if dm is not None:
-        out["diabetes"] = _yesno(dm)
+    norm: list[str] = []
+    for h in hits:
+        if h in ("m", "male", "man"):
+            norm.append("M")
+        elif h in ("f", "female", "woman"):
+            norm.append("F")
 
-    sm = _line_value(t, r"Tobacco smoker") or _line_value(t, r"Smoking status")
-    # Smoking status might be "Never", "Current", etc. Keep boolean if clearly yes/no; else omit.
-    sm_bool = _yesno(sm) if sm is not None else None
-    if sm_bool is not None:
-        out["smoker"] = sm_bool
-    else:
-        if sm:
-            s = _norm(sm).lower()
-            if "current" in s:
-                out["smoker"] = True
-            elif "never" in s or "no" == s:
-                out["smoker"] = False
+    if not norm:
+        return None, "Sex not detected"
+    if "M" in norm and "F" in norm:
+        return None, "Sex conflict detected (both male and female found)"
 
-    sbp = _line_value(t, r"Systolic Blood Pressure") or _line_value(t, r"Blood pressure\s*\(most recent\)")
-    if sbp:
-        # if bp is "144/82", take systolic
-        m2 = re.search(r"(\d{2,3})\s*/\s*(\d{2,3})", sbp)
-        if m2:
-            out["sbp"] = int(m2.group(1))
+    return ("M" if "M" in norm else "F"), None
+
+
+def extract_age(raw: str) -> Tuple[Optional[int], Optional[str]]:
+    if not raw or not raw.strip():
+        return None, "Age not detected (empty text)"
+
+    t = raw
+
+    # Age: 57
+    age = _first_int(r"\bage\s*[:=]\s*(\d{1,3})\b", t)
+    # 57 yo / 57 y/o / 57 yrs
+    if age is None:
+        age = _first_int(r"\b(\d{1,3})\s*(yo|y/o|yr|yrs|year|years)\b", t)
+    # 57-year-old (handles en/em dash)
+    if age is None:
+        t2 = t.replace("–", "-").replace("—", "-")
+        age = _first_int(r"\b(\d{1,3})\s*-\s*year\s*-\s*old\b", t2)
+    if age is None:
+        t2 = t.replace("–", "-").replace("—", "-")
+        age = _first_int(r"\b(\d{1,3})\s*-\s*year\s*old\b", t2)
+    # 57M / 63F
+    if age is None:
+        age = _first_int(r"\b(\d{1,3})\s*(m|f)\b", t)
+
+    if age is None:
+        return None, "Age not detected"
+    if age < 18 or age > 100:
+        return age, "Age looks unusual — please verify"
+    return age, None
+
+
+def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
+    m = re.search(r"\b(?:bp\s*)?(\d{2,3})\s*/\s*(\d{2,3})\b", raw, flags=re.I)
+    if not m:
+        return None
+    try:
+        return int(m.group(1)), int(m.group(2))
+    except Exception:
+        return None
+
+
+def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
+    t = raw.lower()
+
+    diabetes: Optional[bool] = None
+    if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
+        diabetes = False
+    if re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
+        diabetes = True
+
+    smoker: Optional[bool] = None
+    former_smoker: Optional[bool] = None
+
+    if re.search(r"\b(never smoker|non-smoker|nonsmoker|never smoked)\b", t):
+        smoker = False
+        former_smoker = False
+    if re.search(r"\b(former smoker|ex-smoker|quit smoking)\b", t):
+        smoker = False
+        former_smoker = True
+    if re.search(r"\b(current smoker|smoker|smokes)\b", t):
+        if not re.search(r"\b(non-smoker|nonsmoker)\b", t):
+            smoker = True
+            former_smoker = False
+
+    return {"diabetes": diabetes, "smoker": smoker, "former_smoker": former_smoker}
+
+
+def extract_labs(raw: str) -> Dict[str, Optional[float]]:
+    t = raw
+    return {
+        "tc": _first_float(r"\b(?:total\s*cholesterol|total\s*chol|tc|cholesterol|chol)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
+        "ldl": _first_float(r"\bldl\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
+        "hdl": _first_float(r"\bhdl\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
+        "tg": _first_float(r"\b(?:triglycerides|trigs|tgs|tg)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
+        "apob": _first_float(r"\b(?:apo\s*b|apob)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
+        "lpa": _first_float(r"\b(?:lp\(a\)|lpa|lipoprotein\s*\(a\))\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t),
+        "a1c": _first_float(r"\b(?:a1c|hba1c|hb\s*a1c)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t),
+        "ascvd": _first_float(r"\bascvd\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t),
+        "cac": _first_float(r"\b(?:cac|coronary\s*artery\s*calcium|calcium\s*score)\s*(?:score)?\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t),
+    }
+
+
+# ----------------------------
+# Main parse functions
+# ----------------------------
+def parse_ascvd_block_with_report(raw: str) -> ParseReport:
+    """
+    Preferred API: returns extracted fields + warnings/conflicts.
+    """
+    extracted: Dict[str, Any] = {}
+    warnings: list[str] = []
+    conflicts: list[str] = []
+
+    sex, sex_warn = extract_sex(raw)
+    age, age_warn = extract_age(raw)
+
+    extracted["sex"] = sex
+    extracted["age"] = age
+
+    if sex_warn:
+        if "conflict" in sex_warn.lower():
+            conflicts.append(sex_warn)
         else:
-            out["sbp"] = _to_int(sbp)
+            warnings.append(sex_warn)
+    if age_warn:
+        warnings.append(age_warn)
 
-    bpt = _line_value(t, r"Is BP treated") or _line_value(t, r"On BP meds\?")
-    if bpt is not None:
-        out["bpTreated"] = _yesno(bpt)
-
-    # ---------- Lipids / labs ----------
-    tc = _line_value(t, r"Total Cholesterol") or _line_value(t, r"Total cholesterol")
-    if tc:
-        out["tc"] = _to_int(tc)
+    bp = extract_bp(raw)
+    if bp:
+        extracted["sbp"], extracted["dbp"] = bp
     else:
-        n = _find_number_near(t, [r"\bTotal\s+Cholesterol\b", r"\bCholesterol,\s*Total\b", r"\bCHOL\b"])
-        if n is not None:
-            out["tc"] = int(round(n))
+        extracted["sbp"], extracted["dbp"] = None, None
+        warnings.append("BP not detected")
 
-    hdl = _line_value(t, r"HDL Cholesterol") or _line_value(t, r"HDL cholesterol")
-    if hdl:
-        out["hdl"] = _to_int(hdl)
-    else:
-        n = _find_number_near(t, [r"\bHDL\b"])
-        if n is not None:
-            out["hdl"] = int(round(n))
+    flags = extract_bool_flags(raw)
+    extracted.update(flags)
 
-    # LDL is often "LDL Cholesterol", "LDL Calculated", "LDL-C"
-    ldl = _line_value(t, r"LDL(?:-C)?(?:\s+Cholesterol|\s+Calculated|\s+Calc)?") or _line_value(t, r"LDL-C")
-    if ldl:
-        out["ldl"] = _to_int(ldl)
-    else:
-        n = _find_number_near(t, [r"\bLDL\b", r"\bLDL-C\b", r"\bLDL\s+Calc\b", r"\bLDL\s+Calculated\b"])
-        if n is not None:
-            out["ldl"] = int(round(n))
+    labs = extract_labs(raw)
+    extracted.update(labs)
 
-    a1c = _line_value(t, r"A1c") or _line_value(t, r"HbA1c") or _line_value(t, r"HbA1C")
-    if a1c:
-        out["a1c"] = _to_float(a1c)
+    # Diabetes override: A1c >= 6.5 forces diabetes = True
+    if labs.get("a1c") is not None and labs["a1c"] >= 6.5:
+        if extracted.get("diabetes") is False:
+            conflicts.append("Diabetes conflict: text says no diabetes, but A1c ≥ 6.5%")
+        extracted["diabetes"] = True
 
-    apob = _line_value(t, r"ApoB") or _line_value(t, r"APOB")
-    if apob:
-        out["apob"] = _to_int(apob)
-    else:
-        n = _find_number_near(t, [r"\bApoB\b", r"\bAPOB\b"])
-        if n is not None:
-            out["apob"] = int(round(n))
+    # Missing-data warnings for key fields
+    for key, label in [
+        ("ldl", "LDL"),
+        ("apob", "ApoB"),
+        ("lpa", "Lp(a)"),
+        ("cac", "CAC"),
+        ("ascvd", "ASCVD 10-year risk"),
+        ("a1c", "A1c"),
+    ]:
+        if extracted.get(key) is None:
+            warnings.append(f"{label} not detected")
 
-    lpa_val, lpa_unit = _find_lpa(t)
-    if lpa_val is not None:
-        out["lpa"] = int(round(lpa_val))
-    if lpa_unit:
-        out["lpa_unit"] = lpa_unit
+    return ParseReport(extracted=extracted, warnings=warnings, conflicts=conflicts)
 
-    cac = _find_cac(t)
-    if cac is not None:
-        out["cac"] = cac
 
-    return out
+def parse_ascvd_block(raw: str) -> Dict[str, Any]:
+    """
+    Backward-compatible API used by your app previously.
+    Returns extracted dict only (no warnings/conflicts).
+    """
+    return parse_ascvd_block_with_report(raw).extracted
 
