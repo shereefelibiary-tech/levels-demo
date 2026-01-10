@@ -153,6 +153,15 @@ def render_clinical_report(note_text: str) -> str:
         if line.startswith("Drivers:"):
             open_section("Primary drivers")
             items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
+
+            # ===== PATCH: remove any "Level ..." artifacts from drivers =====
+            items = [
+                it for it in items
+                if not re.match(r"^\s*level\b", it, flags=re.IGNORECASE)
+                and not re.match(r"^\s*level\s*[:=]\s*\d", it, flags=re.IGNORECASE)
+            ]
+            # ===============================================================
+
             out.append("<ul>")
             for it in items:
                 out.append(f"<li>{it}</li>")
@@ -695,3 +704,5 @@ if submitted:
     st.caption(
         f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
     )
+
+
