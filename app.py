@@ -36,7 +36,6 @@ html, body, [class*="css"] {
   padding: 18px 20px;
 }
 .report h2 { font-size: 1.10rem; font-weight: 900; margin: 0 0 10px 0; }
-
 .section { margin-top: 12px; }
 .section-title {
   font-variant-caps: all-small-caps;
@@ -51,7 +50,6 @@ html, body, [class*="css"] {
 .section p { margin: 6px 0; line-height: 1.45; }
 .section ul { margin: 6px 0 6px 18px; }
 .section li { margin: 4px 0; }
-
 .muted { color: #6b7280; font-size: 0.9rem; }
 .small-help { color: rgba(31,41,55,0.70); font-size: 0.88rem; }
 
@@ -89,7 +87,30 @@ st.markdown(
 st.info("De-identified use only. Do not enter patient identifiers.")
 
 # ============================================================
-# Reset + clear callbacks (MUST be callbacks)
+# Safe session-state helpers (prevents widget bound crashes)
+# ============================================================
+def clamp_int(v: Any, lo: int, hi: int, default: int) -> int:
+    try:
+        x = int(round(float(v)))
+    except:
+        return default
+    return max(lo, min(hi, x))
+
+def clamp_float(v: Any, lo: float, hi: float, default: float) -> float:
+    try:
+        x = float(v)
+    except:
+        return default
+    return max(lo, min(hi, x))
+
+def get_state_int(key: str, lo: int, hi: int, default: int) -> int:
+    return clamp_int(st.session_state.get(key, default), lo, hi, default)
+
+def get_state_float(key: str, lo: float, hi: float, default: float) -> float:
+    return clamp_float(st.session_state.get(key, default), lo, hi, default)
+
+# ============================================================
+# Reset + clear callbacks (callbacks only)
 # ============================================================
 def reset_form_state():
     for k in list(st.session_state.keys()):
@@ -99,7 +120,6 @@ def reset_form_state():
     st.session_state["_reset_done"] = True
 
 def clear_pasted_text():
-    # Safe because runs before widget is recreated on rerun
     st.session_state["smartphrase_raw"] = ""
     st.session_state["_cleared_done"] = True
 
@@ -188,8 +208,7 @@ def regex_extract_smartphrase(text: str) -> Dict[str, Any]:
     m = _rx_first([r"\bLp\(a\)\b[:\s]+([\d.]+)\s*(nmol/L|mg/dL)?", r"\bLPA\b[:\s]+([\d.]+)\s*(nmol/L|mg/dL)?"], t)
     if m:
         out["lpa"] = _to_int(m.group(1))
-        if m.group(2):
-            out["lpa_unit"] = m.group(2)
+        if m.group(2): out["lpa_unit"] = m.group(2)
 
     m = _rx_first([r"\bLPA\s*UNIT[:\s]+(nmol/L|mg/dL)\b"], t)
     if m: out["lpa_unit"] = m.group(1)
@@ -213,7 +232,7 @@ def merged_parse(text: str) -> Dict[str, Any]:
     return merged
 
 # ============================================================
-# Apply parsed values to session_state
+# Apply parsed values to session_state (with CLAMPING)
 # ============================================================
 TARGET_PARSE_FIELDS = [
     ("age", "Age"),
@@ -243,36 +262,40 @@ def apply_parsed_to_session(parsed: Dict[str, Any]):
         else:
             missing.append(label)
 
-    set_if_present("age", "age_val", lambda v: int(float(v)), "Age")
+    # Clamp to safe UI ranges so widgets never crash
+    set_if_present("age", "age_val", lambda v: clamp_int(v, 0, 120, 52), "Age")
     set_if_present("sex", "sex_val", lambda v: str(v).strip().upper()[0], "Sex")
-    set_if_present("sbp", "sbp_val", lambda v: int(float(v)), "Systolic BP")
-    set_if_present("tc", "tc_val", lambda v: int(float(v)), "Total Cholesterol")
-    set_if_present("hdl", "hdl_val", lambda v: int(float(v)), "HDL")
-    set_if_present("ldl", "ldl_val", lambda v: int(float(v)), "LDL")
-    set_if_present("apob", "apob_val", lambda v: int(float(v)), "ApoB")
-    set_if_present("lpa", "lpa_val", lambda v: int(float(v)), "Lp(a)")
+    set_if_present("sbp", "sbp_val", lambda v: clamp_int(v, 60, 250, 130), "Systolic BP")
+
+    set_if_present("tc", "tc_val", lambda v: clamp_int(v, 0, 500, 200), "Total Cholesterol")
+    set_if_present("hdl", "hdl_val", lambda v: clamp_int(v, 0, 300, 45), "HDL")
+    set_if_present("ldl", "ldl_val", lambda v: clamp_int(v, 0, 400, 120), "LDL")
+
+    set_if_present("apob", "apob_val", lambda v: clamp_int(v, 0, 300, 100), "ApoB")
+    set_if_present("lpa", "lpa_val", lambda v: clamp_int(v, 0, 1000, 0), "Lp(a)")
 
     if parsed.get("lpa_unit") is not None:
-        st.session_state["lpa_unit_val"] = str(parsed["lpa_unit"])
+        unit = str(parsed["lpa_unit"])
+        st.session_state["lpa_unit_val"] = "nmol/L" if "nmol" in unit else "mg/dL"
         applied.append("Lp(a) unit")
     else:
         missing.append("Lp(a) unit")
 
     if parsed.get("a1c") is not None:
-        st.session_state["a1c_val"] = float(parsed["a1c"])
+        st.session_state["a1c_val"] = clamp_float(parsed["a1c"], 0.0, 15.0, 5.0)
         applied.append("A1c")
     else:
         missing.append("A1c")
 
     if parsed.get("hscrp") is not None:
-        st.session_state["hscrp_val"] = float(parsed["hscrp"])
+        st.session_state["hscrp_val"] = clamp_float(parsed["hscrp"], 0.0, 50.0, 0.0)
         applied.append("hsCRP")
     else:
         missing.append("hsCRP")
 
     if parsed.get("cac") is not None:
         st.session_state["cac_known_val"] = "Yes"
-        st.session_state["cac_val"] = int(float(parsed["cac"]))
+        st.session_state["cac_val"] = clamp_int(parsed["cac"], 0, 5000, 0)  # 0 allowed
         applied.append("Calcium Score")
     else:
         missing.append("Calcium Score")
@@ -406,14 +429,14 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium 
         st.markdown(f"- **{label}** {badge}{val}", unsafe_allow_html=True)
 
 # ============================================================
-# Main form
+# Main form (submit button is present; crash-proof defaults)
 # ============================================================
 with st.form("levels_form"):
     st.subheader("Patient context")
 
     a1, a2, a3 = st.columns(3)
     with a1:
-        age = st.number_input("Age (years)", 0, 120, value=int(st.session_state.get("age_val", 52)), step=1, key="age_val")
+        age = st.number_input("Age (years)", 0, 120, value=get_state_int("age_val", 0, 120, 52), step=1, key="age_val")
         sex_default = st.session_state.get("sex_val", "F")
         sex_index = 0 if str(sex_default).upper() == "F" else 1
         sex = st.radio("Sex", ["F", "M"], horizontal=True, index=sex_index, key="sex_val")
@@ -441,7 +464,7 @@ with st.form("levels_form"):
 
     b1, b2, b3 = st.columns(3)
     with b1:
-        sbp = st.number_input("Systolic BP (mmHg)", 60, 250, value=int(st.session_state.get("sbp_val", 130)), step=1, key="sbp_val")
+        sbp = st.number_input("Systolic BP (mmHg)", 60, 250, value=get_state_int("sbp_val", 60, 250, 130), step=1, key="sbp_val")
         bp_default = st.session_state.get("bp_treated_val", "No")
         bp_index = 1 if bp_default == "Yes" else 0
         bp_treated = st.radio("On BP meds?", ["No", "Yes"], horizontal=True, index=bp_index, key="bp_treated_val")
@@ -456,7 +479,7 @@ with st.form("levels_form"):
         diabetes_choice = st.radio("Diabetes (manual)", ["No", "Yes"], horizontal=True, index=dm_index, key="diabetes_choice_val")
 
     with b3:
-        a1c = st.number_input("A1c (%)", 0.0, 15.0, float(st.session_state.get("a1c_val", 5.0)), step=0.1, format="%.1f", key="a1c_val")
+        a1c = st.number_input("A1c (%)", 0.0, 15.0, value=get_state_float("a1c_val", 0.0, 15.0, 5.0), step=0.1, format="%.1f", key="a1c_val")
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
@@ -465,17 +488,18 @@ with st.form("levels_form"):
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, value=int(st.session_state.get("tc_val", 210)), step=1, key="tc_val")
-        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, value=int(st.session_state.get("ldl_val", 148)), step=1, key="ldl_val")
-        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 150, value=int(st.session_state.get("hdl_val", 45)), step=1, key="hdl_val")
+        tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, value=get_state_int("tc_val", 0, 500, 210), step=1, key="tc_val")
+        ldl = st.number_input("LDL-C (mg/dL)", 0, 400, value=get_state_int("ldl_val", 0, 400, 148), step=1, key="ldl_val")
+        # ✅ HDL max widened to 300 + clamped defaults
+        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 300, value=get_state_int("hdl_val", 0, 300, 45), step=1, key="hdl_val")
     with c2:
-        apob = st.number_input("ApoB (mg/dL)", 0, 300, value=int(st.session_state.get("apob_val", 112)), step=1, key="apob_val")
-        lpa = st.number_input("Lp(a) value", 0, 1000, value=int(st.session_state.get("lpa_val", 165)), step=1, key="lpa_val")
+        apob = st.number_input("ApoB (mg/dL)", 0, 300, value=get_state_int("apob_val", 0, 300, 112), step=1, key="apob_val")
+        lpa = st.number_input("Lp(a) value", 0, 1000, value=get_state_int("lpa_val", 0, 1000, 0), step=1, key="lpa_val")
         unit_default = st.session_state.get("lpa_unit_val", "nmol/L")
         unit_index = 0 if str(unit_default) == "nmol/L" else 1
         lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, index=unit_index, key="lpa_unit_val")
     with c3:
-        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, float(st.session_state.get("hscrp_val", 0.0)), step=0.1, format="%.1f", key="hscrp_val")
+        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, value=get_state_float("hscrp_val", 0.0, 50.0, 0.0), step=0.1, format="%.1f", key="hscrp_val")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Imaging — Calcium Score")
@@ -487,7 +511,7 @@ with st.form("levels_form"):
                              index=0 if cac_default == "Yes" else 1, key="cac_known_val")
     with d2:
         cac = st.number_input("Calcium Score (Agatston)", 0, 5000,
-                              value=int(st.session_state.get("cac_val", 0)),
+                              value=get_state_int("cac_val", 0, 5000, 0),
                               step=1, key="cac_val") if cac_known == "Yes" else None
 
     with st.expander("Bleeding risk (for aspirin) — optional"):
@@ -503,7 +527,7 @@ with st.form("levels_form"):
             bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
 
     show_json = st.checkbox("Show JSON (debug)", value=True)
-    submitted = st.form_submit_button("Run")
+    submitted = st.form_submit_button("Run")  # ✅ submit button exists
 
 # ============================================================
 # Run + output
@@ -597,5 +621,4 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
-
 
