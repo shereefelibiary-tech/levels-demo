@@ -1,22 +1,4 @@
 # app.py
-# LEVELS UI (Streamlit) — restores your prior UI and fixes the bugs you listed.
-#
-# This version fixes the Streamlit Session State error by:
-# - For any widget with a `key=...`, we DO NOT pass `value=` or `index=`.
-# - We control defaults ONLY via st.session_state.setdefault(...).
-#
-# Preserves everything you asked for up to now:
-# - Same wide layout + same UI sections + same styling + PHI guardrails
-# - SmartPhrase ingest (paste → parse → apply) with explicit coverage flags
-# - Added: A1c parsed + applied
-# - Added: Clear auto-filled fields button
-# - Defaults now mean "no value yet" (numeric fields default to 0 / 0.0 and are treated as empty)
-# - Output: Clinical report is primary; others moved into expanders
-# - Terminology: Sex → Gender, Black → African American (UI labels)
-# - HDL max widened to avoid StreamlitValueAboveMaxError
-#
-# NOTE: Streamlit number_input cannot be blank, so 0 is used as empty placeholder.
-
 import json
 import re
 import streamlit as st
@@ -25,133 +7,50 @@ from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
 
 # ============================================================
-# Page + “clinical report” styling
+# Page + styling
 # ============================================================
 st.set_page_config(page_title="LEVELS", layout="wide")
 
 st.markdown(
     """
 <style>
-html, body, [class*="css"] {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
-  color: #1f2937;
-}
+html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif; color: #1f2937; }
 
-.header-card {
-  background: #ffffff;
-  border: 1px solid rgba(31,41,55,0.12);
-  border-radius: 14px;
-  padding: 16px 18px;
-  margin-bottom: 10px;
-}
-.header-title {
-  font-size: 1.15rem;
-  font-weight: 800;
-  margin: 0 0 4px 0;
-}
-.header-sub {
-  color: rgba(31,41,55,0.60);
-  font-size: 0.9rem;
-  margin: 0;
-}
+.header-card { background:#fff; border:1px solid rgba(31,41,55,0.12); border-radius:14px; padding:16px 18px; margin-bottom:10px; }
+.header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
+.header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
+.hr { margin:10px 0 14px 0; border-top:1px solid rgba(31,41,55,0.12); }
 
-.hr {
-  margin: 10px 0 14px 0;
-  border-top: 1px solid rgba(31,41,55,0.12);
-}
+.report { background:#fff; border:1px solid rgba(31,41,55,0.12); border-radius:14px; padding:18px 20px; }
+.report h2 { font-size:1.15rem; font-weight:800; margin:0 0 10px 0; }
 
-.report {
-  background: #ffffff;
-  border: 1px solid rgba(31,41,55,0.12);
-  border-radius: 14px;
-  padding: 18px 20px;
-}
+.section { margin-top:14px; }
+.section-title { font-variant-caps:all-small-caps; letter-spacing:0.08em; font-weight:800; font-size:0.85rem; color:#4b5563; margin-bottom:6px; border-bottom:1px solid rgba(31,41,55,0.10); padding-bottom:2px; }
+.section p { margin:6px 0; line-height:1.45; }
+.section ul { margin:6px 0 6px 18px; }
+.section li { margin:4px 0; }
 
-.report h2 {
-  font-size: 1.15rem;
-  font-weight: 800;
-  margin: 0 0 10px 0;
-}
+.muted { color:#6b7280; font-size:0.9rem; }
+.small-help { color: rgba(31,41,55,0.70); font-size:0.88rem; }
 
-.section { margin-top: 14px; }
-.section-title {
-  font-variant-caps: all-small-caps;
-  letter-spacing: 0.08em;
-  font-weight: 800;
-  font-size: 0.85rem;
-  color: #4b5563;
-  margin-bottom: 6px;
-  border-bottom: 1px solid rgba(31,41,55,0.10);
-  padding-bottom: 2px;
-}
+.kv { display:flex; gap:10px; flex-wrap:wrap; border:1px solid rgba(31,41,55,0.10); background:#fbfbfb; border-radius:12px; padding:10px 12px; margin-top:10px; }
+.kv div { font-size:0.9rem; }
+.kv strong { font-weight:800; }
 
-.section p { margin: 6px 0; line-height: 1.45; }
-.section ul { margin: 6px 0 6px 18px; }
-.section li { margin: 4px 0; }
-
-.muted { color: #6b7280; font-size: 0.9rem; }
-.small-help { color: rgba(31,41,55,0.70); font-size: 0.88rem; }
-
-.kv {
-  display:flex; gap:10px; flex-wrap:wrap;
-  border: 1px solid rgba(31,41,55,0.10);
-  background:#fbfbfb;
-  border-radius:12px;
-  padding:10px 12px;
-  margin-top:10px;
-}
-.kv div { font-size: 0.9rem; }
-.kv strong { font-weight: 800; }
-
-.badge {
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  border:1px solid rgba(31,41,55,0.15);
-  background:#fff;
-  font-size:0.82rem;
-  margin-left:6px;
-}
+.badge { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid rgba(31,41,55,0.15); background:#fff; font-size:0.82rem; margin-left:6px; }
 .ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
-.level-card {
-  border: 1px solid rgba(31,41,55,0.10);
-  border-radius: 12px;
-  padding: 12px 12px;
-  background: rgba(31,41,55,0.03);
-  margin-top: 10px;
-}
-.level-card h3 {
-  font-size: 0.95rem;
-  margin: 0 0 6px 0;
-  font-weight: 800;
-}
-.pill {
-  display:inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border:1px solid rgba(31,41,55,0.16);
-  background:#fff;
-  font-size:0.80rem;
-  font-weight:800;
-}
+.level-card { border:1px solid rgba(31,41,55,0.10); border-radius:12px; padding:12px; background: rgba(31,41,55,0.03); margin-top:10px; }
+.level-card h3 { font-size:0.95rem; margin:0 0 6px 0; font-weight:800; }
+
+.pill { display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid rgba(31,41,55,0.16); background:#fff; font-size:0.80rem; font-weight:800; }
 .pill-green { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .pill-yellow { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 .pill-red { border-color: rgba(239,68,68,0.28); background: rgba(239,68,68,0.09); }
 
-.next-row {
-  display:flex; gap:8px; flex-wrap:wrap;
-  margin-top: 8px;
-}
-.next-chip {
-  display:inline-block;
-  padding: 6px 10px;
-  border-radius: 10px;
-  border:1px solid rgba(31,41,55,0.14);
-  background:#fff;
-  font-size:0.86rem;
-}
+.next-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.next-chip { display:inline-block; padding:6px 10px; border-radius:10px; border:1px solid rgba(31,41,55,0.14); background:#fff; font-size:0.86rem; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -173,12 +72,12 @@ st.info("De-identified use only. Do not enter patient identifiers.")
 # Guardrails
 # ============================================================
 PHI_PATTERNS = [
-    r"\b\d{3}-\d{2}-\d{4}\b",              # SSN-like
-    r"\b\d{2}/\d{2}/\d{4}\b",              # date
-    r"\b\d{4}-\d{2}-\d{2}\b",              # ISO date
+    r"\b\d{3}-\d{2}-\d{4}\b",
+    r"\b\d{2}/\d{2}/\d{4}\b",
+    r"\b\d{4}-\d{2}-\d{2}\b",
     r"\bMRN\b|\bMedical Record\b",
-    r"@",                                  # email-ish
-    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",  # phone
+    r"@",
+    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
 ]
 
 def contains_phi(s: str) -> bool:
@@ -190,24 +89,17 @@ def contains_phi(s: str) -> bool:
     return False
 
 # ============================================================
-# Clinical report renderer (mg/dL-safe Next split)
+# Clinical report renderer
 # ============================================================
 def render_clinical_report(note_text: str) -> str:
-    """
-    Converts engine raw text into a polished HTML report.
-    IMPORTANT: Next-steps split uses ' / ' (space-slash-space), so mg/dL is never broken.
-    """
     lines = [ln.rstrip() for ln in (note_text or "").splitlines()]
-
-    out = []
-    out.append('<div class="report">')
-
+    out = ['<div class="report">']
     title = next((ln for ln in lines if ln.strip()), "LEVELS™ Output")
     out.append(f"<h2>{title}</h2>")
 
-    def open_section(title_):
+    def open_section(t):
         out.append('<div class="section">')
-        out.append(f'<div class="section-title">{title_}</div>')
+        out.append(f'<div class="section-title">{t}</div>')
 
     def close_section():
         out.append("</div>")
@@ -216,7 +108,6 @@ def render_clinical_report(note_text: str) -> str:
     while i < len(lines):
         line = lines[i].strip()
         i += 1
-
         if not line or line == title:
             continue
 
@@ -297,13 +188,11 @@ def render_clinical_report(note_text: str) -> str:
         if line.startswith("Next:"):
             open_section("Next steps")
             payload = line.split(":", 1)[1].strip()
-            if " / " in payload:
-                steps = [x.strip() for x in payload.split(" / ") if x.strip()]
-            else:
-                steps = [payload] if payload else []
+            steps = [x.strip() for x in payload.split(" / ")] if " / " in payload else ([payload] if payload else [])
             out.append("<ul>")
             for s in steps:
-                out.append(f"<li>{s}</li>")
+                if s:
+                    out.append(f"<li>{s}</li>")
             out.append("</ul>")
             close_section()
             continue
@@ -355,12 +244,7 @@ TARGET_PARSE_FIELDS = [
 ]
 
 def apply_parsed_to_session(parsed: dict):
-    """
-    Applies parsed values into Streamlit session_state keys used by the form widgets.
-    Returns (applied_list, missing_list) for explicit flagging.
-    """
-    applied = []
-    missing = []
+    applied, missing = [], []
 
     def set_if_present(src_key, state_key, transform=lambda x: x, label=None):
         nonlocal applied, missing
@@ -371,16 +255,16 @@ def apply_parsed_to_session(parsed: dict):
         else:
             missing.append(label)
 
-    set_if_present("age", "age_val", lambda v: int(v), "Age")
+    set_if_present("age", "age_val", int, "Age")
     set_if_present("sex", "sex_val", lambda v: v, "Gender")
-    set_if_present("sbp", "sbp_val", lambda v: int(v), "Systolic BP")
+    set_if_present("sbp", "sbp_val", int, "Systolic BP")
 
-    set_if_present("tc", "tc_val", lambda v: int(v), "Total Cholesterol")
-    set_if_present("hdl", "hdl_val", lambda v: int(v), "HDL")
-    set_if_present("ldl", "ldl_val", lambda v: int(v), "LDL")
+    set_if_present("tc", "tc_val", int, "Total Cholesterol")
+    set_if_present("hdl", "hdl_val", int, "HDL")
+    set_if_present("ldl", "ldl_val", int, "LDL")
 
-    set_if_present("apob", "apob_val", lambda v: int(v), "ApoB")
-    set_if_present("lpa", "lpa_val", lambda v: int(v), "Lp(a)")
+    set_if_present("apob", "apob_val", int, "ApoB")
+    set_if_present("lpa", "lpa_val", lambda v: int(float(v)), "Lp(a)")
 
     if parsed.get("lpa_unit") is not None:
         st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
@@ -396,7 +280,7 @@ def apply_parsed_to_session(parsed: dict):
 
     if parsed.get("cac") is not None:
         st.session_state["cac_known_val"] = "Yes"
-        st.session_state["cac_val"] = int(parsed["cac"])
+        st.session_state["cac_val"] = int(float(parsed["cac"]))
         applied.append("CAC")
     else:
         missing.append("CAC")
@@ -429,30 +313,24 @@ def apply_parsed_to_session(parsed: dict):
 def level_pill_class(level: int) -> str:
     if level <= 0:
         return "pill pill-green"
-    if level == 1 or level == 2:
+    if level in (1, 2):
         return "pill pill-yellow"
     return "pill pill-red"
 
 def level2_explainer(sub: str):
     if sub == "2A":
-        return (
-            "Biology is drifting (lipids/glycemia/metabolic), but no proof of plaque yet.",
-            ["Confirm & trend labs", "Lifestyle sprint 8–12 wks", "Shared statin decision", "Consider CAC if unknown"],
-        )
+        return ("Biology is drifting (lipids/glycemia/metabolic), but no proof of plaque yet.",
+                ["Confirm & trend labs", "Lifestyle sprint 8–12 wks", "Shared statin decision", "Consider CAC if unknown"])
     if sub == "2B":
-        return (
-            "Risk enhancers (Lp(a)/FHx/inflammation/CKD) suggest accelerated lifetime risk.",
-            ["Consider statin default", "Address enhancer drivers", "Consider CAC if unknown", "ApoB-guided targets"],
-        )
+        return ("Risk enhancers (Lp(a)/FHx/inflammation/CKD) suggest accelerated lifetime risk.",
+                ["Consider statin default", "Address enhancer drivers", "Consider CAC if unknown", "ApoB-guided targets"])
     if sub == "2C":
-        return (
-            "Higher probability of silent disease (often CAC 1–99 or multi-domain intermediate risk).",
-            ["Treat like early disease", "Statin default", "Intensify to targets", "Recheck response 6–12 wks"],
-        )
+        return ("Higher probability of silent disease (often CAC 1–99 or multi-domain intermediate risk).",
+                ["Treat like early disease", "Statin default", "Intensify to targets", "Recheck response 6–12 wks"])
     return ("Level 2 prevention zone.", ["Refine with CAC", "ApoB-guided targets", "Shared decisions"])
 
 # ============================================================
-# Session defaults (ONLY via session_state, to avoid widget conflicts)
+# Session defaults (empty = 0 / 0.0)
 # ============================================================
 st.session_state.setdefault("age_val", 0)
 st.session_state.setdefault("sex_val", "F")
@@ -473,12 +351,39 @@ st.session_state.setdefault("cac_val", 0)
 st.session_state.setdefault("smartphrase_raw", "")
 
 # ============================================================
+# Callbacks (fix Streamlit clear button error)
+# ============================================================
+def cb_clear_pasted_text():
+    st.session_state["smartphrase_raw"] = ""
+
+def cb_clear_autofilled_fields():
+    # Reset auto-filled widget keys to empty defaults
+    st.session_state["age_val"] = 0
+    st.session_state["sex_val"] = "F"
+    st.session_state["race_val"] = "Other (use non-African American coefficients)"
+    st.session_state["sbp_val"] = 0
+    st.session_state["tc_val"] = 0
+    st.session_state["ldl_val"] = 0
+    st.session_state["hdl_val"] = 0
+    st.session_state["apob_val"] = 0
+    st.session_state["lpa_val"] = 0
+    st.session_state["lpa_unit_val"] = "nmol/L"
+    st.session_state["a1c_val"] = 0.0
+    st.session_state["bp_treated_val"] = "No"
+    st.session_state["smoking_val"] = "No"
+    st.session_state["diabetes_choice_val"] = "No"
+    st.session_state["cac_known_val"] = "No"
+    st.session_state["cac_val"] = 0
+    # optional output
+    st.session_state.pop("ascvd10_val", None)
+
+# ============================================================
 # Top-level mode
 # ============================================================
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest (paste -> parse -> apply + flag missing)
+# SmartPhrase ingest
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
 
@@ -502,6 +407,7 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/CAC/A1c)
     parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
 
     c1, c2, c3, c4 = st.columns([1, 1, 1.4, 2.6])
+
     with c1:
         if st.button("Parse & Apply", type="primary"):
             applied, missing = apply_parsed_to_session(parsed_preview)
@@ -511,38 +417,10 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/CAC/A1c)
             st.rerun()
 
     with c2:
-        if st.button("Clear pasted text"):
-            st.session_state["smartphrase_raw"] = ""
-            st.rerun()
+        st.button("Clear pasted text", on_click=cb_clear_pasted_text)
 
     with c3:
-        if st.button("Clear auto-filled fields"):
-            for k in [
-                "age_val", "sex_val", "race_val", "sbp_val", "tc_val", "hdl_val", "ldl_val",
-                "apob_val", "lpa_val", "lpa_unit_val", "cac_val", "cac_known_val",
-                "smoking_val", "diabetes_choice_val", "bp_treated_val", "ascvd10_val", "a1c_val",
-            ]:
-                st.session_state.pop(k, None)
-
-            # Re-seed empties (and common radio defaults)
-            st.session_state["age_val"] = 0
-            st.session_state["sex_val"] = "F"
-            st.session_state["race_val"] = "Other (use non-African American coefficients)"
-            st.session_state["sbp_val"] = 0
-            st.session_state["tc_val"] = 0
-            st.session_state["ldl_val"] = 0
-            st.session_state["hdl_val"] = 0
-            st.session_state["apob_val"] = 0
-            st.session_state["lpa_val"] = 0
-            st.session_state["lpa_unit_val"] = "nmol/L"
-            st.session_state["a1c_val"] = 0.0
-            st.session_state["bp_treated_val"] = "No"
-            st.session_state["smoking_val"] = "No"
-            st.session_state["diabetes_choice_val"] = "No"
-            st.session_state["cac_known_val"] = "No"
-            st.session_state["cac_val"] = 0
-
-            st.rerun()
+        st.button("Clear auto-filled fields", on_click=cb_clear_autofilled_fields)
 
     with c4:
         st.caption("Parsed preview")
@@ -619,7 +497,7 @@ with st.form("levels_form"):
     with c1:
         tc = st.number_input("Total cholesterol (mg/dL)", 0, 500, step=1, key="tc_val")
         ldl = st.number_input("LDL-C (mg/dL)", 0, 400, step=1, key="ldl_val")
-        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 300, step=1, key="hdl_val")  # widened max
+        hdl = st.number_input("HDL cholesterol (mg/dL)", 0, 300, step=1, key="hdl_val")
 
     with c2:
         apob = st.number_input("ApoB (mg/dL)", 0, 300, step=1, key="apob_val")
@@ -674,26 +552,21 @@ with st.form("levels_form"):
 # Run + output
 # ============================================================
 if submitted:
-    raw_check = " ".join(
-        [str(x) for x in [
-            age, gender, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
-            tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac
-        ]]
-    )
+    raw_check = " ".join([str(x) for x in [
+        age, gender, race, fhx_choice, ascvd, sbp, bp_treated, smoking, diabetes_choice, a1c,
+        tc, ldl, hdl, apob, lpa, lpa_unit, hscrp, cac
+    ]])
+
     if contains_phi(raw_check):
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
 
-    # Required fields (since empty placeholders are 0)
+    # Required fields (empty placeholders are 0)
     req_errors = []
-    if age <= 0:
-        req_errors.append("Age is required (must be > 0).")
-    if sbp <= 0:
-        req_errors.append("Systolic BP is required (must be > 0).")
-    if tc <= 0:
-        req_errors.append("Total cholesterol is required (must be > 0).")
-    if hdl <= 0:
-        req_errors.append("HDL is required (must be > 0).")
+    if age <= 0: req_errors.append("Age is required (must be > 0).")
+    if sbp <= 0: req_errors.append("Systolic BP is required (must be > 0).")
+    if tc <= 0: req_errors.append("Total cholesterol is required (must be > 0).")
+    if hdl <= 0: req_errors.append("HDL is required (must be > 0).")
 
     if req_errors:
         st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
@@ -706,29 +579,23 @@ if submitted:
         "sex": gender,
         "race": "black" if race == "African American" else "other",
         "ascvd": (ascvd == "Yes"),
-
         "fhx": fhx_to_bool(fhx_choice),
         "fhx_detail": fhx_choice,
-
         "sbp": int(sbp),
         "bp_treated": (bp_treated == "Yes"),
         "smoking": (smoking == "Yes"),
         "diabetes": diabetes_effective,
-
         "a1c": float(a1c) if a1c and a1c > 0 else None,
         "tc": int(tc) if tc and tc > 0 else None,
         "ldl": int(ldl) if ldl and ldl > 0 else None,
         "hdl": int(hdl) if hdl and hdl > 0 else None,
         "apob": int(apob) if apob and apob > 0 else None,
-        "lpa": int(lpa) if lpa and lpa > 0 else None,
+        "lpa": float(lpa) if lpa and lpa > 0 else None,
         "lpa_unit": lpa_unit,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
-
         "cac": int(cac) if (cac is not None and cac > 0) else None,
-
         "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle),
         "ibd": bool(ibd), "hiv": bool(hiv), "osa": bool(osa), "nafld": bool(nafld),
-
         "bleed_gi": bool(bleed_gi),
         "bleed_ich": bool(bleed_ich),
         "bleed_anticoag": bool(bleed_anticoag),
@@ -748,28 +615,16 @@ if submitted:
     st.subheader("Clinical report")
     st.markdown(clinical_html, unsafe_allow_html=True)
 
-    # Downloads below main report
     d1, d2 = st.columns(2)
     with d1:
-        st.download_button(
-            "Download clinical text (.txt)",
-            data=note_text.encode("utf-8"),
-            file_name="levels_note.txt",
-            mime="text/plain",
-            use_container_width=True,
-        )
+        st.download_button("Download clinical text (.txt)", data=note_text.encode("utf-8"),
+                           file_name="levels_note.txt", mime="text/plain", use_container_width=True)
     with d2:
-        st.download_button(
-            "Download JSON",
-            data=json.dumps(out, indent=2).encode("utf-8"),
-            file_name="levels_output.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"),
+                           file_name="levels_output.json", mime="application/json", use_container_width=True)
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    # Key metrics (collapsed)
     with st.expander("Key metrics (Level • Risk Signal • 10-year ASCVD)", expanded=False):
         rs = out.get("riskSignal", {})
         risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
@@ -782,12 +637,8 @@ if submitted:
 
         m1.metric("Level", lvl_display)
         m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
-        if risk10.get("risk_pct") is not None:
-            m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%")
-        else:
-            m3.metric("10-year ASCVD risk", "—")
+        m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
-    # Level interpretation (collapsed)
     with st.expander("Level interpretation (why this level / posture / Level 2 explainer)", expanded=False):
         lvl = out.get("levels", {})
         lvl_display = f"{lvl.get('level','—')}"
@@ -824,23 +675,19 @@ if submitted:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Aspirin summary (collapsed)
     with st.expander("Aspirin summary", expanded=False):
         asp = out.get("aspirin", {})
         asp_status = asp.get("status", "Not assessed")
         asp_why = short_why(asp.get("rationale", []), max_items=3)
         st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
-    # Quick output (raw text) (collapsed; only if Quick mode)
     if mode.startswith("Quick"):
         with st.expander("Quick output (raw text)", expanded=False):
             st.code(note_text, language="text")
 
-    # Raw text copy/paste (collapsed)
     with st.expander("Raw text (copy/paste)", expanded=False):
         st.code(note_text, language="text")
 
-    # JSON debug (collapsed; only if checkbox)
     if show_json:
         with st.expander("JSON (debug)", expanded=False):
             st.json(out)
@@ -848,4 +695,3 @@ if submitted:
     st.caption(
         f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
     )
-
