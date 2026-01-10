@@ -92,6 +92,11 @@ def contains_phi(s: str) -> bool:
 # Clinical report renderer
 # ============================================================
 def render_clinical_report(note_text: str) -> str:
+    """
+    Updated to support BOTH old and new engine headers:
+    - "Level X: ..."
+    - "Posture Level X: ..."
+    """
     lines = [ln.rstrip() for ln in (note_text or "").splitlines()]
     out = ['<div class="report">']
     title = next((ln for ln in lines if ln.strip()), "LEVELS™ Output")
@@ -111,7 +116,8 @@ def render_clinical_report(note_text: str) -> str:
         if not line or line == title:
             continue
 
-        if line.startswith("Level "):
+        # Summary section: accept "Level " OR "Posture Level "
+        if line.startswith("Level ") or line.startswith("Posture Level "):
             open_section("Summary")
             out.append(f"<p><strong>{line}</strong></p>")
             while i < len(lines):
@@ -119,7 +125,7 @@ def render_clinical_report(note_text: str) -> str:
                 if not nxt:
                     i += 1
                     continue
-                if nxt.startswith(("Risk Signal Score", "Pooled Cohort Equations", "Drivers:", "Targets", "Next:", "Aspirin")):
+                if nxt.startswith(("Risk Signal Score", "Pooled Cohort Equations", "Drivers:", "Targets", "Next:", "Aspirin", "Evidence:", "Recommendation strength:", "Confidence:")):
                     break
                 if ":" in nxt:
                     left, right = nxt.split(":", 1)
@@ -130,7 +136,7 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations"):
+        if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations") or line.startswith("Evidence:") or line.startswith("Recommendation strength:") or line.startswith("Confidence:"):
             open_section("Key metrics")
             j = i - 1
             while j < len(lines):
@@ -154,13 +160,12 @@ def render_clinical_report(note_text: str) -> str:
             open_section("Primary drivers")
             items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
 
-            # ===== PATCH: remove any "Level ..." artifacts from drivers =====
+            # remove any "Level ..." artifacts
             items = [
                 it for it in items
                 if not re.match(r"^\s*level\b", it, flags=re.IGNORECASE)
                 and not re.match(r"^\s*level\s*[:=]\s*\d", it, flags=re.IGNORECASE)
             ]
-            # ===============================================================
 
             out.append("<ul>")
             for it in items:
@@ -223,7 +228,7 @@ def render_clinical_report(note_text: str) -> str:
     return "\n".join(out)
 
 # ============================================================
-# Debug helpers (safe + properly indented)
+# Debug helpers
 # ============================================================
 def _find_paths(obj, needle: str, path: str = "root"):
     found = []
@@ -336,23 +341,31 @@ def apply_parsed_to_session(parsed: dict):
     return applied, missing
 
 def level_pill_class(level: int) -> str:
-    if level <= 0:
+    # Updated for posture levels 1–5
+    if level <= 1:
         return "pill pill-green"
-    if level in (1, 2):
+    if level in (2, 3):
         return "pill pill-yellow"
     return "pill pill-red"
 
-def level2_explainer(sub: str):
+def level_explainer(sub: str):
+    # Support v2.5 Level 3 sublevels (3A/3B/3C) + keep older 2A/2B/2C fallback
+    if sub == "3A":
+        return ("High biology without strong enhancers; plaque not proven.", ["Trend labs", "Lifestyle sprint", "Shared decision on statin", "Consider CAC if unknown"])
+    if sub == "3B":
+        return ("High biology with risk enhancers (Lp(a)/FHx/inflammation) → higher lifetime acceleration.", ["Statin default often reasonable", "Address enhancers", "Consider CAC if unknown", "ApoB-guided targets"])
+    if sub == "3C":
+        return ("Intermediate pooled-risk phenotype (near-term risk elevated) despite no proven plaque.", ["Treat risk seriously", "Statin default often reasonable", "Confirm BP/lipids", "Consider CAC if unknown"])
+
+    # Backward-compatible older labels
     if sub == "2A":
-        return ("Biology is drifting (lipids/glycemia/metabolic), but no proof of plaque yet.",
-                ["Confirm & trend labs", "Lifestyle sprint 8–12 wks", "Shared statin decision", "Consider CAC if unknown"])
+        return ("Biology is drifting, but no proof of plaque yet.", ["Confirm & trend labs", "Lifestyle sprint", "Shared statin decision", "Consider CAC if unknown"])
     if sub == "2B":
-        return ("Risk enhancers (Lp(a)/FHx/inflammation/CKD) suggest accelerated lifetime risk.",
-                ["Consider statin default", "Address enhancer drivers", "Consider CAC if unknown", "ApoB-guided targets"])
+        return ("Risk enhancers suggest accelerated lifetime risk.", ["Consider statin default", "Address enhancers", "Consider CAC if unknown", "ApoB-guided targets"])
     if sub == "2C":
-        return ("Higher probability of silent disease (often CAC 1–99 or multi-domain intermediate risk).",
-                ["Treat like early disease", "Statin default", "Intensify to targets", "Recheck response 6–12 wks"])
-    return ("Level 2 prevention zone.", ["Refine with CAC", "ApoB-guided targets", "Shared decisions"])
+        return ("Higher probability of silent disease.", ["Treat like early disease", "Statin default", "Intensify to targets", "Recheck response 6–12 wks"])
+
+    return ("Prevention zone.", ["Refine with CAC", "ApoB-guided targets", "Shared decisions"])
 
 # ============================================================
 # Session defaults (empty = 0 / 0.0)
@@ -376,7 +389,7 @@ st.session_state.setdefault("cac_val", 0)
 st.session_state.setdefault("smartphrase_raw", "")
 
 # ============================================================
-# Callbacks (fix Streamlit clear button error)
+# Callbacks
 # ============================================================
 def cb_clear_pasted_text():
     st.session_state["smartphrase_raw"] = ""
@@ -584,7 +597,7 @@ if submitted:
         st.error("Possible identifier/date detected. Please remove PHI and retry.")
         st.stop()
 
-    # Required fields (empty placeholders are 0)
+    # Required fields
     req_errors = []
     if age <= 0: req_errors.append("Age is required (must be > 0).")
     if sbp <= 0: req_errors.append("Systolic BP is required (must be > 0).")
@@ -616,7 +629,10 @@ if submitted:
         "lpa": float(lpa) if lpa and lpa > 0 else None,
         "lpa_unit": lpa_unit,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
-        "cac": int(cac) if (cac is not None and cac > 0) else None,
+
+        # ✅ FIX: DO NOT DROP CAC=0
+        "cac": int(cac) if cac is not None else None,
+
         "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle),
         "ibd": bool(ibd), "hiv": bool(hiv), "osa": bool(osa), "nafld": bool(nafld),
         "bleed_gi": bool(bleed_gi),
@@ -631,13 +647,12 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    # ---- DEBUG (fixed indentation; collapsed by default) ----
+    # Debug path finder (kept)
     with st.expander("Debug: locate drivers/lpa in output (temporary)", expanded=False):
         st.write("Top-level keys:", list(out.keys()))
         st.write("riskSignal keys:", list((out.get("riskSignal") or {}).keys()))
         st.write("Paths containing 'drivers':", _find_paths(out, "drivers"))
         st.write("Paths containing 'lpa':", _find_paths(out, "lpa"))
-    # --------------------------------------------------------
 
     note_text = render_quick_text(patient, out)
     clinical_html = render_clinical_report(note_text)
@@ -666,29 +681,46 @@ if submitted:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    with st.expander("Key metrics (Level • Risk Signal • 10-year ASCVD)", expanded=False):
+    # NEW: Anchors (collapsed)
+    with st.expander("Anchors (near-term vs lifetime)", expanded=False):
+        anchors = out.get("anchors", {})
+        near = (anchors.get("nearTerm") or {}).get("summary", "—")
+        life = (anchors.get("lifetime") or {}).get("summary", "—")
+        st.markdown(f"**Near-term anchor:** {near}")
+        st.markdown(f"**Lifetime anchor:** {life}")
+
+    # NEW: Trace (collapsed)
+    with st.expander("Trace (audit trail)", expanded=False):
+        st.json(out.get("trace", []))
+
+    with st.expander("Key metrics (Posture • Risk Signal • 10-year ASCVD)", expanded=False):
         rs = out.get("riskSignal", {})
         risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
         lvl = out.get("levels", {})
 
-        m1, m2, m3 = st.columns(3)
-        lvl_display = f"{lvl.get('level','—')}"
-        if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
-            lvl_display += f" ({lvl.get('sublevel')})"
+        posture = int(lvl.get("postureLevel", lvl.get("level", 0)) or 0)
+        sub = lvl.get("sublevel")
+        lvl_display = f"{posture}" + (f" ({sub})" if sub else "")
 
-        m1.metric("Level", lvl_display)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Posture level", lvl_display)
         m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
         m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
-    with st.expander("Level interpretation (why this level / posture / Level 2 explainer)", expanded=False):
+        # Evidence + recommendation strength
+        ev = (lvl.get("evidence") or {})
+        st.markdown(f"**Evidence:** {ev.get('cac_status','—')} / **Burden:** {ev.get('burden_band','—')}")
+        st.markdown(f"**Recommendation strength:** {lvl.get('recommendationStrength','—')}")
+
+    with st.expander("Level interpretation (why / posture / explainer)", expanded=False):
         lvl = out.get("levels", {})
-        lvl_display = f"{lvl.get('level','—')}"
-        if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
-            lvl_display += f" ({lvl.get('sublevel')})"
+        posture = int(lvl.get("postureLevel", lvl.get("level", 0)) or 0)
+        sub = lvl.get("sublevel")
+        lvl_display = f"{posture}" + (f" ({sub})" if sub else "")
 
         st.markdown("<div class='level-card'>", unsafe_allow_html=True)
         st.markdown(
-            f"<h3>Level interpretation <span class='{level_pill_class(int(lvl.get('level',0) or 0))}'>{lvl_display}</span></h3>",
+            f"<h3>Interpretation <span class='{level_pill_class(posture)}'>{lvl_display}</span></h3>",
             unsafe_allow_html=True,
         )
 
@@ -697,7 +729,7 @@ if submitted:
 
         why_list = (lvl.get("why") or [])[:3]
         if why_list:
-            st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
+            st.markdown("<div class='small-help'><strong>Why this posture:</strong></div>", unsafe_allow_html=True)
             st.markdown("<ul>", unsafe_allow_html=True)
             for w in why_list:
                 st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
@@ -706,9 +738,9 @@ if submitted:
         if lvl.get("defaultPosture"):
             st.markdown(f"<p class='small-help'><strong>Default posture:</strong> {lvl['defaultPosture']}</p>", unsafe_allow_html=True)
 
-        if int(lvl.get("level", 0) or 0) == 2 and lvl.get("sublevel"):
-            expl, chips = level2_explainer(lvl.get("sublevel"))
-            st.markdown(f"<p class='small-help'><strong>Level 2 {lvl.get('sublevel')} explainer:</strong> {expl}</p>", unsafe_allow_html=True)
+        if sub:
+            expl, chips = level_explainer(sub)
+            st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
             st.markdown("<div class='next-row'>", unsafe_allow_html=True)
             for c in chips:
                 st.markdown(f"<span class='next-chip'>{c}</span>", unsafe_allow_html=True)
@@ -734,7 +766,6 @@ if submitted:
             st.json(out)
 
     st.caption(
-        f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
+        f"Versions: {VERSION['levels']} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
-
 
