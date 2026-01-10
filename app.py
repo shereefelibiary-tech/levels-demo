@@ -616,6 +616,26 @@ if submitted:
 
     patient = Patient(data)
     out = evaluate(patient)
+# --- DEBUG: locate drivers anywhere in output ---
+st.write("Debug keys:", list(out.keys()))
+st.write("riskSignal keys:", list((out.get("riskSignal") or {}).keys()))
+
+# Search recursively for anything named "drivers" or containing "Lp(a)"
+def _find_paths(obj, needle, path="root"):
+    found = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            p = f"{path}.{k}"
+            if needle.lower() in str(k).lower():
+                found.append(p)
+            found += _find_paths(v, needle, p)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            found += _find_paths(v, needle, f"{path}[{i}]")
+    return found
+
+st.write("Paths containing 'drivers':", _find_paths(out, "drivers"))
+st.write("Paths containing 'lpa':", _find_paths(out, "lpa"))
 
     note_text = render_quick_text(patient, out)
     clinical_html = render_clinical_report(note_text)
@@ -704,5 +724,6 @@ if submitted:
     st.caption(
         f"Versions: {VERSION['levels']} | {VERSION['riskSignal']} | {VERSION['riskCalc']} | {VERSION['aspirin']}. No storage intended."
     )
+
 
 
