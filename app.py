@@ -709,12 +709,6 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    with st.expander("Debug: locate drivers/lpa in output (temporary)", expanded=False):
-        st.write("Top-level keys:", list(out.keys()))
-        st.write("riskSignal keys:", list((out.get("riskSignal") or {}).keys()))
-        st.write("Paths containing 'drivers':", _find_paths(out, "drivers"))
-        st.write("Paths containing 'lpa':", _find_paths(out, "lpa"))
-
     note_text = render_quick_text(patient, out)
     clinical_html = render_clinical_report(note_text)
 
@@ -823,4 +817,5 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
+
 
