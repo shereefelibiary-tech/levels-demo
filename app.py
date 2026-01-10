@@ -7,21 +7,6 @@ from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
 
 # ============================================================
-# Recommendation label mapping (UI-only)
-# ============================================================
-REC_LABEL_MAP = {
-    "Default": "Standard",
-    "Consider": "Optional",
-    "Defer—need data": "Incomplete",
-    "Defer-need data": "Incomplete",
-}
-
-def pretty_recommendation(raw: str) -> str:
-    if not raw:
-        return "—"
-    return REC_LABEL_MAP.get(raw, raw)
-
-# ============================================================
 # Page + styling
 # ============================================================
 st.set_page_config(page_title="LEVELS", layout="wide")
@@ -176,7 +161,7 @@ def render_clinical_report(note_text: str) -> str:
         if not line or line == title:
             continue
 
-        if line.startswith("Level ") or line.startswith("Posture Level "):
+        if line.startswith("Level ") or line.startswith("Posture Level ") or line.startswith("Management Level "):
             open_section("Summary")
             out.append(f"<p><strong>{line}</strong></p>")
             while i < len(lines):
@@ -184,7 +169,7 @@ def render_clinical_report(note_text: str) -> str:
                 if not nxt:
                     i += 1
                     continue
-                if nxt.startswith(("Risk Signal Score", "Pooled Cohort Equations", "Drivers:", "Targets", "Next:", "Aspirin", "Evidence:", "Recommendation strength:", "Confidence:")):
+                if nxt.startswith(("Risk Signal Score", "Pooled Cohort Equations", "Drivers:", "Targets", "Next:", "Aspirin", "Evidence:", "Confidence:")):
                     break
                 if ":" in nxt:
                     left, right = nxt.split(":", 1)
@@ -195,7 +180,7 @@ def render_clinical_report(note_text: str) -> str:
             close_section()
             continue
 
-        if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations") or line.startswith("Evidence:") or line.startswith("Recommendation strength:") or line.startswith("Confidence:"):
+        if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations") or line.startswith("Evidence:") or line.startswith("Confidence:"):
             open_section("Key metrics")
             j = i - 1
             while j < len(lines):
@@ -218,6 +203,7 @@ def render_clinical_report(note_text: str) -> str:
         if line.startswith("Drivers:"):
             open_section("Primary drivers")
             items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
+            # Remove any "Level ..." artifacts from drivers
             items = [
                 it for it in items
                 if not re.match(r"^\s*level\b", it, flags=re.IGNORECASE)
@@ -332,14 +318,14 @@ TARGET_PARSE_FIELDS = [
     ("ra", "Rheumatoid arthritis"),
 ]
 
-def posture_pill_class(posture: int) -> str:
-    if posture <= 1:
+def management_pill_class(level: int) -> str:
+    if level <= 1:
         return "pill pill-green"
-    if posture in (2, 3):
+    if level in (2, 3):
         return "pill pill-yellow"
     return "pill pill-red"
 
-def level_explainer(sub: str):
+def sublevel_explainer(sub: str):
     if sub == "3A":
         return ("High biology without strong enhancers; plaque not proven.", ["Trend labs", "Lifestyle sprint", "Shared decision on statin", "Consider calcium score if unknown"])
     if sub == "3B":
@@ -349,7 +335,7 @@ def level_explainer(sub: str):
     return ("Prevention zone.", ["Refine with calcium score", "ApoB-guided targets", "Shared decisions"])
 
 # ============================================================
-# ✅ DEFINE apply_parsed_to_session BEFORE UI USE
+# Apply parsed values (defined BEFORE use)
 # ============================================================
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
@@ -397,7 +383,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
         applied.append("Smoking")
 
-    # Diabetes negation guard
     dm_guard = diabetes_negation_guard(raw_txt)
     if dm_guard is False:
         st.session_state["diabetes_choice_val"] = "No"
@@ -422,13 +407,11 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["ascvd10_val"] = float(parsed["ascvd_10y"])
         applied.append("ASCVD10y")
 
-    # hsCRP
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
         applied.append("hsCRP")
 
-    # inflammatory flags
     infl = parse_inflammatory_flags_from_text(raw_txt)
     for k, v in infl.items():
         st.session_state[f"infl_{k}_val"] = bool(v)
@@ -660,14 +643,6 @@ with st.form("levels_form"):
             bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
 
     show_json = st.checkbox("Show JSON (debug)", value=True)
-
-    st.caption(
-        "**Recommendation label** = how confident the tool is in making the posture recommendation based on input completeness.\n"
-        "- **Standard**: enough data + signals to make this the usual starting posture.\n"
-        "- **Optional**: reasonable option; preference-sensitive/borderline.\n"
-        "- **Incomplete**: key missing inputs; get missing data before escalating."
-    )
-
     submitted = st.form_submit_button("Run")
 
 # ============================================================
@@ -750,20 +725,17 @@ if submitted:
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
     lvl = out.get("levels", {})
 
-    posture = int(lvl.get("postureLevel", lvl.get("level", 0)) or 0)
+    mgmt_level = int(lvl.get("postureLevel", lvl.get("level", 0)) or 0)
     sub = lvl.get("sublevel")
-    lvl_display = f"{posture}" + (f" ({sub})" if sub else "")
+    lvl_display = f"{mgmt_level}" + (f" ({sub})" if sub else "")
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Posture level", lvl_display)
+    m1.metric("Management Level", lvl_display)
     m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
     m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
     ev = (lvl.get("evidence") or {})
     st.markdown(f"**Evidence:** {ev.get('cac_status','—')} / **Burden:** {ev.get('burden_band','—')}")
-
-    rec_raw = lvl.get("recommendationStrength", "—")
-    st.markdown(f"**Recommendation label:** {pretty_recommendation(rec_raw)}")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -801,10 +773,10 @@ if submitted:
     with st.expander("Trace (audit trail)", expanded=False):
         st.json(out.get("trace", []))
 
-    with st.expander("Interpretation (why / posture / explainer)", expanded=False):
+    with st.expander("Interpretation (why / plan / explainer)", expanded=False):
         st.markdown("<div class='level-card'>", unsafe_allow_html=True)
         st.markdown(
-            f"<h3>Interpretation <span class='{posture_pill_class(posture)}'>{lvl_display}</span></h3>",
+            f"<h3>Interpretation <span class='{management_pill_class(mgmt_level)}'>{lvl_display}</span></h3>",
             unsafe_allow_html=True,
         )
 
@@ -813,17 +785,17 @@ if submitted:
 
         why_list = (lvl.get("why") or [])[:3]
         if why_list:
-            st.markdown("<div class='small-help'><strong>Why this posture:</strong></div>", unsafe_allow_html=True)
+            st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
             st.markdown("<ul>", unsafe_allow_html=True)
             for w in why_list:
                 st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
             st.markdown("</ul>", unsafe_allow_html=True)
 
         if lvl.get("defaultPosture"):
-            st.markdown(f"<p class='small-help'><strong>Default posture:</strong> {lvl['defaultPosture']}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p class='small-help'><strong>Plan:</strong> {lvl['defaultPosture']}</p>", unsafe_allow_html=True)
 
         if sub:
-            expl, chips = level_explainer(sub)
+            expl, chips = sublevel_explainer(sub)
             st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
             st.markdown("<div class='next-row'>", unsafe_allow_html=True)
             for c in chips:
