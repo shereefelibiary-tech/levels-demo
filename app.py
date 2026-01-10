@@ -203,7 +203,6 @@ def render_clinical_report(note_text: str) -> str:
         if line.startswith("Drivers:"):
             open_section("Primary drivers")
             items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
-            # Remove any "Level ..." artifacts from drivers
             items = [
                 it for it in items
                 if not re.match(r"^\s*level\b", it, flags=re.IGNORECASE)
@@ -618,17 +617,17 @@ with st.form("levels_form"):
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Inflammatory states (optional)")
 
-   e1, e2, e3 = st.columns(3)
-with e1:
-    ra = st.checkbox("Rheumatoid arthritis", key="infl_ra_val")
-    psoriasis = st.checkbox("Psoriasis", key="infl_psoriasis_val")
-with e2:
-    sle = st.checkbox("SLE", key="infl_sle_val")
-    ibd = st.checkbox("IBD", key="infl_ibd_val")
-with e3:
-    hiv = st.checkbox("HIV", key="infl_hiv_val")
-    osa = st.checkbox("OSA", key="infl_osa_val")
-    nafld = st.checkbox("NAFLD/MASLD", key="infl_nafld_val")
+    e1, e2, e3 = st.columns(3)
+    with e1:
+        ra = st.checkbox("Rheumatoid arthritis", key="infl_ra_val")
+        psoriasis = st.checkbox("Psoriasis", key="infl_psoriasis_val")
+    with e2:
+        sle = st.checkbox("SLE", key="infl_sle_val")
+        ibd = st.checkbox("IBD", key="infl_ibd_val")
+    with e3:
+        hiv = st.checkbox("HIV", key="infl_hiv_val")
+        osa = st.checkbox("OSA", key="infl_osa_val")
+        nafld = st.checkbox("NAFLD/MASLD", key="infl_nafld_val")
 
     with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
         f1, f2, f3 = st.columns(3)
