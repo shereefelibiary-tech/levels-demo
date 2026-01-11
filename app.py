@@ -1,7 +1,8 @@
 # app.py (fully consolidated, single-file, stable)
-# + ONLY additions: "calculator feel" output (Recommended target + view toggle + LDL vs ApoB logic)
+# + additions: "calculator feel" output (Recommended target + view toggle + LDL vs ApoB logic)
 # + calcium score box always visible + CAC payload uses session_state
 # + FIX: Parse & Apply uses Streamlit callback so widgets actually populate
+# + FIX: remove "drift" everywhere (global text scrub)
 
 import json
 import re
@@ -148,6 +149,22 @@ def contains_phi(s: str) -> bool:
     return False
 
 # ============================================================
+# TEXT SCRUB: remove drift everywhere
+# ============================================================
+def scrub_terms(s: str) -> str:
+    if not s:
+        return s
+    # remove any appearance of drift
+    s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
+    return s
+
+def scrub_list(xs):
+    if not xs:
+        return xs
+    return [scrub_terms(str(x)) for x in xs]
+
+# ============================================================
 # Helpers
 # ============================================================
 FHX_OPTIONS = [
@@ -256,7 +273,7 @@ def sublevel_explainer(sub: str):
     return ("", [])
 
 # ------------------------------------------------------------
-# NEW: Pick primary lipid target (ApoB if present, else LDL)
+# Pick primary lipid target (ApoB if present, else LDL)
 # ------------------------------------------------------------
 def pick_primary_targets(out: dict, patient_data: dict) -> dict:
     targets = out.get("targets", {}) or {}
@@ -291,8 +308,8 @@ def render_high_yield_report(out: dict) -> str:
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
     targets = out.get("targets", {}) or {}
     ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-    drivers = out.get("drivers", []) or []
-    next_actions = out.get("nextActions", []) or []
+    drivers = scrub_list(out.get("drivers", []) or [])
+    next_actions = scrub_list(out.get("nextActions", []) or [])
     asp = out.get("aspirin", {}) or {}
 
     mgmt_level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
@@ -309,8 +326,8 @@ def render_high_yield_report(out: dict) -> str:
     risk_line = f"{risk_pct}%" if risk_pct is not None else "—"
     risk_cat = risk10.get("category") or ""
 
-    evidence_line = ev.get("cac_status") or out.get("diseaseBurden") or "—"
-    burden_line = ev.get("burden_band") or "—"
+    evidence_line = scrub_terms(ev.get("cac_status") or out.get("diseaseBurden") or "—")
+    burden_line = scrub_terms(ev.get("burden_band") or "—")
 
     html = []
     html.append('<div class="report">')
@@ -318,11 +335,8 @@ def render_high_yield_report(out: dict) -> str:
 
     html.append('<div class="section">')
     html.append('<div class="section-title">Summary</div>')
-    meaning = lvl.get("meaning")
-    if meaning:
-        html.append(f"<p>{meaning}</p>")
-    else:
-        html.append("<p class='muted'>No summary available.</p>")
+    meaning = scrub_terms(lvl.get("meaning") or "")
+    html.append(f"<p>{meaning}</p>" if meaning else "<p class='muted'>No summary available.</p>")
     html.append("</div>")
 
     html.append('<div class="section">')
@@ -361,7 +375,7 @@ def render_high_yield_report(out: dict) -> str:
     posture = lvl.get("defaultPosture")
     if posture:
         posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(posture)).strip()
-        posture_clean = posture_clean.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
+        posture_clean = scrub_terms(posture_clean)
         html.append(f"<p><strong>Plan:</strong> {posture_clean}</p>")
 
     if next_actions:
@@ -371,7 +385,7 @@ def render_high_yield_report(out: dict) -> str:
             html.append(f"<li>{a}</li>")
         html.append("</ul>")
 
-    asp_status = asp.get("status")
+    asp_status = scrub_terms(asp.get("status") or "")
     if asp_status:
         html.append(f"<p><strong>Aspirin:</strong> {asp_status}</p>")
 
@@ -426,15 +440,21 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     if parsed.get("lpa_unit") is not None:
         st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
         applied.append("Lp(a) unit")
+    else:
+        missing.append("Lp(a) unit")
 
     if parsed.get("a1c") is not None:
         st.session_state["a1c_val"] = float(parsed["a1c"])
         applied.append("A1c")
+    else:
+        missing.append("A1c")
 
     if parsed.get("cac") is not None:
         st.session_state["cac_known_val"] = "Yes"
         st.session_state["cac_val"] = int(float(parsed["cac"]))
         applied.append("Calcium score")
+    else:
+        missing.append("Calcium score")
 
     if parsed.get("smoker") is not None:
         st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
@@ -451,6 +471,8 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     if parsed.get("bpTreated") is not None:
         st.session_state["bp_treated_val"] = "Yes" if parsed["bpTreated"] else "No"
         applied.append("BP meds")
+    else:
+        missing.append("BP meds")
 
     if parsed.get("africanAmerican") is not None:
         st.session_state["race_val"] = (
@@ -470,6 +492,17 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
 
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
+
+# ============================================================
+# Parse & Apply callback (FIX)
+# ============================================================
+def cb_parse_and_apply():
+    parsed = st.session_state.get("parsed_preview_cache", {}) or {}
+    raw_txt = st.session_state.get("smartphrase_raw", "") or ""
+    applied, missing = apply_parsed_to_session(parsed, raw_txt)
+
+    st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
+    st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "")
 
 # ============================================================
 # Session defaults
@@ -492,6 +525,9 @@ st.session_state.setdefault("diabetes_choice_val", "No")
 st.session_state.setdefault("cac_known_val", "No")
 st.session_state.setdefault("cac_val", 0)
 st.session_state.setdefault("smartphrase_raw", "")
+st.session_state.setdefault("parsed_preview_cache", {})
+st.session_state.setdefault("last_applied_msg", "")
+st.session_state.setdefault("last_missing_msg", "")
 
 for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
     st.session_state.setdefault(f"infl_{k}_val", False)
@@ -501,6 +537,9 @@ for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
 # ============================================================
 def cb_clear_pasted_text():
     st.session_state["smartphrase_raw"] = ""
+    st.session_state["parsed_preview_cache"] = {}
+    st.session_state["last_applied_msg"] = ""
+    st.session_state["last_missing_msg"] = ""
 
 def cb_clear_autofilled_fields():
     st.session_state["age_val"] = 0
@@ -522,6 +561,8 @@ def cb_clear_autofilled_fields():
     st.session_state["cac_val"] = 0
     for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{k}_val"] = False
+    st.session_state["last_applied_msg"] = ""
+    st.session_state["last_missing_msg"] = ""
 
 # ============================================================
 # Top-level mode
@@ -551,15 +592,17 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
 
     parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
+    st.session_state["parsed_preview_cache"] = parsed_preview  # cache for callback
+
+    # messages from last apply
+    if st.session_state.get("last_applied_msg"):
+        st.success(st.session_state["last_applied_msg"])
+    if st.session_state.get("last_missing_msg"):
+        st.warning(st.session_state["last_missing_msg"])
 
     c1, c2, c3, c4 = st.columns([1, 1, 1.4, 2.6])
     with c1:
-        if st.button("Parse & Apply", type="primary"):
-            applied, missing = apply_parsed_to_session(parsed_preview, smart_txt or "")
-            st.success("Applied: " + (", ".join(applied) if applied else "None"))
-            if missing:
-                st.warning("Missing/unparsed: " + ", ".join(missing))
-            st.rerun()
+        st.button("Parse & Apply", type="primary", on_click=cb_parse_and_apply)
     with c2:
         st.button("Clear pasted text", on_click=cb_clear_pasted_text)
     with c3:
@@ -647,7 +690,7 @@ with st.form("levels_form"):
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Imaging")
 
-    # ✅ Calcium score box ALWAYS visible (disabled if No)
+    # Calcium score box ALWAYS visible (disabled if No)
     d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
         cac_known = st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
@@ -714,6 +757,7 @@ if submitted:
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
+    # CAC payload uses session_state, preserves CAC=0 when available
     cac_to_send = int(st.session_state["cac_val"]) if cac_known == "Yes" else None
 
     data = {
@@ -756,7 +800,7 @@ if submitted:
 
     note_text = render_quick_text(patient, out)
     note_text = note_text.replace("Posture Level", "Management Level")
-    note_text = note_text.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
+    note_text = scrub_terms(note_text)  # drift removed here too
 
     view_mode = st.radio("View", ["Simple", "Standard", "Details"], horizontal=True, index=1)
 
@@ -788,7 +832,7 @@ if submitted:
     if view_mode == "Simple":
         st.caption(f"Management Level: {mgmt_level}" + (f" ({sub})" if sub else ""))
         ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-        st.caption(f"Evidence: {ev.get('cac_status','—')}")
+        st.caption(f"Evidence: {scrub_terms(ev.get('cac_status','—'))}")
     else:
         st.subheader("Key metrics")
         render_management_ladder(mgmt_level, sub)
@@ -800,7 +844,7 @@ if submitted:
         m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
         ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-        st.markdown(f"**Evidence:** {ev.get('cac_status','—')} / **Burden:** {ev.get('burden_band','—')}")
+        st.markdown(f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}")
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
         st.subheader("Clinical report (high-yield)")
@@ -829,8 +873,8 @@ if submitted:
 
         with st.expander("Anchors (near-term vs lifetime)", expanded=False):
             anchors = out.get("anchors", {}) or {}
-            near = (anchors.get("nearTerm") or {}).get("summary", "—")
-            life = (anchors.get("lifetime") or {}).get("summary", "—")
+            near = scrub_terms((anchors.get("nearTerm") or {}).get("summary", "—"))
+            life = scrub_terms((anchors.get("lifetime") or {}).get("summary", "—"))
             st.markdown(f"**Near-term anchor:** {near}")
             st.markdown(f"**Lifetime anchor:** {life}")
 
@@ -841,11 +885,11 @@ if submitted:
                 unsafe_allow_html=True,
             )
 
-            meaning = lvl.get("meaning")
+            meaning = scrub_terms(lvl.get("meaning") or "")
             if meaning:
                 st.markdown(f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>", unsafe_allow_html=True)
 
-            why_list = (lvl.get("why") or [])[:3]
+            why_list = scrub_list((lvl.get("why") or [])[:3])
             if why_list:
                 st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
                 st.markdown("<ul>", unsafe_allow_html=True)
@@ -855,11 +899,13 @@ if submitted:
 
             if lvl.get("defaultPosture"):
                 posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(lvl["defaultPosture"])).strip()
-                posture_clean = posture_clean.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
+                posture_clean = scrub_terms(posture_clean)
                 st.markdown(f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>", unsafe_allow_html=True)
 
             if sub:
                 expl, chips = sublevel_explainer(sub)
+                expl = scrub_terms(expl)
+                chips = scrub_list(chips)
                 if expl:
                     st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
                 if chips:
@@ -872,8 +918,8 @@ if submitted:
 
         with st.expander("Aspirin summary", expanded=False):
             asp = out.get("aspirin", {}) or {}
-            asp_status = asp.get("status", "Not assessed")
-            asp_why = short_why(asp.get("rationale", []), max_items=3)
+            asp_status = scrub_terms(asp.get("status", "Not assessed"))
+            asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=3))
             st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
         if mode.startswith("Quick"):
