@@ -7,6 +7,17 @@ from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
 
 # ============================================================
+# Clinician-native Level names (locked)
+# ============================================================
+LEVEL_NAMES = {
+    1: "Minimal risk",
+    2: "Emerging risk",
+    3: "High biologic risk",
+    4: "Subclinical atherosclerosis",
+    5: "Atherosclerosis",
+}
+
+# ============================================================
 # Page + styling
 # ============================================================
 st.set_page_config(page_title="LEVELS", layout="wide")
@@ -14,43 +25,91 @@ st.set_page_config(page_title="LEVELS", layout="wide")
 st.markdown(
     """
 <style>
-html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif; color: #1f2937; }
+html, body, [class*="css"] {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
+  color: #1f2937;
+}
 
-.header-card { background:#fff; border:1px solid rgba(31,41,55,0.12); border-radius:14px; padding:16px 18px; margin-bottom:10px; }
+.header-card {
+  background:#fff; border:1px solid rgba(31,41,55,0.12);
+  border-radius:14px; padding:16px 18px; margin-bottom:10px;
+}
 .header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
 .header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
+
 .hr { margin:10px 0 14px 0; border-top:1px solid rgba(31,41,55,0.12); }
 
-.report { background:#fff; border:1px solid rgba(31,41,55,0.12); border-radius:14px; padding:18px 20px; }
-.report h2 { font-size:1.15rem; font-weight:800; margin:0 0 10px 0; }
+.report {
+  background:#fff;
+  border:1px solid rgba(31,41,55,0.12);
+  border-radius:14px;
+  padding:18px 20px;
+}
+.report h2 {
+  font-size:1.15rem;
+  font-weight:800;
+  margin:0 0 12px 0;
+}
 
-.section { margin-top:14px; }
-.section-title { font-variant-caps:all-small-caps; letter-spacing:0.08em; font-weight:800; font-size:0.85rem; color:#4b5563; margin-bottom:6px; border-bottom:1px solid rgba(31,41,55,0.10); padding-bottom:2px; }
-.section p { margin:6px 0; line-height:1.45; }
-.section ul { margin:6px 0 6px 18px; }
-.section li { margin:4px 0; }
+.section { margin-top: 14px; }
+.section-title {
+  font-variant-caps:all-small-caps;
+  letter-spacing:0.08em;
+  font-weight:800;
+  font-size:0.85rem;
+  color:#4b5563;
+  margin-bottom:6px;
+  border-bottom:1px solid rgba(31,41,55,0.10);
+  padding-bottom:2px;
+}
+.section p { margin: 6px 0; line-height: 1.45; }
+.section ul { margin: 6px 0 6px 18px; }
+.section li { margin: 4px 0; }
 
 .muted { color:#6b7280; font-size:0.9rem; }
 .small-help { color: rgba(31,41,55,0.70); font-size:0.88rem; }
 
-.kv { display:flex; gap:10px; flex-wrap:wrap; border:1px solid rgba(31,41,55,0.10); background:#fbfbfb; border-radius:12px; padding:10px 12px; margin-top:10px; }
+.kv {
+  display:flex; gap:10px; flex-wrap:wrap;
+  border:1px solid rgba(31,41,55,0.10);
+  background:#fbfbfb;
+  border-radius:12px;
+  padding:10px 12px;
+  margin-top:10px;
+}
 .kv div { font-size:0.9rem; }
 .kv strong { font-weight:800; }
 
-.badge { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid rgba(31,41,55,0.15); background:#fff; font-size:0.82rem; margin-left:6px; }
+.badge {
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid rgba(31,41,55,0.15);
+  background:#fff;
+  font-size:0.82rem;
+  margin-left:6px;
+}
 .ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
-.level-card { border:1px solid rgba(31,41,55,0.10); border-radius:12px; padding:12px; background: rgba(31,41,55,0.03); margin-top:10px; }
+.level-card {
+  border:1px solid rgba(31,41,55,0.10);
+  border-radius:12px;
+  padding:12px;
+  background: rgba(31,41,55,0.03);
+  margin-top:10px;
+}
 .level-card h3 { font-size:0.95rem; margin:0 0 6px 0; font-weight:800; }
 
-.pill { display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid rgba(31,41,55,0.16); background:#fff; font-size:0.80rem; font-weight:800; }
-.pill-green { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
-.pill-yellow { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
-.pill-red { border-color: rgba(239,68,68,0.28); background: rgba(239,68,68,0.09); }
-
 .next-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-.next-chip { display:inline-block; padding:6px 10px; border-radius:10px; border:1px solid rgba(31,41,55,0.14); background:#fff; font-size:0.86rem; }
+.next-chip {
+  display:inline-block;
+  padding:6px 10px;
+  border-radius:10px;
+  border:1px solid rgba(31,41,55,0.14);
+  background:#fff;
+  font-size:0.86rem;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -59,8 +118,8 @@ html, body, [class*="css"] { font-family: -apple-system, BlinkMacSystemFont, "Se
 st.markdown(
     f"""
 <div class="header-card">
-  <div class="header-title">LEVELS™ {VERSION["levels"]} — De-identified Demo</div>
-  <p class="header-sub">Fast entry • radios for common choices • SmartPhrase paste → auto-fill (LDL/ApoB/Lp(a)/Calcium score/A1c) • clinical report output</p>
+  <div class="header-title">LEVELS™ {VERSION.get("levels","")} — De-identified Demo</div>
+  <p class="header-sub">Fast entry • SmartPhrase paste → auto-fill • Management Levels 1–5 • high-yield clinical report</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -139,203 +198,134 @@ def diabetes_negation_guard(txt: str):
     return None
 
 # ============================================================
-# Graphic: 5-step Management Level bar (clinician-native labels)
+# Streamlit-native "Management Level ladder" (always renders)
 # ============================================================
-def render_management_bar(level: int, sublevel: str | None = None) -> str:
-    # Always show a highlighted segment: clamp to 1–5
+def render_management_ladder(level: int, sublevel: str | None = None):
     try:
-        lvl = int(level)
+        lvl = int(level or 0)
     except Exception:
         lvl = 1
     lvl = max(1, min(5, lvl))
 
-    labels = {
-        1: "Minimal risk",
-        2: "Emerging risk",
-        3: "High biologic risk",
-        4: "Subclinical atherosclerosis",
-        5: "Atherosclerosis",
-    }
+    st.markdown(f"### Management Level: **{lvl} — {LEVEL_NAMES.get(lvl, '—')}**" + (f" (**{sublevel}**)" if sublevel else ""))
 
-    segs = []
+    cols = st.columns(5)
     for i in range(1, 6):
-        active = (i == lvl)
-        segs.append(f"""
-        <div style="
-            flex:1;
-            padding:10px 10px;
-            border:1px solid rgba(31,41,55,0.18);
-            border-radius:12px;
-            background:{'rgba(31,41,55,0.06)' if active else '#fff'};
-            font-weight:{'800' if active else '600'};
-            text-align:center;
-            font-size:0.88rem;
-        ">
-          {i}
-          <div style="font-weight:600; font-size:0.78rem; color:rgba(31,41,55,0.70); margin-top:2px;">
-            {labels[i]}
-          </div>
-        </div>
-        """)
-
-    sub = f" <span style='font-weight:700; color:rgba(31,41,55,0.70)'>({sublevel})</span>" if sublevel else ""
-    return f"""
-    <div style="margin-top:8px; margin-bottom:10px;">
-      <div style="font-weight:900; font-size:1.0rem; margin-bottom:6px;">
-        Management Level: {lvl}{sub}
-      </div>
-      <div style="display:flex; gap:8px;">
-        {''.join(segs)}
-      </div>
-    </div>
-    """
+        marker = "✅" if i == lvl else " "
+        with cols[i - 1]:
+            st.markdown(f"**{marker} {i}**")
+            st.caption(LEVEL_NAMES[i])
 
 # ============================================================
-# Clinical report renderer (renames Posture -> Management)
+# High-yield Clinical Report (built from engine JSON, not quick-text parsing)
 # ============================================================
-def render_clinical_report(note_text: str) -> str:
-    note_text = (note_text or "").replace("Posture Level", "Management Level")
-    lines = [ln.rstrip() for ln in note_text.splitlines()]
-    out = ['<div class="report">']
-    title = next((ln for ln in lines if ln.strip()), "LEVELS™ Output")
-    out.append(f"<h2>{title}</h2>")
+def render_high_yield_report(out: dict) -> str:
+    lvl = out.get("levels", {}) or {}
+    rs = out.get("riskSignal", {}) or {}
+    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
+    targets = out.get("targets", {}) or {}
+    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+    drivers = out.get("drivers", []) or []
+    next_actions = out.get("nextActions", []) or []
+    asp = out.get("aspirin", {}) or {}
 
-    def open_section(t):
-        out.append('<div class="section">')
-        out.append(f'<div class="section-title">{t}</div>')
+    # Determine management level (robust)
+    mgmt_level = lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1
+    try:
+        mgmt_level = int(mgmt_level)
+    except Exception:
+        mgmt_level = 1
+    mgmt_level = max(1, min(5, mgmt_level))
+    sub = lvl.get("sublevel")
 
-    def close_section():
-        out.append("</div>")
+    name = LEVEL_NAMES.get(mgmt_level, "—")
+    title = f"LEVELS™ — Management Level {mgmt_level}: {name}" + (f" ({sub})" if sub else "")
 
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        i += 1
-        if not line or line == title:
-            continue
+    risk_pct = risk10.get("risk_pct")
+    risk_line = f"{risk_pct}%" if risk_pct is not None else "—"
+    risk_cat = risk10.get("category") or ""
 
-        if line.startswith("Level ") or line.startswith("Management Level "):
-            open_section("Summary")
-            out.append(f"<p><strong>{line}</strong></p>")
-            while i < len(lines):
-                nxt = lines[i].strip()
-                if not nxt:
-                    i += 1
-                    continue
-                if nxt.startswith(("Risk Signal Score", "Pooled Cohort Equations", "Drivers:", "Targets", "Next:", "Aspirin", "Evidence:", "Confidence:")):
-                    break
-                if ":" in nxt:
-                    left, right = nxt.split(":", 1)
-                    out.append(f"<p><strong>{left.strip()}:</strong> {right.strip()}</p>")
-                else:
-                    out.append(f"<p>{nxt}</p>")
-                i += 1
-            close_section()
-            continue
+    evidence_line = ev.get("cac_status") or out.get("diseaseBurden") or "—"
+    burden_line = ev.get("burden_band") or "—"
 
-        if line.startswith("Risk Signal Score") or line.startswith("Pooled Cohort Equations") or line.startswith("Evidence:") or line.startswith("Confidence:"):
-            open_section("Key metrics")
-            j = i - 1
-            while j < len(lines):
-                ln = lines[j].strip()
-                if not ln:
-                    j += 1
-                    continue
-                if ln.startswith(("Drivers:", "Targets", "Next:", "Aspirin")):
-                    break
-                if ":" in ln:
-                    left, right = ln.split(":", 1)
-                    out.append(f"<p><strong>{left.strip()}:</strong> {right.strip()}</p>")
-                else:
-                    out.append(f"<p>{ln}</p>")
-                j += 1
-            i = j
-            close_section()
-            continue
+    # build HTML
+    html = []
+    html.append('<div class="report">')
+    html.append(f"<h2>{title}</h2>")
 
-        if line.startswith("Drivers:"):
-            open_section("Primary drivers")
-            items = [x.strip() for x in line.split(":", 1)[1].split(";") if x.strip()]
-            items = [
-                it for it in items
-                if not re.match(r"^\s*level\b", it, flags=re.IGNORECASE)
-                and not re.match(r"^\s*level\s*[:=]\s*\d", it, flags=re.IGNORECASE)
-            ]
-            out.append("<ul>")
-            for it in items:
-                out.append(f"<li>{it}</li>")
-            out.append("</ul>")
-            close_section()
-            continue
+    # Summary (high yield only)
+    html.append('<div class="section">')
+    html.append('<div class="section-title">Summary</div>')
+    meaning = lvl.get("meaning")
+    if meaning:
+        html.append(f"<p>{meaning}</p>")
+    else:
+        html.append("<p class='muted'>No summary available.</p>")
+    html.append("</div>")
 
-        if line == "Targets" or line.startswith("Targets"):
-            open_section("Targets")
-            out.append("<ul>")
-            while i < len(lines):
-                ln = lines[i].strip()
-                if not ln:
-                    i += 1
-                    continue
-                if ln.startswith(("Benefit context", "ESC/EAS", "Next:", "Aspirin")) or ln == "Targets":
-                    break
-                if ln.startswith("•"):
-                    out.append(f"<li>{ln[1:].strip()}</li>")
-                else:
-                    out.append(f"<li>{ln}</li>")
-                i += 1
-            out.append("</ul>")
-            if i < len(lines) and lines[i].strip().startswith("Benefit context"):
-                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
-                i += 1
-            if i < len(lines) and lines[i].strip().startswith("ESC/EAS"):
-                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
-                i += 1
-            close_section()
-            continue
+    # Key metrics
+    html.append('<div class="section">')
+    html.append('<div class="section-title">Key metrics</div>')
+    html.append(f"<p><strong>Risk Signal Score:</strong> {rs.get('score','—')}/100 ({rs.get('band','—')})</p>")
+    if risk_pct is not None:
+        html.append(f"<p><strong>10-year ASCVD risk (PCE):</strong> {risk_line} {f'({risk_cat})' if risk_cat else ''}</p>")
+    else:
+        html.append(f"<p><strong>10-year ASCVD risk (PCE):</strong> —</p>")
+    html.append(f"<p><strong>Evidence:</strong> {evidence_line}</p>")
+    html.append(f"<p><strong>Burden:</strong> {burden_line}</p>")
+    html.append("</div>")
 
-        if line.startswith("Next:"):
-            open_section("Next steps")
-            payload = line.split(":", 1)[1].strip()
-            steps = [x.strip() for x in payload.split(" / ")] if " / " in payload else ([payload] if payload else [])
-            out.append("<ul>")
-            for s in steps:
-                if s:
-                    out.append(f"<li>{s}</li>")
-            out.append("</ul>")
-            close_section()
-            continue
+    # Drivers
+    html.append('<div class="section">')
+    html.append('<div class="section-title">Primary drivers</div>')
+    if drivers:
+        html.append("<ul>")
+        for d in drivers[:3]:
+            html.append(f"<li>{d}</li>")
+        html.append("</ul>")
+    else:
+        html.append("<p class='muted'>No drivers listed.</p>")
+    html.append("</div>")
 
-        if line.startswith("Aspirin") or line.startswith("Why:"):
-            open_section("Aspirin")
-            out.append(f"<p>{line}</p>")
-            if i < len(lines) and lines[i].strip().startswith("Why:"):
-                out.append(f"<p class='muted'>{lines[i].strip()}</p>")
-                i += 1
-            close_section()
-            continue
+    # Targets + plan
+    html.append('<div class="section">')
+    html.append('<div class="section-title">Targets & plan</div>')
 
-        open_section("Additional")
-        out.append(f"<p class='muted'>{line}</p>")
-        close_section()
+    # Targets (only show if present)
+    tar_lines = []
+    if targets.get("apob") is not None:
+        tar_lines.append(f"ApoB <{targets['apob']} mg/dL")
+    if targets.get("ldl") is not None:
+        tar_lines.append(f"LDL-C <{targets['ldl']} mg/dL")
+    if tar_lines:
+        html.append("<p><strong>Targets:</strong> " + " • ".join(tar_lines) + "</p>")
 
-    out.append("</div>")
-    return "\n".join(out)
+    posture = lvl.get("defaultPosture")
+    if posture:
+        # remove leftover "Default posture:" prefix if engine uses it
+        posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(posture)).strip()
+        html.append(f"<p><strong>Plan:</strong> {posture_clean}</p>")
+
+    if next_actions:
+        html.append("<p><strong>Next steps:</strong></p>")
+        html.append("<ul>")
+        for a in next_actions[:3]:
+            html.append(f"<li>{a}</li>")
+        html.append("</ul>")
+
+    # Aspirin high-yield
+    asp_status = asp.get("status")
+    if asp_status:
+        html.append(f"<p><strong>Aspirin:</strong> {asp_status}</p>")
+
+    html.append("</div>")  # targets & plan section
+
+    html.append("</div>")  # report container
+    return "\n".join(html)
 
 # ============================================================
-# Helpers / options
+# Parsing coverage UI
 # ============================================================
-FHX_OPTIONS = [
-    "None / Unknown",
-    "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55",
-    "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65",
-    "Sibling with premature ASCVD",
-    "Multiple first-degree relatives",
-    "Other premature relative",
-]
-
-def fhx_to_bool(choice: str) -> bool:
-    return choice is not None and choice != "None / Unknown"
-
 TARGET_PARSE_FIELDS = [
     ("age", "Age"),
     ("sex", "Gender"),
@@ -351,24 +341,8 @@ TARGET_PARSE_FIELDS = [
     ("ascvd_10y", "ASCVD 10-year risk (if present)"),
 ]
 
-def management_pill_class(level: int) -> str:
-    if level <= 1:
-        return "pill pill-green"
-    if level in (2, 3):
-        return "pill pill-yellow"
-    return "pill pill-red"
-
-def sublevel_explainer(sub: str):
-    if sub == "3A":
-        return ("High biology without strong enhancers; plaque not proven.", ["Trend labs", "Lifestyle sprint", "Shared decision on statin", "Consider calcium score if unknown"])
-    if sub == "3B":
-        return ("High biology with risk enhancers (Lp(a)/FHx/inflammation) → higher lifetime acceleration.", ["Statin default often reasonable", "Address enhancers", "Consider calcium score if unknown", "ApoB-guided targets"])
-    if sub == "3C":
-        return ("Intermediate pooled-risk phenotype (near-term risk elevated) despite no proven plaque.", ["Treat risk seriously", "Statin default often reasonable", "Confirm BP/lipids", "Consider calcium score if unknown"])
-    return ("Prevention zone.", ["Refine with calcium score", "ApoB-guided targets", "Shared decisions"])
-
 # ============================================================
-# APPLY PARSED TO SESSION (exists + used by Parse & Apply)
+# Apply parsed → session
 # ============================================================
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
@@ -434,7 +408,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         )
         applied.append("Race")
 
-    # optional extras from raw text (no harm if absent)
+    # Optional extras from raw text
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
@@ -445,7 +419,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
-    # dedupe missing
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
@@ -498,7 +471,6 @@ def cb_clear_autofilled_fields():
     st.session_state["diabetes_choice_val"] = "No"
     st.session_state["cac_known_val"] = "No"
     st.session_state["cac_val"] = 0
-    st.session_state.pop("ascvd10_val", None)
     for k in ["ra","psoriasis","sle","ibd","hiv","osa","nafld"]:
         st.session_state[f"infl_{k}_val"] = False
 
@@ -508,11 +480,11 @@ def cb_clear_autofilled_fields():
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest (restored: parsed preview + coverage + KV)
+# SmartPhrase ingest (restored sections)
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
 
-with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium score/A1c)", expanded=False):
+with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     st.markdown(
         "<div class='small-help'>Paste rendered Epic output (SmartPhrase text, ASCVD block, lipid panel, etc). "
         "Click <strong>Parse & Apply</strong>. This will auto-fill as many fields as possible, and explicitly flag what was not found.</div>",
@@ -532,7 +504,6 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium 
     parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
 
     c1, c2, c3, c4 = st.columns([1, 1, 1.4, 2.6])
-
     with c1:
         if st.button("Parse & Apply", type="primary"):
             applied, missing = apply_parsed_to_session(parsed_preview, smart_txt or "")
@@ -540,13 +511,10 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium 
             if missing:
                 st.warning("Missing/unparsed: " + ", ".join(missing))
             st.rerun()
-
     with c2:
         st.button("Clear pasted text", on_click=cb_clear_pasted_text)
-
     with c3:
         st.button("Clear auto-filled fields", on_click=cb_clear_autofilled_fields)
-
     with c4:
         st.caption("Parsed preview")
         st.json(parsed_preview)
@@ -595,7 +563,14 @@ with st.form("levels_form"):
     with a3:
         ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True)
 
-    fhx_choice = st.selectbox("Premature family history (Father <55; Mother <65)", FHX_OPTIONS, index=0)
+    fhx_choice = st.selectbox("Premature family history (Father <55; Mother <65)", [
+        "None / Unknown",
+        "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55",
+        "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65",
+        "Sibling with premature ASCVD",
+        "Multiple first-degree relatives",
+        "Other premature relative",
+    ], index=0)
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Cardiometabolic profile")
@@ -677,12 +652,12 @@ if submitted:
     if sbp <= 0: req_errors.append("Systolic BP is required (must be > 0).")
     if tc <= 0: req_errors.append("Total cholesterol is required (must be > 0).")
     if hdl <= 0: req_errors.append("HDL is required (must be > 0).")
+
     if req_errors:
         st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
         st.stop()
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
-
     cac_to_send = None
     if cac_known == "Yes":
         cac_to_send = int(cac) if cac is not None else 0
@@ -717,48 +692,42 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    note_text = render_quick_text(patient, out).replace("Posture Level", "Management Level")
-    clinical_html = render_clinical_report(note_text)
+    # Replace drift wording anywhere it might appear in quick text
+    note_text = render_quick_text(patient, out)
+    note_text = note_text.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
+    note_text = note_text.replace("Posture Level", "Management Level")
 
     # Key metrics FIRST
     st.subheader("Key metrics")
-    rs = out.get("riskSignal", {})
-    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
-    lvl = out.get("levels", {})
+    lvl = out.get("levels", {}) or {}
+    rs = out.get("riskSignal", {}) or {}
+    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
 
-    # Hardened: accept multiple possible keys without breaking the bar
-    mgmt_level = (
-        lvl.get("managementLevel")
-        or lvl.get("postureLevel")
-        or lvl.get("level")
-        or 1
-    )
+    mgmt_level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
         mgmt_level = int(mgmt_level)
     except Exception:
         mgmt_level = 1
     mgmt_level = max(1, min(5, mgmt_level))
-
     sub = lvl.get("sublevel")
-    lvl_display = f"{mgmt_level}" + (f" ({sub})" if sub else "")
 
-    st.markdown(render_management_bar(mgmt_level, sub), unsafe_allow_html=True)
-    st.caption("Legend: **Management Level** reflects prevention intensity. **Evidence** reflects plaque certainty (Calcium score / ASCVD).")
+    render_management_ladder(mgmt_level, sub)
+    st.caption("Legend: Management Level reflects prevention intensity. Evidence reflects plaque certainty (Calcium score / ASCVD).")
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Management Level", lvl_display)
+    m1.metric("Management Level", f"{mgmt_level}" + (f" ({sub})" if sub else ""))
     m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
     m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
-    ev = (lvl.get("evidence") or {})
+    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
     st.markdown(f"**Evidence:** {ev.get('cac_status','—')} / **Burden:** {ev.get('burden_band','—')}")
 
+    # High-yield clinical report (JSON-driven)
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("Clinical report (high-yield)")
+    st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
 
-    # Clinical report SECOND
-    st.subheader("Clinical report")
-    st.markdown(clinical_html, unsafe_allow_html=True)
-
+    # Downloads
     d1, d2 = st.columns(2)
     with d1:
         st.download_button(
@@ -780,22 +749,18 @@ if submitted:
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     with st.expander("Anchors (near-term vs lifetime)", expanded=False):
-        anchors = out.get("anchors", {})
+        anchors = out.get("anchors", {}) or {}
         near = (anchors.get("nearTerm") or {}).get("summary", "—")
         life = (anchors.get("lifetime") or {}).get("summary", "—")
         st.markdown(f"**Near-term anchor:** {near}")
         st.markdown(f"**Lifetime anchor:** {life}")
 
-    with st.expander("Trace (audit trail)", expanded=False):
-        st.json(out.get("trace", []))
-
     with st.expander("Interpretation (why / plan / explainer)", expanded=False):
         st.markdown("<div class='level-card'>", unsafe_allow_html=True)
         st.markdown(
-            f"<h3>Interpretation <span class='{management_pill_class(mgmt_level)}'>{lvl_display}</span></h3>",
+            f"<h3>Interpretation — Management Level {mgmt_level} ({LEVEL_NAMES.get(mgmt_level,'—')})</h3>",
             unsafe_allow_html=True,
         )
-
         if lvl.get("meaning"):
             st.markdown(f"<p class='small-help'><strong>What this means:</strong> {lvl['meaning']}</p>", unsafe_allow_html=True)
 
@@ -808,7 +773,8 @@ if submitted:
             st.markdown("</ul>", unsafe_allow_html=True)
 
         if lvl.get("defaultPosture"):
-            st.markdown(f"<p class='small-help'><strong>Plan:</strong> {lvl['defaultPosture']}</p>", unsafe_allow_html=True)
+            posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(lvl["defaultPosture"])).strip()
+            st.markdown(f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>", unsafe_allow_html=True)
 
         if sub:
             expl, chips = sublevel_explainer(sub)
@@ -821,7 +787,7 @@ if submitted:
         st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("Aspirin summary", expanded=False):
-        asp = out.get("aspirin", {})
+        asp = out.get("aspirin", {}) or {}
         asp_status = asp.get("status", "Not assessed")
         asp_why = short_why(asp.get("rationale", []), max_items=3)
         st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
@@ -830,8 +796,8 @@ if submitted:
         with st.expander("Quick output (raw text)", expanded=False):
             st.code(note_text, language="text")
 
-    with st.expander("Raw text (copy/paste)", expanded=False):
-        st.code(note_text, language="text")
+    with st.expander("Trace (audit trail)", expanded=False):
+        st.json(out.get("trace", []))
 
     if show_json:
         with st.expander("JSON (debug)", expanded=False):
