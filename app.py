@@ -1,4 +1,4 @@
-# app.py (fully consolidated, single-file, stable)
+# app.py (fully consolidated, single-file, stable) — ONLY changes: calcium score box always visible + CAC payload uses session_state
 import json
 import re
 import streamlit as st
@@ -330,7 +330,6 @@ def render_high_yield_report(out: dict) -> str:
     posture = lvl.get("defaultPosture")
     if posture:
         posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(posture)).strip()
-        # rename drift if present
         posture_clean = posture_clean.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
         html.append(f"<p><strong>Plan:</strong> {posture_clean}</p>")
 
@@ -624,11 +623,20 @@ with st.form("levels_form"):
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Imaging")
 
+    # ✅ CHANGE 1: Calcium score box ALWAYS visible (disabled if No)
     d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
         cac_known = st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
     with d2:
-        cac = st.number_input("Calcium score (Agatston)", 0, 5000, step=1, key="cac_val") if cac_known == "Yes" else None
+        st.number_input(
+            "Calcium score (Agatston)",
+            min_value=0,
+            max_value=5000,
+            step=1,
+            key="cac_val",
+            disabled=(cac_known != "Yes"),
+            help="Enter 0 if known zero. If not available, leave disabled.",
+        )
     with d3:
         st.caption("")
 
@@ -679,9 +687,8 @@ if submitted:
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
-    cac_to_send = None
-    if cac_known == "Yes":
-        cac_to_send = int(cac) if cac is not None else 0
+    # ✅ CHANGE 2: CAC payload uses session_state, preserves CAC=0 when available
+    cac_to_send = int(st.session_state["cac_val"]) if cac_known == "Yes" else None
 
     data = {
         "age": int(age),
@@ -834,4 +841,3 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
-
