@@ -89,7 +89,7 @@ def contains_phi(s: str) -> bool:
     return False
 
 # ============================================================
-# UI-side parsing helpers
+# UI-side parsing helpers (hsCRP + inflammatory flags + diabetes negation)
 # ============================================================
 def parse_hscrp_from_text(txt: str):
     if not txt:
@@ -142,7 +142,13 @@ def diabetes_negation_guard(txt: str):
 # Graphic: 5-step Management Level bar (clinician-native labels)
 # ============================================================
 def render_management_bar(level: int, sublevel: str | None = None) -> str:
-    lvl = max(0, min(5, int(level or 0)))
+    # Always show a highlighted segment: clamp to 1–5
+    try:
+        lvl = int(level)
+    except Exception:
+        lvl = 1
+    lvl = max(1, min(5, lvl))
+
     labels = {
         1: "Minimal risk",
         2: "Emerging risk",
@@ -330,6 +336,21 @@ FHX_OPTIONS = [
 def fhx_to_bool(choice: str) -> bool:
     return choice is not None and choice != "None / Unknown"
 
+TARGET_PARSE_FIELDS = [
+    ("age", "Age"),
+    ("sex", "Gender"),
+    ("sbp", "Systolic BP"),
+    ("tc", "Total Cholesterol"),
+    ("hdl", "HDL"),
+    ("ldl", "LDL"),
+    ("apob", "ApoB"),
+    ("lpa", "Lp(a)"),
+    ("lpa_unit", "Lp(a) unit"),
+    ("cac", "Calcium score"),
+    ("a1c", "A1c"),
+    ("ascvd_10y", "ASCVD 10-year risk (if present)"),
+]
+
 def management_pill_class(level: int) -> str:
     if level <= 1:
         return "pill pill-green"
@@ -347,7 +368,7 @@ def sublevel_explainer(sub: str):
     return ("Prevention zone.", ["Refine with calcium score", "ApoB-guided targets", "Shared decisions"])
 
 # ============================================================
-# ✅ APPLY PARSED TO SESSION (THIS WAS MISSING — FIXES NameError)
+# APPLY PARSED TO SESSION (exists + used by Parse & Apply)
 # ============================================================
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
@@ -395,7 +416,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
         applied.append("Smoking")
 
-    # Diabetes: respect explicit negation in text
     dm_guard = diabetes_negation_guard(raw_txt)
     if dm_guard is False:
         st.session_state["diabetes_choice_val"] = "No"
@@ -403,8 +423,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     elif parsed.get("diabetes") is not None:
         st.session_state["diabetes_choice_val"] = "Yes" if parsed["diabetes"] else "No"
         applied.append("Diabetes(manual)")
-    else:
-        missing.append("Diabetes(manual)")
 
     if parsed.get("bpTreated") is not None:
         st.session_state["bp_treated_val"] = "Yes" if parsed["bpTreated"] else "No"
@@ -416,22 +434,18 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         )
         applied.append("Race")
 
-    if parsed.get("ascvd_10y") is not None:
-        st.session_state["ascvd10_val"] = float(parsed["ascvd_10y"])
-        applied.append("ASCVD10y")
-
-    # hsCRP from raw text (optional)
+    # optional extras from raw text (no harm if absent)
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
         applied.append("hsCRP")
 
-    # inflammatory flags from raw text (optional)
     infl = parse_inflammatory_flags_from_text(raw_txt)
     for k, v in infl.items():
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
+    # dedupe missing
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
@@ -457,7 +471,7 @@ st.session_state.setdefault("cac_known_val", "No")
 st.session_state.setdefault("cac_val", 0)
 st.session_state.setdefault("smartphrase_raw", "")
 
-for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
+for k in ["ra","psoriasis","sle","ibd","hiv","osa","nafld"]:
     st.session_state.setdefault(f"infl_{k}_val", False)
 
 # ============================================================
@@ -485,7 +499,7 @@ def cb_clear_autofilled_fields():
     st.session_state["cac_known_val"] = "No"
     st.session_state["cac_val"] = 0
     st.session_state.pop("ascvd10_val", None)
-    for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
+    for k in ["ra","psoriasis","sle","ibd","hiv","osa","nafld"]:
         st.session_state[f"infl_{k}_val"] = False
 
 # ============================================================
@@ -494,7 +508,7 @@ def cb_clear_autofilled_fields():
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest
+# SmartPhrase ingest (restored: parsed preview + coverage + KV)
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
 
@@ -517,7 +531,8 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium 
 
     parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
 
-    c1, c2, c3 = st.columns([1, 1, 1.4])
+    c1, c2, c3, c4 = st.columns([1, 1, 1.4, 2.6])
+
     with c1:
         if st.button("Parse & Apply", type="primary"):
             applied, missing = apply_parsed_to_session(parsed_preview, smart_txt or "")
@@ -525,13 +540,44 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium 
             if missing:
                 st.warning("Missing/unparsed: " + ", ".join(missing))
             st.rerun()
+
     with c2:
         st.button("Clear pasted text", on_click=cb_clear_pasted_text)
+
     with c3:
         st.button("Clear auto-filled fields", on_click=cb_clear_autofilled_fields)
 
-    st.caption("Parsed preview")
-    st.json(parsed_preview)
+    with c4:
+        st.caption("Parsed preview")
+        st.json(parsed_preview)
+
+    st.markdown("### Parse coverage (explicit)")
+    for key, label in TARGET_PARSE_FIELDS:
+        ok = parsed_preview.get(key) is not None
+        badge = "<span class='badge ok'>parsed</span>" if ok else "<span class='badge miss'>not found</span>"
+        val = f": {parsed_preview.get(key)}" if ok else ""
+        st.markdown(f"- **{label}** {badge}{val}", unsafe_allow_html=True)
+
+    st.markdown(
+        f"""
+<div class="kv">
+  <div><strong>Loaded defaults:</strong></div>
+  <div>Age: {st.session_state.get("age_val", 0) or "—"}</div>
+  <div>Gender: {st.session_state.get("sex_val", "—")}</div>
+  <div>Race: {st.session_state.get("race_val", "—")}</div>
+  <div>SBP: {st.session_state.get("sbp_val", 0) or "—"}</div>
+  <div>TC: {st.session_state.get("tc_val", 0) or "—"}</div>
+  <div>HDL: {st.session_state.get("hdl_val", 0) or "—"}</div>
+  <div>LDL: {st.session_state.get("ldl_val", 0) or "—"}</div>
+  <div>ApoB: {st.session_state.get("apob_val", 0) or "—"}</div>
+  <div>Lp(a): {st.session_state.get("lpa_val", 0) or "—"} {st.session_state.get("lpa_unit_val", "")}</div>
+  <div>A1c: {st.session_state.get("a1c_val", 0.0) or "—"}</div>
+  <div>hsCRP: {st.session_state.get("hscrp_val", 0.0) or "—"}</div>
+  <div>Calcium score: {st.session_state.get("cac_val", 0) if st.session_state.get("cac_known_val")=="Yes" else "—"} ({st.session_state.get("cac_known_val", "No")})</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # Main form
@@ -680,7 +726,19 @@ if submitted:
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {})
     lvl = out.get("levels", {})
 
-    mgmt_level = int(lvl.get("postureLevel", lvl.get("level", 0)) or 0)
+    # Hardened: accept multiple possible keys without breaking the bar
+    mgmt_level = (
+        lvl.get("managementLevel")
+        or lvl.get("postureLevel")
+        or lvl.get("level")
+        or 1
+    )
+    try:
+        mgmt_level = int(mgmt_level)
+    except Exception:
+        mgmt_level = 1
+    mgmt_level = max(1, min(5, mgmt_level))
+
     sub = lvl.get("sublevel")
     lvl_display = f"{mgmt_level}" + (f" ({sub})" if sub else "")
 
@@ -782,5 +840,4 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
-
 
