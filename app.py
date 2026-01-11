@@ -1,8 +1,7 @@
 # app.py (fully consolidated, single-file, stable)
-# + additions: "calculator feel" output (Recommended target + view toggle + LDL vs ApoB logic)
-# + calcium score box always visible + CAC payload uses session_state
-# + FIX: Parse & Apply uses Streamlit callback so widgets actually populate
-# + FIX: remove "drift" everywhere (global text scrub)
+# + LDL-first targets (ApoB shown as secondary) + ApoB hover anchors
+# + calcium score always visible + CAC payload uses session_state
+# + Parse & Apply callback + drift removed via scrub_terms
 
 import json
 import re
@@ -154,7 +153,6 @@ def contains_phi(s: str) -> bool:
 def scrub_terms(s: str) -> str:
     if not s:
         return s
-    # remove any appearance of drift
     s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
     s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
     return s
@@ -273,31 +271,33 @@ def sublevel_explainer(sub: str):
     return ("", [])
 
 # ------------------------------------------------------------
-# Pick primary lipid target (ApoB if present, else LDL)
+# LDL-FIRST targets (ApoB secondary)
 # ------------------------------------------------------------
-def pick_primary_targets(out: dict, patient_data: dict) -> dict:
+def pick_dual_targets_ldl_first(out: dict, patient_data: dict) -> dict:
+    """
+    Returns:
+      primary: ('LDL-C', '<100 mg/dL') if LDL goal exists, otherwise ApoB
+      secondary: ApoB line if ApoB goal exists
+      apob_measured: bool
+    """
     targets = out.get("targets", {}) or {}
-
-    has_apob = patient_data.get("apob") is not None
-    has_ldl = patient_data.get("ldl") is not None
-
-    apob_goal = targets.get("apob")
     ldl_goal = targets.get("ldl")
+    apob_goal = targets.get("apob")
+
+    apob_measured = patient_data.get("apob") is not None
 
     primary = None
     secondary = None
 
-    if has_apob and apob_goal is not None:
+    if ldl_goal is not None:
+        primary = ("LDL-C", f"<{int(ldl_goal)} mg/dL")
+    elif apob_goal is not None:
         primary = ("ApoB", f"<{int(apob_goal)} mg/dL")
-        if has_ldl and ldl_goal is not None:
-            secondary = ("LDL-C", f"<{int(ldl_goal)} mg/dL")
-    else:
-        if ldl_goal is not None:
-            primary = ("LDL-C", f"<{int(ldl_goal)} mg/dL")
-        if apob_goal is not None and not has_apob:
-            secondary = ("ApoB", f"<{int(apob_goal)} mg/dL (if checked)")
 
-    return {"primary": primary, "secondary": secondary}
+    if apob_goal is not None:
+        secondary = ("ApoB", f"<{int(apob_goal)} mg/dL")
+
+    return {"primary": primary, "secondary": secondary, "apob_measured": apob_measured}
 
 # ------------------------------------------------------------
 # High-yield Clinical Report (built from engine JSON)
@@ -365,10 +365,10 @@ def render_high_yield_report(out: dict) -> str:
     html.append('<div class="section-title">Targets & plan</div>')
 
     tar_lines = []
-    if targets.get("apob") is not None:
-        tar_lines.append(f"ApoB <{targets['apob']} mg/dL")
     if targets.get("ldl") is not None:
         tar_lines.append(f"LDL-C <{targets['ldl']} mg/dL")
+    if targets.get("apob") is not None:
+        tar_lines.append(f"ApoB <{targets['apob']} mg/dL")
     if tar_lines:
         html.append("<p><strong>Targets:</strong> " + " • ".join(tar_lines) + "</p>")
 
@@ -592,9 +592,8 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
 
     parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
-    st.session_state["parsed_preview_cache"] = parsed_preview  # cache for callback
+    st.session_state["parsed_preview_cache"] = parsed_preview
 
-    # messages from last apply
     if st.session_state.get("last_applied_msg"):
         st.success(st.session_state["last_applied_msg"])
     if st.session_state.get("last_missing_msg"):
@@ -690,7 +689,6 @@ with st.form("levels_form"):
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Imaging")
 
-    # Calcium score box ALWAYS visible (disabled if No)
     d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
         cac_known = st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
@@ -757,7 +755,6 @@ if submitted:
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
-    # CAC payload uses session_state, preserves CAC=0 when available
     cac_to_send = int(st.session_state["cac_val"]) if cac_known == "Yes" else None
 
     data = {
@@ -800,22 +797,36 @@ if submitted:
 
     note_text = render_quick_text(patient, out)
     note_text = note_text.replace("Posture Level", "Management Level")
-    note_text = scrub_terms(note_text)  # drift removed here too
+    note_text = scrub_terms(note_text)
 
     view_mode = st.radio("View", ["Simple", "Standard", "Details"], horizontal=True, index=1)
 
-    targets_pick = pick_primary_targets(out, data)
-    primary = targets_pick["primary"]
-    secondary = targets_pick["secondary"]
+    # ---------- LDL-first targets (ApoB secondary) ----------
+    t_pick = pick_dual_targets_ldl_first(out, data)
+    primary = t_pick["primary"]
+    apob_line = t_pick["secondary"]
+    apob_measured = t_pick["apob_measured"]
 
-    st.markdown("## Recommended lipid target")
+    st.markdown("## Recommended lipid targets")
     if primary:
         st.markdown(f"### **{primary[0]} {primary[1]}**")
     else:
         st.markdown("### **Target: —**")
 
-    if secondary and view_mode != "Simple":
-        st.caption(f"Secondary: {secondary[0]} {secondary[1]}")
+    # ApoB line with hover anchors
+    if apob_line is not None:
+        hover = "Quick anchors: <80 good • 80–99 borderline • ≥100 high • ≥130 very high (ACC risk signal). ApoB is a particle-count check—especially helpful when TG/metabolic risk is present."
+        st.markdown(
+            f"**{apob_line[0]} {apob_line[1]}** <span title=\"{hover}\">ⓘ</span>",
+            unsafe_allow_html=True,
+        )
+        if not apob_measured:
+            st.caption("ApoB not measured here — optional add-on to check for discordance.")
+    else:
+        if view_mode != "Simple":
+            st.caption("ApoB not available (no engine target).")
+
+    # -------------------------------------------------------
 
     lvl = out.get("levels", {}) or {}
     rs = out.get("riskSignal", {}) or {}
@@ -936,3 +947,4 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
+
