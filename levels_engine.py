@@ -892,3 +892,4 @@ def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
 
     lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
     return "\n".join(lines)
+
