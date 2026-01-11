@@ -5,7 +5,6 @@ import streamlit as st
 
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
-from ui_components import render_management_bar  # NEW (visuals separated)
 
 # ============================================================
 # Page + styling
@@ -90,7 +89,7 @@ def contains_phi(s: str) -> bool:
     return False
 
 # ============================================================
-# UI-side parsing helpers (hsCRP + inflammatory flags + diabetes negation)
+# UI-side parsing helpers
 # ============================================================
 def parse_hscrp_from_text(txt: str):
     if not txt:
@@ -138,6 +137,52 @@ def diabetes_negation_guard(txt: str):
         if not re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
             return True
     return None
+
+# ============================================================
+# Graphic: 5-step Management Level bar (clinician-native labels)
+# ============================================================
+def render_management_bar(level: int, sublevel: str | None = None) -> str:
+    lvl = max(0, min(5, int(level or 0)))
+    labels = {
+        1: "Minimal risk",
+        2: "Emerging risk",
+        3: "High biologic risk",
+        4: "Subclinical atherosclerosis",
+        5: "Atherosclerosis",
+    }
+
+    segs = []
+    for i in range(1, 6):
+        active = (i == lvl)
+        segs.append(f"""
+        <div style="
+            flex:1;
+            padding:10px 10px;
+            border:1px solid rgba(31,41,55,0.18);
+            border-radius:12px;
+            background:{'rgba(31,41,55,0.06)' if active else '#fff'};
+            font-weight:{'800' if active else '600'};
+            text-align:center;
+            font-size:0.88rem;
+        ">
+          {i}
+          <div style="font-weight:600; font-size:0.78rem; color:rgba(31,41,55,0.70); margin-top:2px;">
+            {labels[i]}
+          </div>
+        </div>
+        """)
+
+    sub = f" <span style='font-weight:700; color:rgba(31,41,55,0.70)'>({sublevel})</span>" if sublevel else ""
+    return f"""
+    <div style="margin-top:8px; margin-bottom:10px;">
+      <div style="font-weight:900; font-size:1.0rem; margin-bottom:6px;">
+        Management Level: {lvl}{sub}
+      </div>
+      <div style="display:flex; gap:8px;">
+        {''.join(segs)}
+      </div>
+    </div>
+    """
 
 # ============================================================
 # Clinical report renderer (renames Posture -> Management)
@@ -271,7 +316,7 @@ def render_clinical_report(note_text: str) -> str:
     return "\n".join(out)
 
 # ============================================================
-# Options
+# Helpers / options
 # ============================================================
 FHX_OPTIONS = [
     "None / Unknown",
@@ -302,6 +347,95 @@ def sublevel_explainer(sub: str):
     return ("Prevention zone.", ["Refine with calcium score", "ApoB-guided targets", "Shared decisions"])
 
 # ============================================================
+# ✅ APPLY PARSED TO SESSION (THIS WAS MISSING — FIXES NameError)
+# ============================================================
+def apply_parsed_to_session(parsed: dict, raw_txt: str):
+    applied, missing = [], []
+
+    def set_if_present(src_key, state_key, transform=lambda x: x, label=None):
+        nonlocal applied, missing
+        label = label or src_key
+        if parsed.get(src_key) is not None:
+            st.session_state[state_key] = transform(parsed[src_key])
+            applied.append(label)
+        else:
+            missing.append(label)
+
+    set_if_present("age", "age_val", int, "Age")
+    set_if_present("sex", "sex_val", lambda v: v, "Gender")
+    set_if_present("sbp", "sbp_val", int, "Systolic BP")
+
+    set_if_present("tc", "tc_val", int, "Total Cholesterol")
+    set_if_present("hdl", "hdl_val", int, "HDL")
+    set_if_present("ldl", "ldl_val", int, "LDL")
+
+    set_if_present("apob", "apob_val", int, "ApoB")
+    set_if_present("lpa", "lpa_val", lambda v: int(float(v)), "Lp(a)")
+
+    if parsed.get("lpa_unit") is not None:
+        st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
+        applied.append("Lp(a) unit")
+    else:
+        missing.append("Lp(a) unit")
+
+    if parsed.get("a1c") is not None:
+        st.session_state["a1c_val"] = float(parsed["a1c"])
+        applied.append("A1c")
+    else:
+        missing.append("A1c")
+
+    if parsed.get("cac") is not None:
+        st.session_state["cac_known_val"] = "Yes"
+        st.session_state["cac_val"] = int(float(parsed["cac"]))
+        applied.append("Calcium score")
+    else:
+        missing.append("Calcium score")
+
+    if parsed.get("smoker") is not None:
+        st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
+        applied.append("Smoking")
+
+    # Diabetes: respect explicit negation in text
+    dm_guard = diabetes_negation_guard(raw_txt)
+    if dm_guard is False:
+        st.session_state["diabetes_choice_val"] = "No"
+        applied.append("Diabetes(manual) (negation)")
+    elif parsed.get("diabetes") is not None:
+        st.session_state["diabetes_choice_val"] = "Yes" if parsed["diabetes"] else "No"
+        applied.append("Diabetes(manual)")
+    else:
+        missing.append("Diabetes(manual)")
+
+    if parsed.get("bpTreated") is not None:
+        st.session_state["bp_treated_val"] = "Yes" if parsed["bpTreated"] else "No"
+        applied.append("BP meds")
+
+    if parsed.get("africanAmerican") is not None:
+        st.session_state["race_val"] = (
+            "African American" if parsed["africanAmerican"] else "Other (use non-African American coefficients)"
+        )
+        applied.append("Race")
+
+    if parsed.get("ascvd_10y") is not None:
+        st.session_state["ascvd10_val"] = float(parsed["ascvd_10y"])
+        applied.append("ASCVD10y")
+
+    # hsCRP from raw text (optional)
+    h = parse_hscrp_from_text(raw_txt)
+    if h is not None:
+        st.session_state["hscrp_val"] = float(h)
+        applied.append("hsCRP")
+
+    # inflammatory flags from raw text (optional)
+    infl = parse_inflammatory_flags_from_text(raw_txt)
+    for k, v in infl.items():
+        st.session_state[f"infl_{k}_val"] = bool(v)
+        applied.append(k.upper())
+
+    missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
+    return applied, missing
+
+# ============================================================
 # Session defaults
 # ============================================================
 st.session_state.setdefault("age_val", 0)
@@ -323,7 +457,7 @@ st.session_state.setdefault("cac_known_val", "No")
 st.session_state.setdefault("cac_val", 0)
 st.session_state.setdefault("smartphrase_raw", "")
 
-for k in ["ra","psoriasis","sle","ibd","hiv","osa","nafld"]:
+for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
     st.session_state.setdefault(f"infl_{k}_val", False)
 
 # ============================================================
@@ -351,7 +485,7 @@ def cb_clear_autofilled_fields():
     st.session_state["cac_known_val"] = "No"
     st.session_state["cac_val"] = 0
     st.session_state.pop("ascvd10_val", None)
-    for k in ["ra","psoriasis","sle","ibd","hiv","osa","nafld"]:
+    for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{k}_val"] = False
 
 # ============================================================
@@ -360,7 +494,7 @@ def cb_clear_autofilled_fields():
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest (unchanged from your current flow)
+# SmartPhrase ingest
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
 
@@ -386,9 +520,7 @@ with st.expander("Paste Epic output to auto-fill fields (LDL/ApoB/Lp(a)/Calcium 
     c1, c2, c3 = st.columns([1, 1, 1.4])
     with c1:
         if st.button("Parse & Apply", type="primary"):
-            # NOTE: your apply_parsed_to_session function exists in your build; keep your existing one.
-            # If you removed it, re-add it from the last working version.
-            applied, missing = apply_parsed_to_session(parsed_preview, smart_txt or "")  # noqa: F821
+            applied, missing = apply_parsed_to_session(parsed_preview, smart_txt or "")
             st.success("Applied: " + (", ".join(applied) if applied else "None"))
             if missing:
                 st.warning("Missing/unparsed: " + ", ".join(missing))
@@ -550,12 +682,11 @@ if submitted:
 
     mgmt_level = int(lvl.get("postureLevel", lvl.get("level", 0)) or 0)
     sub = lvl.get("sublevel")
+    lvl_display = f"{mgmt_level}" + (f" ({sub})" if sub else "")
 
-    # Graphic descriptor + legend
     st.markdown(render_management_bar(mgmt_level, sub), unsafe_allow_html=True)
     st.caption("Legend: **Management Level** reflects prevention intensity. **Evidence** reflects plaque certainty (Calcium score / ASCVD).")
 
-    lvl_display = f"{mgmt_level}" + (f" ({sub})" if sub else "")
     m1, m2, m3 = st.columns(3)
     m1.metric("Management Level", lvl_display)
     m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
@@ -572,11 +703,21 @@ if submitted:
 
     d1, d2 = st.columns(2)
     with d1:
-        st.download_button("Download clinical text (.txt)", data=note_text.encode("utf-8"),
-                           file_name="levels_note.txt", mime="text/plain", use_container_width=True)
+        st.download_button(
+            "Download clinical text (.txt)",
+            data=note_text.encode("utf-8"),
+            file_name="levels_note.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
     with d2:
-        st.download_button("Download JSON", data=json.dumps(out, indent=2).encode("utf-8"),
-                           file_name="levels_output.json", mime="application/json", use_container_width=True)
+        st.download_button(
+            "Download JSON",
+            data=json.dumps(out, indent=2).encode("utf-8"),
+            file_name="levels_output.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
