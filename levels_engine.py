@@ -142,7 +142,6 @@ def lpa_info(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     unit_raw = str(p.get("lpa_unit", "")).strip()
     unit = unit_raw.lower()
 
-    # Determine threshold used
     if "mg" in unit:
         threshold = 50.0
         elevated = raw_val >= threshold
@@ -150,7 +149,6 @@ def lpa_info(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         mg_est = raw_val
         used = "mg/dL"
     else:
-        # default assume nmol/L
         threshold = 125.0
         elevated = raw_val >= threshold
         nmol_est = raw_val
@@ -220,7 +218,6 @@ def evidence_model(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
             "certainty": "Moderate",
         }
 
-    # CAC positive
     band = "Minimal plaque" if cac <= 9 else ("Low plaque burden" if cac <= 99 else ("Moderate plaque burden" if cac <= 399 else "High plaque burden"))
     add_trace(trace, "Evidence_CAC_positive", cac, f"CAC positive → plaque present; burden_band={band}")
     return {
@@ -301,7 +298,6 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
     genetics = 0
     lpa_inf = lpa_info(p, trace)
     if lpa_inf.get("present"):
-        # Genetics points based on used_unit/threshold tiers (same as v2.0 logic)
         used = lpa_inf["used_unit"]
         v = lpa_inf["raw_value"]
         if used == "mg/dL":
@@ -347,35 +343,6 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
 # ----------------------------
 # Pooled Cohort Equations (10-year ASCVD risk)
 # ----------------------------
-PCE = {
-    ("white", "female"): {"s0": 0.9665, "mean": -29.18,
-        "ln_age": -29.799, "ln_age_sq": 4.884, "ln_tc": 13.540, "ln_age_ln_tc": -3.114,
-        "ln_hdl": -13.578, "ln_age_ln_hdl": 3.149,
-        "ln_sbp_treated": 2.019, "ln_sbp_untreated": 1.957,
-        "smoker": 7.574, "ln_age_smoker": -1.665,
-        "diabetes": 0.661
-    },
-    ("black", "female"): {"s0": 0.9533, "mean": 86.61,
-        "ln_age": 17.114, "ln_tc": 0.940,
-        "ln_hdl": -18.920, "ln_age_ln_hdl": 4.475,
-        "ln_sbp_treated": 29.291, "ln_age_ln_sbp_treated": -6.432,
-        "ln_sbp_untreated": 27.820, "ln_age_ln_sbp_untreated": -6.087,
-        "smoker": 0.691, "diabetes": 0.874
-    },
-    ("white", "male"): {"s0": 0.9144, "mean": 61.18,
-        "ln_age": 12.344, "ln_tc": 11.853, "ln_age_ln_tc": -2.664,
-        "ln_hdl": -7.990, "ln_age_ln_hdl": 1.769,
-        "ln_sbp_treated": 1.797, "ln_sbp_untreated": 1.764,
-        "smoker": 7.837, "ln_age_smoker": -1.795,
-        "diabetes": 0.658
-    },
-    ("black", "male"): {"s0": 0.8954, "mean": 19.54,
-        "ln_age": 2.469, "ln_tc": 0.302, "ln_hdl": -0.307,
-        "ln_sbp_treated": 1.916, "ln_sbp_untreated": 1.809,
-        "smoker": 0.549, "diabetes": 0.645
-    },
-}
-
 def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     req = ["age","sex","race","tc","hdl","sbp","bp_treated","smoking","diabetes"]
     missing = [k for k in req if not p.has(k)]
@@ -497,11 +464,10 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], evidence: Dict[str, Any]) 
     else:
         near_factors.append("PCE 10y not available")
 
-    # CAC state
     cac_status = evidence.get("cac_status", "Unknown")
-    if cac_status.startswith("Known zero"):
+    if str(cac_status).startswith("Known zero"):
         near_factors.append("CAC=0 (low short-term signal)")
-    elif cac_status.startswith("Positive") or cac_status.startswith("High"):
+    elif str(cac_status).startswith("Positive"):
         near_factors.append(cac_status)
     else:
         near_factors.append("CAC unknown")
@@ -551,21 +517,14 @@ def _has_any_data(p: Patient) -> bool:
     return bool(p.data)
 
 def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[int, List[str]]:
-    """
-    Returns (postureLevel 1–5, triggers list).
-    Clinical ASCVD is handled as evidence override, not a posture level.
-    """
     triggers: List[str] = []
 
-    # Evidence-led posture when CAC indicates plaque burden
     if evidence.get("clinical_ascvd"):
         triggers.append("Clinical ASCVD")
         add_trace(trace, "Posture_override_ASCVD", True, "Clinical ASCVD present (posture uses secondary prevention banner)")
-        # Keep postureLevel at 5 for intensity equivalence, but clinicalASCVD flag will drive messaging.
         return 5, triggers
 
     if evidence.get("plaque_present") is True:
-        # CAC positive
         cac = evidence.get("cac_value")
         if isinstance(cac, int):
             if 1 <= cac <= 99:
@@ -577,11 +536,9 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
                 add_trace(trace, "Posture_CAC_100_plus", cac, "PostureLevel=5 (advanced subclinical)")
                 return 5, triggers
 
-    # No plaque evidence (CAC=0 or unknown): biology drives posture 1–3
     high = False
     mild = False
 
-    # High biology (Level 3 candidates)
     if p.has("apob") and float(p.get("apob", 0)) >= 100:
         high = True; triggers.append("ApoB>=100")
     if p.has("ldl") and float(p.get("ldl", 0)) >= 130:
@@ -594,7 +551,6 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
         high = True; triggers.append("Premature FHx")
 
     if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
-        # Chronic inflammatory disease counts as high-biology risk enhancer; hsCRP alone counts mild (see below)
         if has_chronic_inflammatory_disease(p):
             high = True
         triggers.append("Inflammation present")
@@ -604,7 +560,6 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
     if p.get("smoking") is True:
         high = True; triggers.append("Smoking")
 
-    # Mild drift (Level 2 candidates) — safety constraint: cannot elevate above 2 from these alone
     if not high:
         if p.has("apob") and 80 <= float(p.get("apob", 0)) <= 99:
             mild = True; triggers.append("ApoB 80–99")
@@ -612,7 +567,6 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
             mild = True; triggers.append("LDL 100–129")
         if a1c_status(p) == "prediabetes":
             mild = True; triggers.append("Prediabetes A1c")
-        # hsCRP mild drift (if not chronic inflammatory disease)
         if p.has("hscrp") and not has_chronic_inflammatory_disease(p):
             try:
                 if float(p.get("hscrp")) >= 2:
@@ -624,7 +578,8 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
         add_trace(trace, "Posture_high_biology", triggers[:4], "PostureLevel=3")
         return 3, triggers
     if mild:
-        add_trace(trace, "Posture_mild_drift", triggers[:4], "PostureLevel=2")
+        # drift renamed everywhere → Emerging risk
+        add_trace(trace, "Posture_emerging_risk", triggers[:4], "PostureLevel=2")
         return 2, triggers
 
     if _has_any_data(p):
@@ -638,7 +593,6 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
 # Targets + ESC goals (posture-based)
 # ----------------------------
 def levels_targets(level:int)->Dict[str,int]:
-    # Conservative before proven plaque; intensify once plaque is present.
     if level <= 2: return {"apob":80, "ldl":100}
     if level == 3: return {"apob":80, "ldl":100}
     if level == 4: return {"apob":70, "ldl":70}
@@ -654,7 +608,7 @@ def esc_numeric_goals(level:int, clinical_ascvd: bool)->str:
     if level == 3:
         return "ESC/EAS goals (high biologic risk): LDL-C <100 mg/dL; ApoB <100 mg/dL (tighten with enhancers)."
     if level == 2:
-        return "ESC/EAS goals: individualized; consider LDL-C <100 mg/dL if sustained risk drift."
+        return "ESC/EAS goals: individualized; consider LDL-C <100 mg/dL if sustained emerging risk."
     return "ESC/EAS goals: individualized by risk tier."
 
 def atherosclerotic_disease_burden(p: Patient)->str:
@@ -670,54 +624,36 @@ def atherosclerotic_disease_burden(p: Patient)->str:
 # Deterministic driver ranking
 # ----------------------------
 def ranked_drivers(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, Any]]) -> List[str]:
-    """
-    Deterministic ordering:
-      1) Clinical ASCVD / CAC evidence
-      2) ApoB/LDL
-      3) Lp(a)
-      4) Diabetes/smoking
-      5) Inflammation
-      6) FHx
-      7) Prediabetes
-    """
     candidates: List[Tuple[int, str]] = []
 
-    # Evidence
     if p.get("ascvd") is True:
         candidates.append((10, "Clinical ASCVD"))
     elif evidence.get("plaque_present") is True and evidence.get("cac_value") is not None:
         candidates.append((10, f"CAC {int(evidence['cac_value'])}"))
 
-    # ApoB/LDL
     if p.has("apob") and float(p.get("apob", 0)) >= 100:
         candidates.append((20, f"ApoB {fmt_int(p.get('apob'))}"))
     elif p.has("ldl") and float(p.get("ldl", 0)) >= 130:
         candidates.append((20, f"LDL-C {fmt_int(p.get('ldl'))}"))
 
-    # Lp(a)
     lpa_inf = lpa_info(p, trace)
     if lpa_inf.get("present") and lpa_inf.get("elevated"):
         candidates.append((30, "Lp(a) elevated"))
 
-    # Metabolic major
     if p.get("diabetes") is True:
         candidates.append((40, "Diabetes"))
     if p.get("smoking") is True:
         candidates.append((41, "Smoking"))
 
-    # Inflammation
     if inflammation_flags(p) or has_chronic_inflammatory_disease(p):
         candidates.append((50, "Inflammatory signal"))
 
-    # FHx
     if p.get("fhx") is True:
         candidates.append((60, "Premature family history"))
 
-    # Prediabetes
     if a1c_status(p) == "prediabetes":
         candidates.append((70, "Prediabetes A1c"))
 
-    # Sort stable
     candidates.sort(key=lambda x: (x[0], x[1]))
     ranked = [txt for _, txt in candidates]
     add_trace(trace, "Drivers_ranked", ranked, "Deterministic driver ranking applied")
@@ -737,8 +673,7 @@ def next_actions(p: Patient, posture:int, targets:Dict[str,int], evidence: Dict[
         except Exception:
             pass
 
-    # CAC guidance consistent with CAC state
-    if evidence.get("cac_status", "").startswith("Known zero") and posture in (2,3):
+    if str(evidence.get("cac_status","")).startswith("Known zero") and posture in (2,3):
         acts.append("CAC=0 supports staged escalation; consider repeat CAC in 3–5y if risk persists.")
     elif evidence.get("cac_status") == "Unknown" and posture >= 3:
         acts.append("Consider CAC to clarify plaque burden and refine intensity.")
@@ -753,7 +688,7 @@ def posture_labels(posture:int)->str:
     labels = {
         0: "Level 0 — No data / not assessed",
         1: "Level 1 — Low biologic risk (no plaque evidence)",
-        2: "Level 2 — Risk drift (mild–moderate biology)",
+        2: "Level 2 — Emerging risk (mild–moderate biology)",
         3: "Level 3 — High biologic risk (plaque possible, unproven)",
         4: "Level 4 — Early subclinical atherosclerosis (plaque present, low burden)",
         5: "Level 5 — Advanced subclinical atherosclerosis (high plaque burden / intensity equivalent)",
@@ -772,12 +707,11 @@ def explain_levels(
 ) -> Dict[str, Any]:
     strength = recommendation_strength(confidence)
 
-    # Sublevels for posture 3 (high biology) to express heterogeneity
     sublevel = None
     if posture == 3:
         enhancers = 0
-        # treat these as lifetime accelerators
-        if (lpa_info(p, trace).get("present") and lpa_info(p, trace).get("elevated")): enhancers += 1
+        lpa_inf = lpa_info(p, trace)
+        if lpa_inf.get("present") and lpa_inf.get("elevated"): enhancers += 1
         if p.get("fhx") is True: enhancers += 1
         if inflammation_flags(p) or has_chronic_inflammatory_disease(p): enhancers += 1
 
@@ -785,15 +719,14 @@ def explain_levels(
         intermediate = (risk_pct is not None and risk_pct >= 7.5)
 
         if enhancers >= 1:
-            sublevel = "3B"  # enhancer-driven lifetime acceleration
+            sublevel = "3B"
         elif intermediate:
-            sublevel = "3C"  # intermediate pooled phenotype
+            sublevel = "3C"
         else:
-            sublevel = "3A"  # high bio without enhancers
+            sublevel = "3A"
 
         add_trace(trace, "Sublevel_level3", sublevel, "Assigned Level 3 sublevel")
 
-    # Meaning + default posture language
     clinical = bool(evidence.get("clinical_ascvd"))
 
     if clinical:
@@ -803,7 +736,7 @@ def explain_levels(
         meaning = "Low biologic risk signals and no evidence of plaque with current data."
         base_posture = "Lifestyle-first; periodic reassessment; avoid over-medicalization."
     elif posture == 2:
-        meaning = "Mild–moderate biologic drift without proven plaque."
+        meaning = "Mild–moderate emerging risk without proven plaque."
         base_posture = "Confirm and trend; lifestyle sprint; shared decision on medications based on trajectory."
     elif posture == 3:
         meaning = "High biologic risk; plaque is possible but unproven (or CAC=0 suggests low short-term signal)."
@@ -818,7 +751,6 @@ def explain_levels(
     prefix = {"Default": "Default posture: ", "Consider": "Consider: ", "Defer—need data": "Defer—need data: "}.get(strength, "")
     default_posture = prefix + base_posture
 
-    # Why list: use top drivers, but gated by confidence (low confidence emphasizes missing data)
     why = drivers_all[:3]
     if strength == "Defer—need data":
         missing = confidence.get("top_missing") or []
@@ -852,37 +784,23 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     trace: List[Dict[str, Any]] = []
     add_trace(trace, "Engine_start", VERSION["levels"], "Begin evaluation")
 
-    # Evidence (CAC/ASCVD)
     evidence = evidence_model(p, trace)
-
-    # PCE
     risk10 = pooled_cohort_equations_10y_ascvd_risk(p, trace)
-
-    # Confidence
     conf = completeness(p)
-
-    # RSS (with trace)
     rs = risk_signal_score(p, trace)
-
-    # Anchors
     anchors = build_anchors(p, risk10, evidence)
 
-    # Posture (1–5) + triggers
     posture, posture_triggers = posture_level(p, evidence, trace)
 
-    # Targets + other outputs
     targets = levels_targets(posture)
     burden_str = atherosclerotic_disease_burden(p)
     asp = aspirin_advice(p, risk10, trace)
 
-    # Deterministic drivers
     drivers_all = ranked_drivers(p, evidence, trace)
     drivers_top = drivers_all[:3]
 
-    # Attach drivers also into riskSignal for UI consistency
     rs = {**rs, "drivers": drivers_top}
 
-    # Explain (posture vs evidence, confidence gating, anchors)
     levels_obj = explain_levels(
         p=p,
         posture=posture,
@@ -893,10 +811,8 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         trace=trace,
         risk10=risk10,
     )
-    # Preserve posture triggers for transparency
     levels_obj["triggers"] = sorted(set(posture_triggers))
 
-    # Next actions
     next_acts = next_actions(p, posture, targets, evidence)
 
     out = {
@@ -919,20 +835,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
-
-
-def esc_numeric_goals(level:int, clinical_ascvd: bool)->str:
-    if clinical_ascvd:
-        return "ESC/EAS goals (clinical ASCVD): LDL-C <55 mg/dL; ApoB <65 mg/dL."
-    if level >= 5:
-        return "ESC/EAS goals (advanced subclinical): LDL-C <55–70 mg/dL; ApoB <65–80 mg/dL (tighten with enhancers)."
-    if level == 4:
-        return "ESC/EAS goals (subclinical disease): LDL-C <70 mg/dL; ApoB <80 mg/dL."
-    if level == 3:
-        return "ESC/EAS goals (high biologic risk): LDL-C <100 mg/dL; ApoB <100 mg/dL (tighten with enhancers)."
-    if level == 2:
-        return "ESC/EAS goals: individualized; consider LDL-C <100 mg/dL if sustained risk drift."
-    return "ESC/EAS goals: individualized by risk tier."
 
 
 def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
