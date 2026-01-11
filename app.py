@@ -1,4 +1,4 @@
-# app.py
+# app.py (fully consolidated, single-file, stable)
 import json
 import re
 import streamlit as st
@@ -45,11 +45,7 @@ html, body, [class*="css"] {
   border-radius:14px;
   padding:18px 20px;
 }
-.report h2 {
-  font-size:1.15rem;
-  font-weight:800;
-  margin:0 0 12px 0;
-}
+.report h2 { font-size:1.15rem; font-weight:800; margin:0 0 12px 0; }
 
 .section { margin-top: 14px; }
 .section-title {
@@ -148,8 +144,23 @@ def contains_phi(s: str) -> bool:
     return False
 
 # ============================================================
-# UI-side parsing helpers (hsCRP + inflammatory flags + diabetes negation)
+# Helpers
 # ============================================================
+FHX_OPTIONS = [
+    "None / Unknown",
+    "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55",
+    "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65",
+    "Sibling with premature ASCVD",
+    "Multiple first-degree relatives",
+    "Other premature relative",
+]
+
+def fhx_to_bool(choice: str) -> bool:
+    return choice is not None and choice != "None / Unknown"
+
+# ------------------------------------------------------------
+# UI-side parsing helpers (hsCRP + inflammatory flags + diabetes negation)
+# ------------------------------------------------------------
 def parse_hscrp_from_text(txt: str):
     if not txt:
         return None
@@ -197,9 +208,9 @@ def diabetes_negation_guard(txt: str):
             return True
     return None
 
-# ============================================================
+# ------------------------------------------------------------
 # Streamlit-native "Management Level ladder" (always renders)
-# ============================================================
+# ------------------------------------------------------------
 def render_management_ladder(level: int, sublevel: str | None = None):
     try:
         lvl = int(level or 0)
@@ -207,7 +218,10 @@ def render_management_ladder(level: int, sublevel: str | None = None):
         lvl = 1
     lvl = max(1, min(5, lvl))
 
-    st.markdown(f"### Management Level: **{lvl} — {LEVEL_NAMES.get(lvl, '—')}**" + (f" (**{sublevel}**)" if sublevel else ""))
+    st.markdown(
+        f"### Management Level: **{lvl} — {LEVEL_NAMES.get(lvl, '—')}**"
+        + (f" (**{sublevel}**)" if sublevel else "")
+    )
 
     cols = st.columns(5)
     for i in range(1, 6):
@@ -216,9 +230,30 @@ def render_management_ladder(level: int, sublevel: str | None = None):
             st.markdown(f"**{marker} {i}**")
             st.caption(LEVEL_NAMES[i])
 
-# ============================================================
-# High-yield Clinical Report (built from engine JSON, not quick-text parsing)
-# ============================================================
+# ------------------------------------------------------------
+# Sublevel explainer
+# ------------------------------------------------------------
+def sublevel_explainer(sub: str):
+    if sub == "3A":
+        return (
+            "High biology without strong enhancers; plaque not proven.",
+            ["Trend labs", "Lifestyle sprint", "Shared decision on statin", "Consider calcium score if unknown"],
+        )
+    if sub == "3B":
+        return (
+            "High biology with enhancers (Lp(a)/FHx/inflammation) → higher lifetime acceleration.",
+            ["Statin default often reasonable", "Address enhancers", "Consider calcium score if unknown", "ApoB-guided targets"],
+        )
+    if sub == "3C":
+        return (
+            "Higher near-term risk phenotype despite no proven plaque.",
+            ["Treat risk seriously", "Statin default often reasonable", "Confirm BP/lipids", "Consider calcium score if unknown"],
+        )
+    return ("", [])
+
+# ------------------------------------------------------------
+# High-yield Clinical Report (built from engine JSON)
+# ------------------------------------------------------------
 def render_high_yield_report(out: dict) -> str:
     lvl = out.get("levels", {}) or {}
     rs = out.get("riskSignal", {}) or {}
@@ -229,15 +264,13 @@ def render_high_yield_report(out: dict) -> str:
     next_actions = out.get("nextActions", []) or []
     asp = out.get("aspirin", {}) or {}
 
-    # Determine management level (robust)
-    mgmt_level = lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1
+    mgmt_level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
         mgmt_level = int(mgmt_level)
     except Exception:
         mgmt_level = 1
     mgmt_level = max(1, min(5, mgmt_level))
     sub = lvl.get("sublevel")
-
     name = LEVEL_NAMES.get(mgmt_level, "—")
     title = f"LEVELS™ — Management Level {mgmt_level}: {name}" + (f" ({sub})" if sub else "")
 
@@ -248,12 +281,10 @@ def render_high_yield_report(out: dict) -> str:
     evidence_line = ev.get("cac_status") or out.get("diseaseBurden") or "—"
     burden_line = ev.get("burden_band") or "—"
 
-    # build HTML
     html = []
     html.append('<div class="report">')
     html.append(f"<h2>{title}</h2>")
 
-    # Summary (high yield only)
     html.append('<div class="section">')
     html.append('<div class="section-title">Summary</div>')
     meaning = lvl.get("meaning")
@@ -263,19 +294,17 @@ def render_high_yield_report(out: dict) -> str:
         html.append("<p class='muted'>No summary available.</p>")
     html.append("</div>")
 
-    # Key metrics
     html.append('<div class="section">')
     html.append('<div class="section-title">Key metrics</div>')
     html.append(f"<p><strong>Risk Signal Score:</strong> {rs.get('score','—')}/100 ({rs.get('band','—')})</p>")
     if risk_pct is not None:
         html.append(f"<p><strong>10-year ASCVD risk (PCE):</strong> {risk_line} {f'({risk_cat})' if risk_cat else ''}</p>")
     else:
-        html.append(f"<p><strong>10-year ASCVD risk (PCE):</strong> —</p>")
+        html.append("<p><strong>10-year ASCVD risk (PCE):</strong> —</p>")
     html.append(f"<p><strong>Evidence:</strong> {evidence_line}</p>")
     html.append(f"<p><strong>Burden:</strong> {burden_line}</p>")
     html.append("</div>")
 
-    # Drivers
     html.append('<div class="section">')
     html.append('<div class="section-title">Primary drivers</div>')
     if drivers:
@@ -287,11 +316,9 @@ def render_high_yield_report(out: dict) -> str:
         html.append("<p class='muted'>No drivers listed.</p>")
     html.append("</div>")
 
-    # Targets + plan
     html.append('<div class="section">')
     html.append('<div class="section-title">Targets & plan</div>')
 
-    # Targets (only show if present)
     tar_lines = []
     if targets.get("apob") is not None:
         tar_lines.append(f"ApoB <{targets['apob']} mg/dL")
@@ -302,8 +329,9 @@ def render_high_yield_report(out: dict) -> str:
 
     posture = lvl.get("defaultPosture")
     if posture:
-        # remove leftover "Default posture:" prefix if engine uses it
         posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(posture)).strip()
+        # rename drift if present
+        posture_clean = posture_clean.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
         html.append(f"<p><strong>Plan:</strong> {posture_clean}</p>")
 
     if next_actions:
@@ -313,19 +341,17 @@ def render_high_yield_report(out: dict) -> str:
             html.append(f"<li>{a}</li>")
         html.append("</ul>")
 
-    # Aspirin high-yield
     asp_status = asp.get("status")
     if asp_status:
         html.append(f"<p><strong>Aspirin:</strong> {asp_status}</p>")
 
-    html.append("</div>")  # targets & plan section
-
-    html.append("</div>")  # report container
+    html.append("</div>")
+    html.append("</div>")
     return "\n".join(html)
 
-# ============================================================
-# Parsing coverage UI
-# ============================================================
+# ------------------------------------------------------------
+# Parse coverage UI
+# ------------------------------------------------------------
 TARGET_PARSE_FIELDS = [
     ("age", "Age"),
     ("sex", "Gender"),
@@ -341,9 +367,9 @@ TARGET_PARSE_FIELDS = [
     ("ascvd_10y", "ASCVD 10-year risk (if present)"),
 ]
 
-# ============================================================
+# ------------------------------------------------------------
 # Apply parsed → session
-# ============================================================
+# ------------------------------------------------------------
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
 
@@ -480,7 +506,7 @@ def cb_clear_autofilled_fields():
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest (restored sections)
+# SmartPhrase ingest (parsed preview + coverage + loaded defaults)
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
 
@@ -550,8 +576,6 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
 # ============================================================
 # Main form
 # ============================================================
-def fhx_to_bool(choice: str) -> bool:
-    return choice is not None and choice != "None / Unknown"
 with st.form("levels_form"):
     st.subheader("Patient context")
 
@@ -565,14 +589,7 @@ with st.form("levels_form"):
     with a3:
         ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True)
 
-    fhx_choice = st.selectbox("Premature family history (Father <55; Mother <65)", [
-        "None / Unknown",
-        "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55",
-        "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65",
-        "Sibling with premature ASCVD",
-        "Multiple first-degree relatives",
-        "Other premature relative",
-    ], index=0)
+    fhx_choice = st.selectbox("Premature family history", FHX_OPTIONS, index=0)
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Cardiometabolic profile")
@@ -649,6 +666,7 @@ with st.form("levels_form"):
 # Run + output
 # ============================================================
 if submitted:
+    # Required fields (keep as you wanted)
     req_errors = []
     if age <= 0: req_errors.append("Age is required (must be > 0).")
     if sbp <= 0: req_errors.append("Systolic BP is required (must be > 0).")
@@ -660,6 +678,7 @@ if submitted:
         st.stop()
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
+
     cac_to_send = None
     if cac_known == "Yes":
         cac_to_send = int(cac) if cac is not None else 0
@@ -683,8 +702,10 @@ if submitted:
         "lpa_unit": lpa_unit,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
         "cac": cac_to_send,
+
         "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle),
         "ibd": bool(ibd), "hiv": bool(hiv), "osa": bool(osa), "nafld": bool(nafld),
+
         "bleed_gi": bool(bleed_gi), "bleed_ich": bool(bleed_ich),
         "bleed_anticoag": bool(bleed_anticoag), "bleed_nsaid": bool(bleed_nsaid),
         "bleed_disorder": bool(bleed_disorder), "bleed_ckd": bool(bleed_ckd),
@@ -694,12 +715,12 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    # Replace drift wording anywhere it might appear in quick text
+    # Quick text (kept, but cleaned)
     note_text = render_quick_text(patient, out)
-    note_text = note_text.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
     note_text = note_text.replace("Posture Level", "Management Level")
+    note_text = note_text.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
 
-    # Key metrics FIRST
+    # --- Key metrics FIRST ---
     st.subheader("Key metrics")
     lvl = out.get("levels", {}) or {}
     rs = out.get("riskSignal", {}) or {}
@@ -724,7 +745,7 @@ if submitted:
     ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
     st.markdown(f"**Evidence:** {ev.get('cac_status','—')} / **Burden:** {ev.get('burden_band','—')}")
 
-    # High-yield clinical report (JSON-driven)
+    # --- Clinical report: high yield ---
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Clinical report (high-yield)")
     st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
@@ -760,11 +781,13 @@ if submitted:
     with st.expander("Interpretation (why / plan / explainer)", expanded=False):
         st.markdown("<div class='level-card'>", unsafe_allow_html=True)
         st.markdown(
-            f"<h3>Interpretation — Management Level {mgmt_level} ({LEVEL_NAMES.get(mgmt_level,'—')})</h3>",
+            f"<h3>Interpretation — Management Level {mgmt_level}: {LEVEL_NAMES.get(mgmt_level,'—')}</h3>",
             unsafe_allow_html=True,
         )
-        if lvl.get("meaning"):
-            st.markdown(f"<p class='small-help'><strong>What this means:</strong> {lvl['meaning']}</p>", unsafe_allow_html=True)
+
+        meaning = lvl.get("meaning")
+        if meaning:
+            st.markdown(f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>", unsafe_allow_html=True)
 
         why_list = (lvl.get("why") or [])[:3]
         if why_list:
@@ -776,15 +799,18 @@ if submitted:
 
         if lvl.get("defaultPosture"):
             posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(lvl["defaultPosture"])).strip()
+            posture_clean = posture_clean.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
             st.markdown(f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>", unsafe_allow_html=True)
 
         if sub:
             expl, chips = sublevel_explainer(sub)
-            st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
-            st.markdown("<div class='next-row'>", unsafe_allow_html=True)
-            for c in chips:
-                st.markdown(f"<span class='next-chip'>{c}</span>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+            if expl:
+                st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
+            if chips:
+                st.markdown("<div class='next-row'>", unsafe_allow_html=True)
+                for c in chips:
+                    st.markdown(f"<span class='next-chip'>{c}</span>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -808,5 +834,4 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
-
 
