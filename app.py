@@ -1,4 +1,7 @@
-# app.py (fully consolidated, single-file, stable) — ONLY changes: calcium score box always visible + CAC payload uses session_state
+# app.py (fully consolidated, single-file, stable)
+# + ONLY additions: "calculator feel" output (Recommended target + view toggle + LDL vs ApoB logic)
+# + calcium score box always visible + CAC payload uses session_state
+
 import json
 import re
 import streamlit as st
@@ -252,6 +255,33 @@ def sublevel_explainer(sub: str):
     return ("", [])
 
 # ------------------------------------------------------------
+# NEW: Pick primary lipid target (ApoB if present, else LDL)
+# ------------------------------------------------------------
+def pick_primary_targets(out: dict, patient_data: dict) -> dict:
+    targets = out.get("targets", {}) or {}
+
+    has_apob = patient_data.get("apob") is not None
+    has_ldl = patient_data.get("ldl") is not None
+
+    apob_goal = targets.get("apob")
+    ldl_goal = targets.get("ldl")
+
+    primary = None
+    secondary = None
+
+    if has_apob and apob_goal is not None:
+        primary = ("ApoB", f"<{int(apob_goal)} mg/dL")
+        if has_ldl and ldl_goal is not None:
+            secondary = ("LDL-C", f"<{int(ldl_goal)} mg/dL")
+    else:
+        if ldl_goal is not None:
+            primary = ("LDL-C", f"<{int(ldl_goal)} mg/dL")
+        if apob_goal is not None and not has_apob:
+            secondary = ("ApoB", f"<{int(apob_goal)} mg/dL (if checked)")
+
+    return {"primary": primary, "secondary": secondary}
+
+# ------------------------------------------------------------
 # High-yield Clinical Report (built from engine JSON)
 # ------------------------------------------------------------
 def render_high_yield_report(out: dict) -> str:
@@ -395,21 +425,15 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     if parsed.get("lpa_unit") is not None:
         st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
         applied.append("Lp(a) unit")
-    else:
-        missing.append("Lp(a) unit")
 
     if parsed.get("a1c") is not None:
         st.session_state["a1c_val"] = float(parsed["a1c"])
         applied.append("A1c")
-    else:
-        missing.append("A1c")
 
     if parsed.get("cac") is not None:
         st.session_state["cac_known_val"] = "Yes"
         st.session_state["cac_val"] = int(float(parsed["cac"]))
         applied.append("Calcium score")
-    else:
-        missing.append("Calcium score")
 
     if parsed.get("smoker") is not None:
         st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
@@ -433,7 +457,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         )
         applied.append("Race")
 
-    # Optional extras from raw text
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
@@ -444,6 +467,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
+    # de-dupe missing list (and keep it simple)
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
@@ -469,7 +493,7 @@ st.session_state.setdefault("cac_known_val", "No")
 st.session_state.setdefault("cac_val", 0)
 st.session_state.setdefault("smartphrase_raw", "")
 
-for k in ["ra","psoriasis","sle","ibd","hiv","osa","nafld"]:
+for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
     st.session_state.setdefault(f"infl_{k}_val", False)
 
 # ============================================================
@@ -496,7 +520,7 @@ def cb_clear_autofilled_fields():
     st.session_state["diabetes_choice_val"] = "No"
     st.session_state["cac_known_val"] = "No"
     st.session_state["cac_val"] = 0
-    for k in ["ra","psoriasis","sle","ibd","hiv","osa","nafld"]:
+    for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{k}_val"] = False
 
 # ============================================================
@@ -623,7 +647,7 @@ with st.form("levels_form"):
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Imaging")
 
-    # ✅ CHANGE 1: Calcium score box ALWAYS visible (disabled if No)
+    # ✅ Calcium score box ALWAYS visible (disabled if No)
     d1, d2, d3 = st.columns([1, 1, 1])
     with d1:
         cac_known = st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
@@ -676,10 +700,14 @@ with st.form("levels_form"):
 if submitted:
     # Required fields (keep as you wanted)
     req_errors = []
-    if age <= 0: req_errors.append("Age is required (must be > 0).")
-    if sbp <= 0: req_errors.append("Systolic BP is required (must be > 0).")
-    if tc <= 0: req_errors.append("Total cholesterol is required (must be > 0).")
-    if hdl <= 0: req_errors.append("HDL is required (must be > 0).")
+    if age <= 0:
+        req_errors.append("Age is required (must be > 0).")
+    if sbp <= 0:
+        req_errors.append("Systolic BP is required (must be > 0).")
+    if tc <= 0:
+        req_errors.append("Total cholesterol is required (must be > 0).")
+    if hdl <= 0:
+        req_errors.append("HDL is required (must be > 0).")
 
     if req_errors:
         st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
@@ -687,7 +715,7 @@ if submitted:
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
-    # ✅ CHANGE 2: CAC payload uses session_state, preserves CAC=0 when available
+    # CAC payload uses session_state, preserves CAC=0 when available
     cac_to_send = int(st.session_state["cac_val"]) if cac_known == "Yes" else None
 
     data = {
@@ -709,13 +737,19 @@ if submitted:
         "lpa_unit": lpa_unit,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
         "cac": cac_to_send,
-
-        "ra": bool(ra), "psoriasis": bool(psoriasis), "sle": bool(sle),
-        "ibd": bool(ibd), "hiv": bool(hiv), "osa": bool(osa), "nafld": bool(nafld),
-
-        "bleed_gi": bool(bleed_gi), "bleed_ich": bool(bleed_ich),
-        "bleed_anticoag": bool(bleed_anticoag), "bleed_nsaid": bool(bleed_nsaid),
-        "bleed_disorder": bool(bleed_disorder), "bleed_ckd": bool(bleed_ckd),
+        "ra": bool(ra),
+        "psoriasis": bool(psoriasis),
+        "sle": bool(sle),
+        "ibd": bool(ibd),
+        "hiv": bool(hiv),
+        "osa": bool(osa),
+        "nafld": bool(nafld),
+        "bleed_gi": bool(bleed_gi),
+        "bleed_ich": bool(bleed_ich),
+        "bleed_anticoag": bool(bleed_anticoag),
+        "bleed_nsaid": bool(bleed_nsaid),
+        "bleed_disorder": bool(bleed_disorder),
+        "bleed_ckd": bool(bleed_ckd),
     }
     data = {k: v for k, v in data.items() if v is not None}
 
@@ -727,8 +761,30 @@ if submitted:
     note_text = note_text.replace("Posture Level", "Management Level")
     note_text = note_text.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
 
-    # --- Key metrics FIRST ---
-    st.subheader("Key metrics")
+    # ============================================================
+    # NEW: View toggle (Simple / Standard / Details)
+    # ============================================================
+    view_mode = st.radio("View", ["Simple", "Standard", "Details"], horizontal=True, index=1)
+
+    # ============================================================
+    # NEW: "Voila" output — Recommended lipid target (first)
+    # ============================================================
+    targets_pick = pick_primary_targets(out, data)
+    primary = targets_pick["primary"]
+    secondary = targets_pick["secondary"]
+
+    st.markdown("## Recommended lipid target")
+    if primary:
+        st.markdown(f"### **{primary[0]} {primary[1]}**")
+    else:
+        st.markdown("### **Target: —**")
+
+    if secondary and view_mode != "Simple":
+        st.caption(f"Secondary: {secondary[0]} {secondary[1]}")
+
+    # ============================================================
+    # Key metrics
+    # ============================================================
     lvl = out.get("levels", {}) or {}
     rs = out.get("riskSignal", {}) or {}
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
@@ -741,23 +797,29 @@ if submitted:
     mgmt_level = max(1, min(5, mgmt_level))
     sub = lvl.get("sublevel")
 
-    render_management_ladder(mgmt_level, sub)
-    st.caption("Legend: Management Level reflects prevention intensity. Evidence reflects plaque certainty (Calcium score / ASCVD).")
+    # Simple view: minimal, calculator-like
+    if view_mode == "Simple":
+        st.caption(f"Management Level: {mgmt_level}" + (f" ({sub})" if sub else ""))
+        ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+        st.caption(f"Evidence: {ev.get('cac_status','—')}")
+    else:
+        st.subheader("Key metrics")
+        render_management_ladder(mgmt_level, sub)
+        st.caption("Legend: Management Level reflects prevention intensity. Evidence reflects plaque certainty (Calcium score / ASCVD).")
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Management Level", f"{mgmt_level}" + (f" ({sub})" if sub else ""))
-    m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
-    m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Management Level", f"{mgmt_level}" + (f" ({sub})" if sub else ""))
+        m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
+        m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
-    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-    st.markdown(f"**Evidence:** {ev.get('cac_status','—')} / **Burden:** {ev.get('burden_band','—')}")
+        ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+        st.markdown(f"**Evidence:** {ev.get('cac_status','—')} / **Burden:** {ev.get('burden_band','—')}")
 
-    # --- Clinical report: high yield ---
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Clinical report (high-yield)")
-    st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        st.subheader("Clinical report (high-yield)")
+        st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
 
-    # Downloads
+    # Downloads always available
     d1, d2 = st.columns(2)
     with d1:
         st.download_button(
@@ -776,67 +838,69 @@ if submitted:
             use_container_width=True,
         )
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    # Details-only extras
+    if view_mode == "Details":
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    with st.expander("Anchors (near-term vs lifetime)", expanded=False):
-        anchors = out.get("anchors", {}) or {}
-        near = (anchors.get("nearTerm") or {}).get("summary", "—")
-        life = (anchors.get("lifetime") or {}).get("summary", "—")
-        st.markdown(f"**Near-term anchor:** {near}")
-        st.markdown(f"**Lifetime anchor:** {life}")
+        with st.expander("Anchors (near-term vs lifetime)", expanded=False):
+            anchors = out.get("anchors", {}) or {}
+            near = (anchors.get("nearTerm") or {}).get("summary", "—")
+            life = (anchors.get("lifetime") or {}).get("summary", "—")
+            st.markdown(f"**Near-term anchor:** {near}")
+            st.markdown(f"**Lifetime anchor:** {life}")
 
-    with st.expander("Interpretation (why / plan / explainer)", expanded=False):
-        st.markdown("<div class='level-card'>", unsafe_allow_html=True)
-        st.markdown(
-            f"<h3>Interpretation — Management Level {mgmt_level}: {LEVEL_NAMES.get(mgmt_level,'—')}</h3>",
-            unsafe_allow_html=True,
-        )
+        with st.expander("Interpretation (why / plan / explainer)", expanded=False):
+            st.markdown("<div class='level-card'>", unsafe_allow_html=True)
+            st.markdown(
+                f"<h3>Interpretation — Management Level {mgmt_level}: {LEVEL_NAMES.get(mgmt_level,'—')}</h3>",
+                unsafe_allow_html=True,
+            )
 
-        meaning = lvl.get("meaning")
-        if meaning:
-            st.markdown(f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>", unsafe_allow_html=True)
+            meaning = lvl.get("meaning")
+            if meaning:
+                st.markdown(f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>", unsafe_allow_html=True)
 
-        why_list = (lvl.get("why") or [])[:3]
-        if why_list:
-            st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
-            st.markdown("<ul>", unsafe_allow_html=True)
-            for w in why_list:
-                st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
-            st.markdown("</ul>", unsafe_allow_html=True)
+            why_list = (lvl.get("why") or [])[:3]
+            if why_list:
+                st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
+                st.markdown("<ul>", unsafe_allow_html=True)
+                for w in why_list:
+                    st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
+                st.markdown("</ul>", unsafe_allow_html=True)
 
-        if lvl.get("defaultPosture"):
-            posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(lvl["defaultPosture"])).strip()
-            posture_clean = posture_clean.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
-            st.markdown(f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>", unsafe_allow_html=True)
+            if lvl.get("defaultPosture"):
+                posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(lvl["defaultPosture"])).strip()
+                posture_clean = posture_clean.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
+                st.markdown(f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>", unsafe_allow_html=True)
 
-        if sub:
-            expl, chips = sublevel_explainer(sub)
-            if expl:
-                st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
-            if chips:
-                st.markdown("<div class='next-row'>", unsafe_allow_html=True)
-                for c in chips:
-                    st.markdown(f"<span class='next-chip'>{c}</span>", unsafe_allow_html=True)
-                st.markdown("</div>", unsafe_allow_html=True)
+            if sub:
+                expl, chips = sublevel_explainer(sub)
+                if expl:
+                    st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
+                if chips:
+                    st.markdown("<div class='next-row'>", unsafe_allow_html=True)
+                    for c in chips:
+                        st.markdown(f"<span class='next-chip'>{c}</span>", unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    with st.expander("Aspirin summary", expanded=False):
-        asp = out.get("aspirin", {}) or {}
-        asp_status = asp.get("status", "Not assessed")
-        asp_why = short_why(asp.get("rationale", []), max_items=3)
-        st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
+        with st.expander("Aspirin summary", expanded=False):
+            asp = out.get("aspirin", {}) or {}
+            asp_status = asp.get("status", "Not assessed")
+            asp_why = short_why(asp.get("rationale", []), max_items=3)
+            st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
-    if mode.startswith("Quick"):
-        with st.expander("Quick output (raw text)", expanded=False):
-            st.code(note_text, language="text")
+        if mode.startswith("Quick"):
+            with st.expander("Quick output (raw text)", expanded=False):
+                st.code(note_text, language="text")
 
-    with st.expander("Trace (audit trail)", expanded=False):
-        st.json(out.get("trace", []))
+        with st.expander("Trace (audit trail)", expanded=False):
+            st.json(out.get("trace", []))
 
-    if show_json:
-        with st.expander("JSON (debug)", expanded=False):
-            st.json(out)
+        if show_json:
+            with st.expander("JSON (debug)", expanded=False):
+                st.json(out)
 
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
