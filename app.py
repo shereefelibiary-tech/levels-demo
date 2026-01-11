@@ -1,6 +1,7 @@
 # app.py (fully consolidated, single-file, stable)
 # + ONLY additions: "calculator feel" output (Recommended target + view toggle + LDL vs ApoB logic)
 # + calcium score box always visible + CAC payload uses session_state
+# + FIX: Parse & Apply uses Streamlit callback so widgets actually populate
 
 import json
 import re
@@ -467,7 +468,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
-    # de-dupe missing list (and keep it simple)
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
@@ -698,7 +698,6 @@ with st.form("levels_form"):
 # Run + output
 # ============================================================
 if submitted:
-    # Required fields (keep as you wanted)
     req_errors = []
     if age <= 0:
         req_errors.append("Age is required (must be > 0).")
@@ -715,7 +714,6 @@ if submitted:
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
 
-    # CAC payload uses session_state, preserves CAC=0 when available
     cac_to_send = int(st.session_state["cac_val"]) if cac_known == "Yes" else None
 
     data = {
@@ -756,19 +754,12 @@ if submitted:
     patient = Patient(data)
     out = evaluate(patient)
 
-    # Quick text (kept, but cleaned)
     note_text = render_quick_text(patient, out)
     note_text = note_text.replace("Posture Level", "Management Level")
     note_text = note_text.replace("Risk drift", "Emerging risk").replace("drift", "Emerging risk")
 
-    # ============================================================
-    # NEW: View toggle (Simple / Standard / Details)
-    # ============================================================
     view_mode = st.radio("View", ["Simple", "Standard", "Details"], horizontal=True, index=1)
 
-    # ============================================================
-    # NEW: "Voila" output — Recommended lipid target (first)
-    # ============================================================
     targets_pick = pick_primary_targets(out, data)
     primary = targets_pick["primary"]
     secondary = targets_pick["secondary"]
@@ -782,9 +773,6 @@ if submitted:
     if secondary and view_mode != "Simple":
         st.caption(f"Secondary: {secondary[0]} {secondary[1]}")
 
-    # ============================================================
-    # Key metrics
-    # ============================================================
     lvl = out.get("levels", {}) or {}
     rs = out.get("riskSignal", {}) or {}
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
@@ -797,7 +785,6 @@ if submitted:
     mgmt_level = max(1, min(5, mgmt_level))
     sub = lvl.get("sublevel")
 
-    # Simple view: minimal, calculator-like
     if view_mode == "Simple":
         st.caption(f"Management Level: {mgmt_level}" + (f" ({sub})" if sub else ""))
         ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
@@ -819,7 +806,6 @@ if submitted:
         st.subheader("Clinical report (high-yield)")
         st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
 
-    # Downloads always available
     d1, d2 = st.columns(2)
     with d1:
         st.download_button(
@@ -838,7 +824,6 @@ if submitted:
             use_container_width=True,
         )
 
-    # Details-only extras
     if view_mode == "Details":
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
