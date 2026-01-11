@@ -2,11 +2,16 @@
 # + LDL-first targets (ApoB shown as secondary) + ApoB hover anchors
 # + calcium score always visible + CAC payload uses session_state
 # + Parse & Apply callback + drift removed via scrub_terms
+#
+# FIX: Prevent parsed dates from being applied into numeric boxes
+#  - sanitize dates before parse_smartphrase()
+#  - harden apply_parsed_to_session() with safe numeric coercion + date-like guards
 
 import json
 import re
 import streamlit as st
 import levels_engine as le
+
 with st.expander("DEBUG: engine version", expanded=False):
     st.write("Engine sentinel:", getattr(le, "PCE_DEBUG_SENTINEL", "MISSING"))
     st.write("Has PCE:", hasattr(le, "PCE"))
@@ -232,6 +237,62 @@ def diabetes_negation_guard(txt: str):
     return None
 
 # ------------------------------------------------------------
+# FIX: Date-like sanitizer + safe numeric coercion
+# ------------------------------------------------------------
+DATE_LIKE_PATTERNS = [
+    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",  # 01/04/2026
+    r"\b\d{4}-\d{2}-\d{2}\b",        # 2026-01-04
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},\s+\d{4}\b",  # Jan 4, 2026
+]
+
+def is_date_like(v) -> bool:
+    if v is None:
+        return False
+    s = str(v).strip().lower()
+    return any(re.search(p, s, flags=re.I) for p in DATE_LIKE_PATTERNS)
+
+def sanitize_text_for_parser(txt: str) -> str:
+    """
+    Prevent common dates from being mis-captured as lab values.
+    Only used for parse_smartphrase(); raw text remains available for negation/hsCRP/inflammation.
+    """
+    if not txt:
+        return txt
+    out = txt
+    for p in DATE_LIKE_PATTERNS:
+        out = re.sub(p, " ", out, flags=re.I)
+    out = re.sub(r"[ \t]+", " ", out)
+    return out
+
+def coerce_int(v):
+    if v is None:
+        return None
+    if is_date_like(v):
+        return None
+    s = str(v).strip()
+    m = re.search(r"[-+]?\d+", s)
+    if not m:
+        return None
+    try:
+        return int(m.group(0))
+    except Exception:
+        return None
+
+def coerce_float(v):
+    if v is None:
+        return None
+    if is_date_like(v):
+        return None
+    s = str(v).strip()
+    m = re.search(r"[-+]?\d+(?:\.\d+)?", s)
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except Exception:
+        return None
+
+# ------------------------------------------------------------
 # Streamlit-native "Management Level ladder" (always renders)
 # ------------------------------------------------------------
 def render_management_ladder(level: int, sublevel: str | None = None):
@@ -416,84 +477,111 @@ TARGET_PARSE_FIELDS = [
 ]
 
 # ------------------------------------------------------------
-# Apply parsed → session
+# Apply parsed → session (HARDENED)
 # ------------------------------------------------------------
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
 
-    def set_if_present(src_key, state_key, transform=lambda x: x, label=None):
+    def apply_num(src_key, state_key, coerce_fn, label):
         nonlocal applied, missing
-        label = label or src_key
-        if parsed.get(src_key) is not None:
-            st.session_state[state_key] = transform(parsed[src_key])
-            applied.append(label)
-        else:
+        v = parsed.get(src_key)
+        v2 = coerce_fn(v)
+        if v2 is None:
             missing.append(label)
+            return
+        st.session_state[state_key] = v2
+        applied.append(label)
 
-    set_if_present("age", "age_val", int, "Age")
-    set_if_present("sex", "sex_val", lambda v: v, "Gender")
-    set_if_present("sbp", "sbp_val", int, "Systolic BP")
+    # Numeric fields (refuse date-like content)
+    apply_num("age", "age_val", coerce_int, "Age")
+    apply_num("sbp", "sbp_val", coerce_int, "Systolic BP")
 
-    set_if_present("tc", "tc_val", int, "Total Cholesterol")
-    set_if_present("hdl", "hdl_val", int, "HDL")
-    set_if_present("ldl", "ldl_val", int, "LDL")
+    apply_num("tc", "tc_val", coerce_int, "Total Cholesterol")
+    apply_num("hdl", "hdl_val", coerce_int, "HDL")
+    apply_num("ldl", "ldl_val", coerce_int, "LDL")
 
-    set_if_present("apob", "apob_val", int, "ApoB")
-    set_if_present("lpa", "lpa_val", lambda v: int(float(v)), "Lp(a)")
+    apply_num("apob", "apob_val", coerce_int, "ApoB")
+    # Lp(a): allow float but store as int-like in UI (your prior behavior)
+    lpa_v = coerce_float(parsed.get("lpa"))
+    if lpa_v is not None:
+        st.session_state["lpa_val"] = int(lpa_v)
+        applied.append("Lp(a)")
+    else:
+        missing.append("Lp(a)")
 
-    if parsed.get("lpa_unit") is not None:
+    # Sex: accept only canonical values
+    sex = parsed.get("sex")
+    if sex in ("F", "M"):
+        st.session_state["sex_val"] = sex
+        applied.append("Gender")
+    else:
+        missing.append("Gender")
+
+    # Lp(a) unit: accept only known
+    if parsed.get("lpa_unit") in ("nmol/L", "mg/dL"):
         st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
         applied.append("Lp(a) unit")
     else:
         missing.append("Lp(a) unit")
 
-    if parsed.get("a1c") is not None:
-        st.session_state["a1c_val"] = float(parsed["a1c"])
+    # A1c: float
+    a1c_v = coerce_float(parsed.get("a1c"))
+    if a1c_v is not None:
+        st.session_state["a1c_val"] = float(a1c_v)
         applied.append("A1c")
     else:
         missing.append("A1c")
 
-    if parsed.get("cac") is not None:
+    # CAC: if numeric, set known yes
+    cac_v = coerce_int(parsed.get("cac"))
+    if cac_v is not None:
         st.session_state["cac_known_val"] = "Yes"
-        st.session_state["cac_val"] = int(float(parsed["cac"]))
+        st.session_state["cac_val"] = int(cac_v)
         applied.append("Calcium score")
     else:
         missing.append("Calcium score")
 
+    # Smoking
     if parsed.get("smoker") is not None:
-        st.session_state["smoking_val"] = "Yes" if parsed["smoker"] else "No"
+        st.session_state["smoking_val"] = "Yes" if bool(parsed["smoker"]) else "No"
         applied.append("Smoking")
 
+    # Diabetes: negation guard wins; else parsed diabetes if present
     dm_guard = diabetes_negation_guard(raw_txt)
     if dm_guard is False:
         st.session_state["diabetes_choice_val"] = "No"
         applied.append("Diabetes(manual) (negation)")
     elif parsed.get("diabetes") is not None:
-        st.session_state["diabetes_choice_val"] = "Yes" if parsed["diabetes"] else "No"
+        st.session_state["diabetes_choice_val"] = "Yes" if bool(parsed["diabetes"]) else "No"
         applied.append("Diabetes(manual)")
 
+    # BP meds
     if parsed.get("bpTreated") is not None:
-        st.session_state["bp_treated_val"] = "Yes" if parsed["bpTreated"] else "No"
+        st.session_state["bp_treated_val"] = "Yes" if bool(parsed["bpTreated"]) else "No"
         applied.append("BP meds")
     else:
         missing.append("BP meds")
 
+    # Race mapping
     if parsed.get("africanAmerican") is not None:
         st.session_state["race_val"] = (
-            "African American" if parsed["africanAmerican"] else "Other (use non-African American coefficients)"
+            "African American" if bool(parsed["africanAmerican"]) else "Other (use non-African American coefficients)"
         )
         applied.append("Race")
 
+    # hsCRP from raw text (kept as you had)
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
         applied.append("hsCRP")
 
+    # inflammatory flags from raw text (kept as you had)
     infl = parse_inflammatory_flags_from_text(raw_txt)
     for k, v in infl.items():
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
+    # de-dupe missing list
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
@@ -595,7 +683,10 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     if smart_txt and contains_phi(smart_txt):
         st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
 
-    parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
+    # FIX: sanitize dates for the parser only
+    parser_txt = sanitize_text_for_parser(smart_txt or "")
+    parsed_preview = parse_smartphrase(parser_txt) if (parser_txt or "").strip() else {}
+
     st.session_state["parsed_preview_cache"] = parsed_preview
 
     if st.session_state.get("last_applied_msg"):
