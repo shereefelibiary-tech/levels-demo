@@ -6,6 +6,10 @@
 import json
 import re
 import streamlit as st
+import levels_engine as le
+with st.expander("DEBUG: engine version", expanded=False):
+    st.write("Engine sentinel:", getattr(le, "PCE_DEBUG_SENTINEL", "MISSING"))
+    st.write("Has PCE:", hasattr(le, "PCE"))
 
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
@@ -947,4 +951,5 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
+
 
