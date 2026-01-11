@@ -550,6 +550,8 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
 # ============================================================
 # Main form
 # ============================================================
+def fhx_to_bool(choice: str) -> bool:
+    return choice is not None and choice != "None / Unknown"
 with st.form("levels_form"):
     st.subheader("Patient context")
 
@@ -806,4 +808,5 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
+
 
