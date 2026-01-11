@@ -345,6 +345,102 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
 # Pooled Cohort Equations (10-year ASCVD risk)
 # ----------------------------
 def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # Local PCE coefficients to prevent NameError if module constant was lost during edits.
+    PCE = {
+        ("white", "female"): {"s0": 0.9665, "mean": -29.18,
+            "ln_age": -29.799, "ln_age_sq": 4.884, "ln_tc": 13.540, "ln_age_ln_tc": -3.114,
+            "ln_hdl": -13.578, "ln_age_ln_hdl": 3.149,
+            "ln_sbp_treated": 2.019, "ln_sbp_untreated": 1.957,
+            "smoker": 7.574, "ln_age_smoker": -1.665,
+            "diabetes": 0.661
+        },
+        ("black", "female"): {"s0": 0.9533, "mean": 86.61,
+            "ln_age": 17.114, "ln_tc": 0.940,
+            "ln_hdl": -18.920, "ln_age_ln_hdl": 4.475,
+            "ln_sbp_treated": 29.291, "ln_age_ln_sbp_treated": -6.432,
+            "ln_sbp_untreated": 27.820, "ln_age_ln_sbp_untreated": -6.087,
+            "smoker": 0.691, "diabetes": 0.874
+        },
+        ("white", "male"): {"s0": 0.9144, "mean": 61.18,
+            "ln_age": 12.344, "ln_tc": 11.853, "ln_age_ln_tc": -2.664,
+            "ln_hdl": -7.990, "ln_age_ln_hdl": 1.769,
+            "ln_sbp_treated": 1.797, "ln_sbp_untreated": 1.764,
+            "smoker": 7.837, "ln_age_smoker": -1.795,
+            "diabetes": 0.658
+        },
+        ("black", "male"): {"s0": 0.8954, "mean": 19.54,
+            "ln_age": 2.469, "ln_tc": 0.302, "ln_hdl": -0.307,
+            "ln_sbp_treated": 1.916, "ln_sbp_untreated": 1.809,
+            "smoker": 0.549, "diabetes": 0.645
+        },
+    }
+
+    req = ["age","sex","race","tc","hdl","sbp","bp_treated","smoking","diabetes"]
+    missing = [k for k in req if not p.has(k)]
+    if missing:
+        add_trace(trace, "PCE_missing_inputs", missing, "PCE not calculated")
+        return {"risk_pct": None, "missing": missing}
+
+    age = int(p.get("age"))
+    if age < 40 or age > 79:
+        add_trace(trace, "PCE_age_out_of_range", age, "Valid age range 40–79")
+        return {"risk_pct": None, "missing": [], "notes": "Valid for ages 40–79."}
+
+    sex = str(p.get("sex", "")).lower()
+    sex_key = "male" if sex in ("m","male") else "female"
+
+    race = str(p.get("race", "")).lower()
+    race_key = "black" if race in ("black","african american","african-american") else "white"
+
+    c = PCE[(race_key, sex_key)]
+    tc = float(p.get("tc")); hdl = float(p.get("hdl")); sbp = float(p.get("sbp"))
+    treated = bool(p.get("bp_treated")); smoker = bool(p.get("smoking")); dm = bool(p.get("diabetes"))
+
+    ln_age = math.log(age); ln_tc = math.log(tc); ln_hdl = math.log(hdl); ln_sbp = math.log(sbp)
+
+    lp = 0.0
+    lp += c.get("ln_age",0)*ln_age
+    if "ln_age_sq" in c:
+        lp += c["ln_age_sq"]*(ln_age**2)
+    lp += c.get("ln_tc",0)*ln_tc
+    if "ln_age_ln_tc" in c:
+        lp += c["ln_age_ln_tc"]*(ln_age*ln_tc)
+    lp += c.get("ln_hdl",0)*ln_hdl
+    if "ln_age_ln_hdl" in c:
+        lp += c["ln_age_ln_hdl"]*(ln_age*ln_hdl)
+
+    if treated:
+        lp += c.get("ln_sbp_treated",0)*ln_sbp
+        if "ln_age_ln_sbp_treated" in c:
+            lp += c["ln_age_ln_sbp_treated"]*(ln_age*ln_sbp)
+    else:
+        lp += c.get("ln_sbp_untreated",0)*ln_sbp
+        if "ln_age_ln_sbp_untreated" in c:
+            lp += c["ln_age_ln_sbp_untreated"]*(ln_age*ln_sbp)
+
+    if smoker:
+        lp += c.get("smoker",0)
+        if "ln_age_smoker" in c:
+            lp += c["ln_age_smoker"]*ln_age
+    if dm:
+        lp += c.get("diabetes",0)
+
+    risk = 1 - (c["s0"] ** math.exp(lp - c["mean"]))
+    risk = max(0.0, min(1.0, risk))
+    risk_pct = round(risk*100, 1)
+
+    if risk_pct < 5:
+        cat = "Low (<5%)"
+    elif risk_pct < 7.5:
+        cat = "Borderline (5–7.4%)"
+    elif risk_pct < 20:
+        cat = "Intermediate (7.5–19.9%)"
+    else:
+        cat = "High (≥20%)"
+
+    add_trace(trace, "PCE_calculated", risk_pct, f"PCE category={cat}")
+    return {"risk_pct": risk_pct, "category": cat, "notes": "Population estimate (does not include CAC/ApoB/Lp(a))."}
+
     req = ["age","sex","race","tc","hdl","sbp","bp_treated","smoking","diabetes"]
     missing = [k for k in req if not p.has(k)]
     if missing:
@@ -893,5 +989,6 @@ def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
 
     lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
     return "\n".join(lines)
+
 
 
