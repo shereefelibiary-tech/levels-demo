@@ -33,6 +33,7 @@
 import math
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
+PCE_DEBUG_SENTINEL = "PCE_SENTINEL_2026_01_11"
 
 
 VERSION = {
@@ -892,4 +893,5 @@ def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
 
     lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
     return "\n".join(lines)
+
 
