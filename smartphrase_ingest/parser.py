@@ -48,7 +48,7 @@ def extract_sex(raw: str) -> Tuple[Optional[str], Optional[str]]:
       - Sex: Male / Gender=f
       - 57M / 63F / M57
       - "57 yo male"
-      - "47 y/o M"  (FIXED)
+      - "47 y/o M"
     """
     if not raw or not raw.strip():
         return None, "Sex not detected (empty text)"
@@ -65,7 +65,7 @@ def extract_sex(raw: str) -> Tuple[Optional[str], Optional[str]]:
     hits += re.findall(r"\b\d{1,3}\s*([mf])\b", t)
     hits += re.findall(r"\b([mf])\s*\d{1,3}\b", t)
 
-    # 3) Age token then standalone M/F (FIX): "47 y/o M", "47 yo F"
+    # 3) Age token then standalone M/F: "47 y/o M", "47 yo F"
     hits += re.findall(r"\b\d{1,3}\s*(?:yo|y/o|yr|yrs|year|years)\s*([mf])\b", t)
 
     # 4) Free text words
@@ -115,6 +115,7 @@ def extract_age(raw: str) -> Tuple[Optional[int], Optional[str]]:
 
 
 def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
+    # Picks first BP like 135/84 anywhere in the text
     m = re.search(r"\b(?:bp\s*)?(\d{2,3})\s*/\s*(\d{2,3})\b", raw, flags=re.I)
     if not m:
         return None
@@ -125,27 +126,45 @@ def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
 
 
 def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
+    """
+    FIXES:
+      - Diabetes negation should not be overwritten by generic 'diabetes' token.
+      - Smoking: 'Tobacco smoker: No' and 'Smoking status: Never' should not set smoker=True.
+    """
     t = raw.lower()
 
+    # ---- Diabetes (negation-first; use elif to prevent overwrite) ----
     diabetes: Optional[bool] = None
     if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
         diabetes = False
-    if re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
+    elif re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
         diabetes = True
 
+    # ---- Smoking (explicit negation/never first) ----
     smoker: Optional[bool] = None
     former_smoker: Optional[bool] = None
 
-    if re.search(r"\b(never smoker|non-smoker|nonsmoker|never smoked)\b", t):
+    # Epic-style fields:
+    # "Tobacco smoker: No"
+    if re.search(r"\btobacco\s*smoker\s*:\s*(no|false)\b", t):
         smoker = False
         former_smoker = False
-    if re.search(r"\b(former smoker|ex-smoker|quit smoking)\b", t):
+    # "Smoking status: Never"
+    elif re.search(r"\bsmoking\s*status\s*:\s*never\b", t):
+        smoker = False
+        former_smoker = False
+    # Common negations
+    elif re.search(r"\b(never smoker|non-?smoker|nonsmoker|never smoked)\b", t):
+        smoker = False
+        former_smoker = False
+    # Former
+    elif re.search(r"\b(former smoker|ex-smoker|quit smoking)\b", t):
         smoker = False
         former_smoker = True
-    if re.search(r"\b(current smoker|smoker|smokes)\b", t):
-        if not re.search(r"\b(non-smoker|nonsmoker)\b", t):
-            smoker = True
-            former_smoker = False
+    # Current yes — require explicit yes/current (avoid matching generic word 'smoker' in "smoker: no")
+    elif re.search(r"\btobacco\s*smoker\s*:\s*(yes|true)\b", t) or re.search(r"\bcurrent smoker\b", t) or re.search(r"\bsmoking\s*status\s*:\s*every day\b", t) or re.search(r"\bsmoking\s*status\s*:\s*some days\b", t):
+        smoker = True
+        former_smoker = False
 
     return {"diabetes": diabetes, "smoker": smoker, "former_smoker": former_smoker}
 
@@ -153,10 +172,8 @@ def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
 def extract_lpa_unit(raw: str) -> Optional[str]:
     """
     Detect unit for Lp(a) specifically.
-    Case 2 failure fix: "Lp(a) 87.8 mg/dL" should return mg/dL.
     """
     t = raw.lower()
-    # Find a small window around an Lp(a) mention to avoid picking up generic mg/dL elsewhere.
     m = re.search(r"(lp\(a\)|lpa|lipoprotein\s*\(a\)).{0,30}", t)
     window = m.group(0) if m else t
 
@@ -173,28 +190,46 @@ def extract_bp_treated(raw: str) -> Optional[bool]:
         return False
     if re.search(r"\b(on bp meds|bp treated|treated bp|on antihypertensive|taking antihypertensives|on htn meds)\b", t):
         return True
+    # Epic risk calc: "Is BP treated: No"
+    if re.search(r"\bis\s*bp\s*treated\s*:\s*(no|false)\b", t):
+        return False
+    if re.search(r"\bis\s*bp\s*treated\s*:\s*(yes|true)\b", t):
+        return True
     return None
 
 
 def extract_race_african_american(raw: str) -> Optional[bool]:
     t = raw.lower()
-
     if re.search(r"\b(non[-\s]?black|not black|non[-\s]?african american|not african american)\b", t):
         return False
     if re.search(r"\b(african american|black)\b", t):
         return True
     if re.search(r"\brace\s*[:=]\s*aa\b", t) or re.search(r"\bethnicity\s*[:=]\s*aa\b", t):
         return True
+    # Epic risk calc: "Is Non-Hispanic African American: Yes"
+    if re.search(r"\bis\s*non-?hispanic\s*african\s*american\s*:\s*(yes|true)\b", t):
+        return True
+    if re.search(r"\bis\s*non-?hispanic\s*african\s*american\s*:\s*(no|false)\b", t):
+        return False
     return None
 
 
 def extract_labs(raw: str) -> Dict[str, Optional[float]]:
     """
-    Fixes:
-      - LDL-C variants like "LDL-C: 128" (Case 4)
-      - A1c extraction should work for "A1c 6.1%" etc (Cases 1/2/3/5)
+    FIXES:
+      - A1c should be captured from Epic table format:
+        "Hemoglobin A1C ... 01/05/2026  5.7 (H)"
+      - LDL-C variants like "LDL-C: 128"
     """
     t = raw
+
+    # Table-aware A1c fallback (Epic-style)
+    a1c_table = _first_float(
+        r"hemoglobin\s*a1c[\s\S]{0,300}?\b\d{1,2}/\d{1,2}/\d{2,4}\s+(\d{1,2}(?:\.\d+)?)\b",
+        t,
+    )
+
+    a1c_inline = _first_float(r"\b(?:a1c|hba1c|hb\s*a1c)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t)
 
     return {
         "tc": _first_float(r"\b(?:total\s*cholesterol|total\s*chol|tc|cholesterol|chol)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
@@ -207,9 +242,13 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
         "apob": _first_float(r"\b(?:apo\s*b|apob)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
         "lpa": _first_float(r"\b(?:lp\(a\)|lpa|lipoprotein\s*\(a\))\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t),
 
-        "a1c": _first_float(r"\b(?:a1c|hba1c|hb\s*a1c)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t),
+        # A1c: prefer table capture if present
+        "a1c": a1c_table if a1c_table is not None else a1c_inline,
 
+        # Risk calc may include ascvd percentage
         "ascvd": _first_float(r"\bascvd\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t),
+
+        # CAC numeric only (*** or Not done should not match)
         "cac": _first_float(r"\b(?:cac|coronary\s*artery\s*calcium|calcium\s*score)\s*(?:score)?\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t),
     }
 
@@ -284,7 +323,6 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {}
 
-    # Include A1c + lpa_unit explicitly (these were missing in your results)
     keys = (
         "age", "sex", "sbp",
         "tc", "hdl", "ldl",
@@ -306,3 +344,4 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
         out["former_smoker"] = x["former_smoker"]
 
     return out
+
