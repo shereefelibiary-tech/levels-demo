@@ -115,14 +115,45 @@ def extract_age(raw: str) -> Tuple[Optional[int], Optional[str]]:
 
 
 def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
-    # Picks first BP like 135/84 anywhere in the text
-    m = re.search(r"\b(?:bp\s*)?(\d{2,3})\s*/\s*(\d{2,3})\b", raw, flags=re.I)
-    if not m:
-        return None
-    try:
-        return int(m.group(1)), int(m.group(2))
-    except Exception:
-        return None
+    t = raw
+
+    # 1) Prefer Risk Calculation style: "Systolic Blood Pressure: 182 mmHg"
+    m = re.search(r"\bsystolic\s+blood\s+pressure\s*:\s*(\d{2,3})\b", t, flags=re.I)
+    if m:
+        try:
+            sbp = int(m.group(1))
+            # DBP not provided there; return sbp with None-ish dbp placeholder
+            return sbp, 0
+        except Exception:
+            pass
+
+    # 2) Prefer explicit BP label: "BP 182/112" or "BP: 182/112"
+    m = re.search(r"\bBP\b[^\d]{0,10}(\d{2,3})\s*/\s*(\d{2,3})\b", t, flags=re.I)
+    if m:
+        try:
+            sbp, dbp = int(m.group(1)), int(m.group(2))
+            # sanity filter
+            if 50 <= sbp <= 300 and 30 <= dbp <= 200:
+                return sbp, dbp
+        except Exception:
+            pass
+
+    # 3) Fallback: any 2-3 digit slash 2-3 digit, but reject date-like and implausible pairs
+    for m in re.finditer(r"\b(\d{2,3})\s*/\s*(\d{2,3})\b", t):
+        try:
+            sbp, dbp = int(m.group(1)), int(m.group(2))
+        except Exception:
+            continue
+
+        # Reject date fragments like 12/29, 05/29, 07/05
+        if sbp <= 31 and dbp <= 31:
+            continue
+
+        # Standard plausibility
+        if 50 <= sbp <= 300 and 30 <= dbp <= 200:
+            return sbp, dbp
+
+    return None
 
 
 def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
