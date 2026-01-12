@@ -589,12 +589,20 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
 # Parse & Apply callback (FIX)
 # ============================================================
 def cb_parse_and_apply():
-    parsed = st.session_state.get("parsed_preview_cache", {}) or {}
     raw_txt = st.session_state.get("smartphrase_raw", "") or ""
+
+    # Always parse fresh at click time (no stale cache issues)
+    parser_txt = sanitize_text_for_parser(raw_txt)
+    parsed = parse_smartphrase(parser_txt) if parser_txt.strip() else {}
+
+    # Keep preview cache in sync with what we actually applied
+    st.session_state["parsed_preview_cache"] = parsed
+
     applied, missing = apply_parsed_to_session(parsed, raw_txt)
 
     st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
     st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "")
+
 
 # ============================================================
 # Session defaults
@@ -1042,5 +1050,6 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
+
 
 
