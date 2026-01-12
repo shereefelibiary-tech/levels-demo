@@ -3,10 +3,14 @@
 # + calcium score always visible + CAC payload uses session_state
 # + Parse & Apply callback + drift removed via scrub_terms
 #
-# FIXES:
-#  - Diabetes guard: trust "Diabetic: No/Yes"; ignore Epic smartlist placeholders "{YES/NO:####}"
-#  - CAC input: do not disable number_input inside form (prevents greyed/locked behavior)
-#  - Parse fresh on click; no pre-parse date scrubbing; keep apply-time date guards
+# FINAL BEHAVIOR:
+# - SmartPhrase parsing uses RAW text (no date-scrubbing before parsing; Epic A1c tables rely on dates)
+# - Parse & Apply parses fresh on click (no stale cache issues)
+# - Apply-time date guards prevent date strings from filling numeric boxes
+# - Diabetes guard respects "Diabetic: No/Yes" and avoids Epic smartlist placeholders
+# - CAC input is NOT disabled inside the form (Streamlit forms don't re-render live; disabling feels "locked")
+# - UI uses "Management" language (no "posture")
+# - Lipid targets show a small guideline anchor note (ACC/AHA + ESC/EAS)
 
 import json
 import re
@@ -228,42 +232,35 @@ def parse_inflammatory_flags_from_text(txt: str) -> dict:
 
 def diabetes_negation_guard(txt: str):
     """
-    Returns:
-      False = explicit no diabetes
-      True  = explicit diabetes
-      None  = unknown (e.g., Epic smartlist placeholders)
+    UI-side guard (wins over parser) for common Epic phrasing.
     """
     if not txt:
         return None
     t = txt.lower()
 
-    # Trust Epic Risk Calculation section if present
+    # Epic risk calculation language
     if re.search(r"\bdiabetic\s*:\s*(no|false)\b", t):
         return False
     if re.search(r"\bdiabetic\s*:\s*(yes|true)\b", t):
         return True
 
-    # Ignore unanswered Epic smartlist placeholders (treat as unknown)
-    # e.g., "Diabetes mellitus: {YES/NO:19726}"
-    if re.search(r"\bdiabetes\s*mellitus\s*:\s*\{yes/no:\d+\}\b", t):
-        return None
-
-    # Explicit negations
+    # Common negation/affirmation
     if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
         return False
-
-    # Explicit diabetes terms (only after the placeholder check above)
     if re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
-        return True
-
+        if not re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
+            # Avoid treating Epic smartlist placeholder as "true"
+            if re.search(r"\bdiabetes\s*mellitus\s*:\s*\{yes/no:\d+\}\b", t):
+                return None
+            return True
     return None
 
 # ------------------------------------------------------------
 # Apply-time date-like guards + safe numeric coercion
 # ------------------------------------------------------------
 DATE_LIKE_PATTERNS = [
-    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",
-    r"\b\d{4}-\d{2}-\d{2}\b",
+    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",  # 01/05/2026
+    r"\b\d{4}-\d{2}-\d{2}\b",        # 2026-01-05
     r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},\s+\d{4}\b",
 ]
 
@@ -348,6 +345,12 @@ def sublevel_explainer(sub: str):
 # LDL-FIRST targets (ApoB secondary)
 # ------------------------------------------------------------
 def pick_dual_targets_ldl_first(out: dict, patient_data: dict) -> dict:
+    """
+    Returns:
+      primary: ('LDL-C', '<100 mg/dL') if LDL goal exists, otherwise ApoB
+      secondary: ApoB line if ApoB goal exists
+      apob_measured: bool
+    """
     targets = out.get("targets", {}) or {}
     ldl_goal = targets.get("ldl")
     apob_goal = targets.get("apob")
@@ -366,6 +369,20 @@ def pick_dual_targets_ldl_first(out: dict, patient_data: dict) -> dict:
         secondary = ("ApoB", f"<{int(apob_goal)} mg/dL")
 
     return {"primary": primary, "secondary": secondary, "apob_measured": apob_measured}
+
+def guideline_anchor_note(mgmt_level: int, clinical_ascvd: bool) -> str:
+    """
+    Short, non-intrusive provenance note for lipid targets.
+    """
+    if clinical_ascvd:
+        return "Guideline anchor: ACC/AHA secondary prevention (LDL-C <70). ESC/EAS very-high-risk often targets <55."
+    if mgmt_level >= 4:
+        return "Guideline anchor: ACC/AHA & ESC/EAS targets for subclinical atherosclerosis (LDL-C <70)."
+    if mgmt_level == 3:
+        return "Guideline anchor: ACC/AHA primary prevention—risk-enhanced approach; ApoB thresholds used as risk-enhancing markers."
+    if mgmt_level == 2:
+        return "Guideline anchor: ACC/AHA primary prevention—individualized targets based on overall risk and trajectory."
+    return "Guideline anchor: ACC/AHA primary prevention—lifestyle-first and periodic reassessment."
 
 # ------------------------------------------------------------
 # High-yield Clinical Report (built from engine JSON)
@@ -480,7 +497,7 @@ TARGET_PARSE_FIELDS = [
 ]
 
 # ------------------------------------------------------------
-# Apply parsed → session
+# Apply parsed → session (HARDENED)
 # ------------------------------------------------------------
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
@@ -544,13 +561,13 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     dm_guard = diabetes_negation_guard(raw_txt)
     if dm_guard is False:
         st.session_state["diabetes_choice_val"] = "No"
-        applied.append("Diabetes(manual) (guard)")
+        applied.append("Diabetes(manual) (negation)")
     elif dm_guard is True:
         st.session_state["diabetes_choice_val"] = "Yes"
-        applied.append("Diabetes(manual) (guard)")
+        applied.append("Diabetes(manual) (risk-calc)")
     elif parsed.get("diabetes") is not None:
         st.session_state["diabetes_choice_val"] = "Yes" if bool(parsed["diabetes"]) else "No"
-        applied.append("Diabetes(manual) (parsed)")
+        applied.append("Diabetes(manual)")
 
     if parsed.get("bpTreated") is not None:
         st.session_state["bp_treated_val"] = "Yes" if bool(parsed["bpTreated"]) else "No"
@@ -578,14 +595,16 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     return applied, missing
 
 # ============================================================
-# Parse & Apply callback (parse fresh)
+# Parse & Apply callback (FINAL)
 # ============================================================
 def cb_parse_and_apply():
     raw_txt = st.session_state.get("smartphrase_raw", "") or ""
     parsed = parse_smartphrase(raw_txt) if raw_txt.strip() else {}
+
     st.session_state["parsed_preview_cache"] = parsed
 
     applied, missing = apply_parsed_to_session(parsed, raw_txt)
+
     st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
     st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "")
 
@@ -655,7 +674,7 @@ def cb_clear_autofilled_fields():
 mode = st.radio("Output mode", ["Quick (default)", "Full (details)"], horizontal=True)
 
 # ============================================================
-# SmartPhrase ingest
+# SmartPhrase ingest (optional)
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
 
@@ -676,6 +695,7 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     if smart_txt and contains_phi(smart_txt):
         st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
 
+    # IMPORTANT: Do NOT sanitize dates before parsing; Epic A1c tables use dates.
     parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
     st.session_state["parsed_preview_cache"] = parsed_preview
 
@@ -778,7 +798,8 @@ with st.form("levels_form"):
     with d1:
         cac_known = st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
     with d2:
-        # IMPORTANT: do not disable inside a form; it will feel "locked"
+        # IMPORTANT: In a Streamlit form, disabling based on another widget feels "locked" until submit.
+        # Keep it editable; ignore if CAC is unknown.
         st.number_input(
             "Calcium score (Agatston)",
             min_value=0,
@@ -786,7 +807,7 @@ with st.form("levels_form"):
             step=1,
             key="cac_val",
             disabled=False,
-            help="Enter CAC here. If 'Calcium score available?' is No, this value will be ignored on Run.",
+            help="If CAC is not available, set 'Calcium score available?' to No. The engine will ignore this value.",
         )
     with d3:
         st.caption("")
@@ -893,28 +914,9 @@ if submitted:
     apob_line = t_pick["secondary"]
     apob_measured = t_pick["apob_measured"]
 
-    st.markdown("## Recommended lipid targets")
-    if primary:
-        st.markdown(f"### **{primary[0]} {primary[1]}**")
-    else:
-        st.markdown("### **Target: —**")
-
-    # ApoB line with hover anchors
-    if apob_line is not None:
-        hover = "Quick anchors: <80 good • 80–99 borderline • ≥100 high • ≥130 very high (ACC risk signal). ApoB is a particle-count check—especially helpful when TG/metabolic risk is present."
-        st.markdown(
-            f"**{apob_line[0]} {apob_line[1]}** <span title=\"{hover}\">ⓘ</span>",
-            unsafe_allow_html=True,
-        )
-        if not apob_measured:
-            st.caption("ApoB not measured here — optional add-on to check for discordance.")
-    else:
-        if view_mode != "Simple":
-            st.caption("ApoB not available (no engine target).")
-
     lvl = out.get("levels", {}) or {}
-    rs = out.get("riskSignal", {}) or {}
-    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
+    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+    clinical_ascvd = bool(ev.get("clinical_ascvd")) if isinstance(ev, dict) else False
 
     mgmt_level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
@@ -924,9 +926,37 @@ if submitted:
     mgmt_level = max(1, min(5, mgmt_level))
     sub = lvl.get("sublevel")
 
+    st.markdown("## Recommended lipid targets")
+    if primary:
+        st.markdown(f"### **{primary[0]} {primary[1]}**")
+        st.caption(guideline_anchor_note(mgmt_level, clinical_ascvd))
+    else:
+        st.markdown("### **Target: —**")
+
+    # ApoB line with hover anchors + guideline note
+    if apob_line is not None:
+        hover = (
+            "Quick anchors: <80 good • 80–99 borderline • ≥100 high • ≥130 very high (risk signal). "
+            "ApoB is a particle-count check—especially helpful when TG/metabolic risk is present."
+        )
+        st.markdown(
+            f"**{apob_line[0]} {apob_line[1]}** <span title=\"{hover}\">ⓘ</span>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Guideline anchor: ApoB used as a risk-enhancing lipid marker (ACC/AHA) and as a treatment target in higher-risk tiers (ESC/EAS).")
+        if not apob_measured:
+            st.caption("ApoB not measured here — optional add-on to check for discordance.")
+    else:
+        if view_mode != "Simple":
+            st.caption("ApoB not available (no engine target).")
+
+    # -------------------------------------------------------
+
+    rs = out.get("riskSignal", {}) or {}
+    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
+
     if view_mode == "Simple":
         st.caption(f"Management Level: {mgmt_level}" + (f" ({sub})" if sub else ""))
-        ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
         st.caption(f"Evidence: {scrub_terms(ev.get('cac_status','—'))}")
     else:
         st.subheader("Key metrics")
@@ -938,8 +968,9 @@ if submitted:
         m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
         m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
-        ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-        st.markdown(f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}")
+        st.markdown(
+            f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}"
+        )
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
         st.subheader("Clinical report (high-yield)")
@@ -982,27 +1013,43 @@ if submitted:
 
             meaning = scrub_terms(lvl.get("meaning") or "")
             if meaning:
-                st.markdown(f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>",
+                    unsafe_allow_html=True,
+                )
 
             why_list = scrub_list((lvl.get("why") or [])[:3])
             if why_list:
-                st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div class='small-help'><strong>Why this level:</strong></div>",
+                    unsafe_allow_html=True,
+                )
                 st.markdown("<ul>", unsafe_allow_html=True)
                 for w in why_list:
                     st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
                 st.markdown("</ul>", unsafe_allow_html=True)
 
             if lvl.get("defaultPosture"):
-                posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(lvl["defaultPosture"])).strip()
+                posture_clean = re.sub(
+                    r"^\s*(Default posture:|Consider:|Defer—need data:)\s*",
+                    "",
+                    str(lvl["defaultPosture"]),
+                ).strip()
                 posture_clean = scrub_terms(posture_clean)
-                st.markdown(f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>",
+                    unsafe_allow_html=True,
+                )
 
             if sub:
                 expl, chips = sublevel_explainer(sub)
                 expl = scrub_terms(expl)
                 chips = scrub_list(chips)
                 if expl:
-                    st.markdown(f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>",
+                        unsafe_allow_html=True,
+                    )
                 if chips:
                     st.markdown("<div class='next-row'>", unsafe_allow_html=True)
                     for c in chips:
