@@ -934,6 +934,10 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     return out
 
 
+# levels_engine.py
+# Replace your existing render_quick_text() with this version.
+# Only change: adds a single “Note:” line right after the PCE line (or after the PCE-not-calculated line).
+
 def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
     lvl = out["levels"]
     rs = out["riskSignal"]
@@ -943,26 +947,42 @@ def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
 
     lines=[]
     lines.append(f"LEVELS™ {out['version']['levels']} — Quick Reference")
+
     sub = f" ({lvl.get('sublevel')})" if lvl.get("sublevel") else ""
-    lines.append(f"Posture Level {lvl.get('postureLevel', lvl.get('level'))}{sub}: {lvl['label'].split('—',1)[1].strip()}")
+    lines.append(
+        f"Posture Level {lvl.get('postureLevel', lvl.get('level'))}{sub}: "
+        f"{lvl['label'].split('—',1)[1].strip()}"
+    )
 
     ev = lvl.get("evidence", {})
     lines.append(f"Evidence: {ev.get('cac_status','Unknown')} / burden: {ev.get('burden_band','Unknown')}")
     lines.append(f"Atherosclerotic disease burden: {out['diseaseBurden']}")
 
-    miss=", ".join(conf["top_missing"]) if conf["top_missing"] else "none"
+    miss = ", ".join(conf["top_missing"]) if conf["top_missing"] else "none"
     lines.append(f"Confidence: {conf['confidence']} ({conf['pct']}% complete; missing: {miss})")
     lines.append(f"Recommendation strength: {lvl.get('recommendationStrength','—')}")
     lines.append("")
+
+    # RSS line (already includes band)
     lines.append(f"Risk Signal Score: {rs['score']}/100 ({rs['band']}) — {rs['note']}")
 
+    # PCE line
     if risk10.get("risk_pct") is not None:
         lines.append(f"Pooled Cohort Equations (10-year ASCVD risk): {risk10['risk_pct']}% ({risk10['category']})")
     else:
         if risk10.get("missing"):
-            lines.append(f"Pooled Cohort Equations (10-year ASCVD risk): not calculated (missing {', '.join(risk10['missing'][:3])})")
+            lines.append(
+                f"Pooled Cohort Equations (10-year ASCVD risk): not calculated "
+                f"(missing {', '.join(risk10['missing'][:3])})"
+            )
         else:
             lines.append("Pooled Cohort Equations (10-year ASCVD risk): not calculated")
+
+    # ✅ One-line clarity note (kept short to avoid clutter)
+    lines.append(
+        "Note: Risk Signal reflects biologic/plaque burden; ASCVD risk reflects 10-year event probability—"
+        "discordance is expected and informative."
+    )
 
     if out.get("drivers"):
         lines.append("Drivers: " + "; ".join(out["drivers"]))
@@ -975,12 +995,17 @@ def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
 
     above = False
     try:
-        if p.has("apob") and float(p.get("apob")) > t["apob"]: above = True
-        if p.has("ldl") and float(p.get("ldl")) > t["ldl"]: above = True
+        if p.has("apob") and float(p.get("apob")) > t["apob"]:
+            above = True
+        if p.has("ldl") and float(p.get("ldl")) > t["ldl"]:
+            above = True
     except Exception:
         pass
     if above:
-        lines.append("Benefit context: ~40 mg/dL ApoB/LDL reduction ≈ ~20–25% relative ASCVD event reduction over time (population data).")
+        lines.append(
+            "Benefit context: ~40 mg/dL ApoB/LDL reduction ≈ ~20–25% relative ASCVD event reduction over time "
+            "(population data)."
+        )
 
     lines.append(out["escGoals"])
 
@@ -989,6 +1014,3 @@ def render_quick_text(p: Patient, out: Dict[str,Any]) -> str:
 
     lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
     return "\n".join(lines)
-
-
-
