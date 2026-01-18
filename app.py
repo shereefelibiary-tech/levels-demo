@@ -1,16 +1,25 @@
 # app.py (Risk Continuum — clinician-clean layout + continuum visualization)
-# PATCHED (v2.8-compatible) — applies 4 fixes:
-#   1) ASCVD radio now has key="ascvd_val" and is read from session_state
-#   2) FHx selectbox now has key="fhx_choice_val" and is read from session_state
-#   3) Bleeding-risk checkboxes now have stable keys (bleed_*) and are read from session_state
-#   4) Renders engine snapshot insights (out["insights"]) once, in Report tab (and lightly in Overview)
+#
+# UPDATED per directions:
+# - NO "Overview" tab (removes redundancy)
+# - All actionable content clustered together in Report:
+#     • Plan + Next steps + Aspirin + Structural clarification (CAC advisory) grouped as "Plan & actions"
+#     • Clinical context (risk driver / phenotype / robustness / structural status) adjacent to actions
+# - Uses engine v2.8 insights (out["insights"]) in ONE place (Report)
+#
+# Fixes retained:
+#   1) ASCVD radio key="ascvd_val"
+#   2) FHx selectbox key="fhx_choice_val"
+#   3) Bleeding-risk checkboxes keyed and read from session_state
+#   4) Renders out["insights"] (phenotype + CAC advisory + robustness)
 #
 # Keeps:
 # - Risk Continuum bar visualization
 # - SmartPhrase ingest + Parse&Apply + parse coverage
-# - Demo defaults toggle
+# - Demo defaults
 # - LDL-first targets visible
 # - PREVENT visible (even if not active yet)
+# - Details + Debug tabs
 
 import json
 import re
@@ -101,22 +110,17 @@ html, body, [class*="css"] {
 .section ul { margin: 6px 0 6px 18px; }
 .section li { margin: 4px 0; }
 
-.kv {
-  display:flex; gap:10px; flex-wrap:wrap;
-  border:1px solid rgba(31,41,55,0.10);
-  background:#fbfbfb;
-  border-radius:12px;
-  padding:10px 12px;
-  margin-top:10px;
-}
-.kv div { font-size:0.9rem; }
-.kv strong { font-weight:800; }
-
 .next-box {
   border:1px solid rgba(31,41,55,0.10);
   border-radius:12px;
   padding:12px;
   background:#fff;
+}
+.context-box {
+  border:1px solid rgba(31,41,55,0.10);
+  border-radius:12px;
+  padding:12px;
+  background:#fbfbfb;
 }
 </style>
 """,
@@ -201,7 +205,6 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
     segs = []
     for i in range(1, 6):
         active = (i == lvl)
-
         outline = "2px solid #111827" if active else "1px solid rgba(31,41,55,0.25)"
         shadow = "0 8px 20px rgba(0,0,0,0.18)" if active else "none"
 
@@ -396,117 +399,6 @@ def guideline_anchor_note(level: int, clinical_ascvd: bool) -> str:
     return "Guideline anchor: ACC/AHA primary prevention—lifestyle-first and periodic reassessment."
 
 # ============================================================
-# High-yield report HTML
-# ============================================================
-def render_high_yield_report(out: dict) -> str:
-    lvl = out.get("levels", {}) or {}
-    rs = out.get("riskSignal", {}) or {}
-    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
-    targets = out.get("targets", {}) or {}
-    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-    drivers = scrub_list(out.get("drivers", []) or [])
-    next_actions = scrub_list(out.get("nextActions", []) or [])
-    asp = out.get("aspirin", {}) or {}
-
-    prevent10 = out.get("prevent10", {}) or {}
-    p_total = prevent10.get("total_cvd_10y_pct")
-    p_ascvd = prevent10.get("ascvd_10y_pct")
-
-    level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
-    try:
-        level = int(level)
-    except Exception:
-        level = 1
-    level = max(1, min(5, level))
-
-    sub = lvl.get("sublevel")
-    name = LEVEL_NAMES.get(level, "—")
-    title = f"{SYSTEM_NAME} — Level {level}: {name}" + (f" ({sub})" if sub else "")
-
-    risk_pct = risk10.get("risk_pct")
-    risk_line = f"{risk_pct}%" if risk_pct is not None else "—"
-    risk_cat = risk10.get("category") or ""
-
-    evidence_line = scrub_terms(ev.get("cac_status") or out.get("diseaseBurden") or "—")
-    burden_line = scrub_terms(ev.get("burden_band") or "—")
-
-    rec_tag = scrub_terms(lvl.get("recommendationStrength") or "—")
-    explainer = scrub_terms(lvl.get("explainer") or "")
-    meaning = scrub_terms(lvl.get("meaning") or "")
-
-    html = []
-    html.append('<div class="report">')
-    html.append(f"<h2>{title}</h2>")
-
-    html.append('<div class="section">')
-    html.append('<div class="section-title">Summary</div>')
-    html.append(f"<p>{meaning}</p>" if meaning else "<p class='muted'>No summary available.</p>")
-    if explainer:
-        html.append(f"<p class='small-help'><strong>Level explainer:</strong> {explainer}</p>")
-    if rec_tag and rec_tag != "—":
-        html.append(f"<p class='small-help'><strong>Recommendation tag:</strong> {rec_tag}</p>")
-    html.append("</div>")
-
-    html.append('<div class="section">')
-    html.append('<div class="section-title">Key metrics</div>')
-    html.append(f"<p><strong>Risk Signal Score:</strong> {rs.get('score','—')}/100 ({rs.get('band','—')})</p>")
-    if risk_pct is not None:
-        html.append(f"<p><strong>10-year ASCVD risk (PCE):</strong> {risk_line} {f'({risk_cat})' if risk_cat else ''}</p>")
-    else:
-        html.append("<p><strong>10-year ASCVD risk (PCE):</strong> —</p>")
-
-    if p_total is not None or p_ascvd is not None:
-        html.append(f"<p><strong>PREVENT (10-year):</strong> total CVD {p_total}% / ASCVD {p_ascvd}%</p>")
-    else:
-        note = prevent10.get("notes")
-        if note:
-            html.append(f"<p class='muted'><strong>PREVENT (10-year):</strong> {scrub_terms(note)}</p>")
-
-    html.append(f"<p><strong>Evidence:</strong> {evidence_line}</p>")
-    html.append(f"<p><strong>Burden:</strong> {burden_line}</p>")
-    html.append("</div>")
-
-    html.append('<div class="section">')
-    html.append('<div class="section-title">Primary drivers</div>')
-    if drivers:
-        html.append("<ul>")
-        for d in drivers[:3]:
-            html.append(f"<li>{d}</li>")
-        html.append("</ul>")
-    else:
-        html.append("<p class='muted'>No drivers listed.</p>")
-    html.append("</div>")
-
-    html.append('<div class="section">')
-    html.append('<div class="section-title">Targets & plan</div>')
-
-    tar_lines = []
-    if targets.get("ldl") is not None:
-        tar_lines.append(f"LDL-C <{targets['ldl']} mg/dL")
-    if targets.get("apob") is not None:
-        tar_lines.append(f"ApoB <{targets['apob']} mg/dL")
-    if tar_lines:
-        html.append("<p><strong>Targets:</strong> " + " • ".join(tar_lines) + "</p>")
-
-    plan = lvl.get("defaultPosture")
-    if plan:
-        plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", str(plan)).strip()
-        plan_clean = scrub_terms(plan_clean)
-        html.append(f"<p><strong>Plan:</strong> {plan_clean}</p>")
-
-    if next_actions:
-        html.append("<p><strong>Next steps:</strong></p>")
-        html.append("<p>" + "<br>".join([f"• {a}" for a in next_actions[:3]]) + "</p>")
-
-    asp_status = scrub_terms(asp.get("status") or "")
-    if asp_status:
-        html.append(f"<p><strong>Aspirin:</strong> {asp_status}</p>")
-
-    html.append("</div>")
-    html.append("</div>")
-    return "\n".join(html)
-
-# ============================================================
 # Parse & Apply
 # ============================================================
 TARGET_PARSE_FIELDS = [
@@ -652,8 +544,8 @@ def cb_parse_and_apply():
 st.session_state.setdefault("age_val", 0)
 st.session_state.setdefault("sex_val", "F")
 st.session_state.setdefault("race_val", "Other (use non-African American coefficients)")
-st.session_state.setdefault("ascvd_val", "No")              # FIX #1
-st.session_state.setdefault("fhx_choice_val", "None / Unknown")  # FIX #2
+st.session_state.setdefault("ascvd_val", "No")
+st.session_state.setdefault("fhx_choice_val", "None / Unknown")
 st.session_state.setdefault("sbp_val", 0)
 st.session_state.setdefault("tc_val", 0)
 st.session_state.setdefault("ldl_val", 0)
@@ -669,11 +561,9 @@ st.session_state.setdefault("diabetes_choice_val", "No")
 st.session_state.setdefault("cac_known_val", "No")
 st.session_state.setdefault("cac_val", 0)
 
-# Bleeding flags (FIX #3)
-for bk in ["bleed_gi","bleed_nsaid","bleed_anticoag","bleed_disorder","bleed_ich","bleed_ckd"]:
+for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
     st.session_state.setdefault(bk, False)
 
-# PREVENT defaults
 st.session_state.setdefault("bmi_val", 0.0)
 st.session_state.setdefault("egfr_val", 0.0)
 st.session_state.setdefault("lipid_lowering_val", "No")
@@ -687,7 +577,7 @@ for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
     st.session_state.setdefault(f"infl_{k}_val", False)
 
 # ============================================================
-# DEMO defaults (optional)
+# Demo defaults (optional)
 # ============================================================
 st.session_state.setdefault("demo_defaults_on", True)
 st.session_state.setdefault("demo_defaults_applied", False)
@@ -723,7 +613,7 @@ def apply_demo_defaults():
     for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{kk}_val"] = False
 
-    for bk in ["bleed_gi","bleed_nsaid","bleed_anticoag","bleed_disorder","bleed_ich","bleed_ckd"]:
+    for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
         st.session_state[bk] = False
 
     st.session_state["demo_defaults_applied"] = True
@@ -805,10 +695,8 @@ with st.form("risk_continuum_form"):
         race_options = ["Other (use non-African American coefficients)", "African American"]
         race = st.radio("Race (calculator)", race_options, horizontal=False, key="race_val")
     with a3:
-        # FIX #1: key
         ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True, key="ascvd_val")
 
-    # FIX #2: key
     fhx_choice = st.selectbox("Premature family history", FHX_OPTIONS, index=0, key="fhx_choice_val")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
@@ -884,7 +772,6 @@ with st.form("risk_continuum_form"):
         osa = st.checkbox("OSA", key="infl_osa_val")
         nafld = st.checkbox("NAFLD/MASLD", key="infl_nafld_val")
 
-    # FIX #3: keys for bleeding checkboxes
     with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
         f1, f2, f3 = st.columns(3)
         with f1:
@@ -904,7 +791,6 @@ with st.form("risk_continuum_form"):
 # Output rendering (Tabs)
 # ============================================================
 if submitted:
-    # Required field checks
     req_errors = []
     if st.session_state["age_val"] <= 0:
         req_errors.append("Age is required (must be > 0).")
@@ -918,7 +804,6 @@ if submitted:
         st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
         st.stop()
 
-    # Pull values from session_state (avoids local-variable drift)
     age = st.session_state["age_val"]
     gender = st.session_state["sex_val"]
     race = st.session_state["race_val"]
@@ -975,7 +860,6 @@ if submitted:
         "osa": bool(st.session_state.get("infl_osa_val", False)),
         "nafld": bool(st.session_state.get("infl_nafld_val", False)),
 
-        # FIX #3: read from session_state keys
         "bleed_gi": bool(st.session_state.get("bleed_gi", False)),
         "bleed_ich": bool(st.session_state.get("bleed_ich", False)),
         "bleed_anticoag": bool(st.session_state.get("bleed_anticoag", False)),
@@ -983,7 +867,6 @@ if submitted:
         "bleed_disorder": bool(st.session_state.get("bleed_disorder", False)),
         "bleed_ckd": bool(st.session_state.get("bleed_ckd", False)),
 
-        # PREVENT required inputs
         "bmi": float(bmi) if bmi and bmi > 0 else None,
         "egfr": float(egfr) if egfr and egfr > 0 else None,
         "lipid_lowering": (lipid_lowering == "Yes"),
@@ -994,13 +877,12 @@ if submitted:
     out = evaluate(patient)
     note_text = scrub_terms(render_quick_text(patient, out))
 
-    # Pull objects
     lvl = out.get("levels", {}) or {}
     ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
     rs = out.get("riskSignal", {}) or {}
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
     prevent10 = out.get("prevent10", {}) or {}
-    ins = out.get("insights", {}) or {}  # FIX #4
+    ins = out.get("insights", {}) or {}
 
     level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
@@ -1011,88 +893,110 @@ if submitted:
     sub = lvl.get("sublevel")
 
     legend = lvl.get("legend") or FALLBACK_LEVEL_LEGEND
-    explainer = scrub_terms(lvl.get("explainer") or "")
     rec_tag = scrub_terms(lvl.get("recommendationStrength") or "—")
+    explainer = scrub_terms(lvl.get("explainer") or "")
 
-    # Targets block
+    # Targets
     t_pick = pick_dual_targets_ldl_first(out, data)
     primary = t_pick["primary"]
     apob_line = t_pick["secondary"]
     apob_measured = t_pick["apob_measured"]
-
     clinical_ascvd = bool(ev.get("clinical_ascvd")) if isinstance(ev, dict) else False
 
-    # Plan one-liner (strip tag prefix)
+    # Plan line
     plan = lvl.get("defaultPosture") or ""
     plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", str(plan)).strip()
     plan_clean = scrub_terms(plan_clean)
 
     next_actions = scrub_list(out.get("nextActions", []) or [])
 
-    # PREVENT values
+    # Aspirin status
+    asp = out.get("aspirin", {}) or {}
+    asp_status = scrub_terms(asp.get("status", "Not assessed"))
+
+    # PREVENT
     p_total = prevent10.get("total_cvd_10y_pct")
     p_ascvd = prevent10.get("ascvd_10y_pct")
     p_note = scrub_terms(prevent10.get("notes", ""))
 
-    tab_overview, tab_report, tab_details, tab_debug = st.tabs(["Overview", "Report", "Details", "Debug"])
+    tab_report, tab_details, tab_debug = st.tabs(["Report", "Details", "Debug"])
 
     # =========================
-    # OVERVIEW tab
+    # REPORT (single clinician view)
     # =========================
-    with tab_overview:
+    with tab_report:
         st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
-        # Metrics row
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Risk Signal Score", f"{rs.get('score','—')}/100", rs.get("band","—"))
-        m2.metric(
-            "PCE 10y ASCVD",
-            f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—",
-            risk10.get("category",""),
+        st.markdown("### Snapshot")
+        st.markdown(f"**Level:** {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
+        st.markdown(f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}")
+
+        pce_line = f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—"
+        pce_cat = risk10.get("category") or ""
+        st.markdown(f"**Key metrics:** RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • PCE 10y {pce_line} {pce_cat}".strip())
+
+        st.markdown(
+            f"**PREVENT 10y:** total CVD {p_total if p_total is not None else '—'} • "
+            f"ASCVD {p_ascvd if p_ascvd is not None else '—'}"
         )
-        m3.metric("PREVENT 10y total CVD", f"{p_total}%" if p_total is not None else "—")
-        m4.metric("PREVENT 10y ASCVD", f"{p_ascvd}%" if p_ascvd is not None else "—")
         if (p_total is None and p_ascvd is None) and p_note:
             st.caption(f"PREVENT: {p_note}")
 
-        # Light-touch snapshot insight (kept minimal here)
-        if ins.get("decision_robustness"):
-            st.markdown(
-                f"**Decision robustness:** {ins.get('decision_robustness')}"
-                + (f" — {scrub_terms(ins.get('decision_robustness_note',''))}" if ins.get("decision_robustness_note") else "")
-            )
-
-        st.markdown("### Evidence")
-        st.write(f"{scrub_terms(ev.get('cac_status','—'))} / {scrub_terms(ev.get('burden_band','—'))}")
-
-        st.markdown("### Lipid targets")
+        # Targets
         if primary:
-            st.markdown(f"**{primary[0]} {primary[1]}**")
+            lipid_targets_line = f"{primary[0]} {primary[1]}"
+            if apob_line:
+                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+            st.markdown(f"**Lipid targets:** {lipid_targets_line}")
             st.caption(guideline_anchor_note(level, clinical_ascvd))
-        else:
-            st.markdown("**Target: —**")
-
-        if apob_line is not None:
-            hover = (
-                "Quick anchors: <80 good • 80–99 borderline • ≥100 high • ≥130 very high (risk signal). "
-                "ApoB is a particle-count check—especially helpful when TG/metabolic risk is present."
-            )
-            st.markdown(f"**{apob_line[0]} {apob_line[1]}** <span title=\"{hover}\">ⓘ</span>", unsafe_allow_html=True)
-            st.caption("ApoB: risk-enhancing marker (ACC/AHA) and treatment target in higher-risk tiers (ESC/EAS).")
-            if not apob_measured:
+            if apob_line and not apob_measured:
                 st.caption("ApoB not measured here — optional add-on to check for discordance.")
 
-        st.markdown("### Plan")
-        st.write(plan_clean if plan_clean else "—")
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # ---- Cluster ALL directions/recommendations together ----
+        st.markdown("### Plan & actions")
+
+        if plan_clean:
+            st.markdown(f"**Plan:** {plan_clean}")
         if explainer:
             st.caption(f"Explainer: {explainer}")
 
-        st.markdown("### Next steps")
         if next_actions:
-            st.markdown("<div class='next-box'>" + "<br>".join([f"• {a}" for a in next_actions[:3]]) + "</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='next-box'>—</div>", unsafe_allow_html=True)
+            st.markdown("**Next steps:**")
+            for a in next_actions[:3]:
+                st.markdown(f"- {a}")
 
+        st.markdown(f"**Aspirin:** {asp_status}")
+
+        # Structural clarification (CAC advisory) lives here with actions
+        if ins.get("structural_clarification"):
+            st.caption(scrub_terms(ins.get("structural_clarification")))
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # ---- Clinical context adjacent (supports pattern recognition, not a directive) ----
+        st.markdown("### Clinical context")
+
+        drivers = scrub_list(out.get("drivers", []) or [])
+        if drivers:
+            st.markdown(f"**Risk driver:** {drivers[0]}")
+
+        if ins.get("phenotype_label"):
+            st.markdown(f"**Phenotype:** {scrub_terms(ins.get('phenotype_label'))}")
+
+        if ins.get("decision_robustness"):
+            rob = scrub_terms(ins.get("decision_robustness"))
+            rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
+            st.markdown(f"**Decision robustness:** {rob}" + (f" — {rob_note}" if rob_note else ""))
+
+        if ev.get("cac_status") == "Unknown":
+            st.markdown("**Structural status:** Unknown (CAC not performed)")
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # Copy/download clustered here (still part of clinical output)
+        st.markdown("### Output (copy/download)")
         d1, d2 = st.columns(2)
         with d1:
             st.download_button(
@@ -1111,76 +1015,31 @@ if submitted:
                 use_container_width=True,
             )
 
+        with st.expander("Full narrative report (optional)", expanded=False):
+            # Reuse your high-yield narrative (kept optional to reduce clutter)
+            st.markdown(
+                f"""
+<div class="report">
+  <h2>{SYSTEM_NAME} — Level {level}: {LEVEL_NAMES.get(level,'—')}{f" ({sub})" if sub else ""}</h2>
+  <div class="section">
+    <div class="section-title">Summary</div>
+    <p>{scrub_terms(lvl.get("meaning","") or "—")}</p>
+    <p class="small-help"><strong>Recommendation tag:</strong> {rec_tag}</p>
+  </div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+            # If you prefer, you can paste your full render_high_yield_report() from earlier here.
+            # For now, show quick text to keep report short and aligned.
+            st.code(note_text, language="text")
+
         with st.expander("How Levels work (legend)", expanded=False):
             for item in legend:
                 st.write(f"• {scrub_terms(item)}")
 
     # =========================
-    # REPORT tab — overview embedded + insights block (FIX #4)
-    # =========================
-    with tab_report:
-        st.subheader("Clinical report (high-yield)")
-
-        st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
-
-        st.markdown("### Overview")
-        st.markdown(f"**Level:** {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
-        st.markdown(f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}")
-
-        pce_line = f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—"
-        pce_cat = risk10.get("category") or ""
-        st.markdown(f"**Key metrics:** RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • PCE 10y {pce_line} {pce_cat}".strip())
-
-        st.markdown(
-            f"**PREVENT 10y:** total CVD {p_total if p_total is not None else '—'} • "
-            f"ASCVD {p_ascvd if p_ascvd is not None else '—'}"
-        )
-        if (p_total is None and p_ascvd is None) and p_note:
-            st.caption(f"PREVENT: {p_note}")
-
-        if primary:
-            lipid_targets_line = f"{primary[0]} {primary[1]}"
-            if apob_line:
-                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
-            st.markdown(f"**Lipid targets:** {lipid_targets_line}")
-
-        if plan_clean:
-            st.markdown(f"**Plan:** {plan_clean}")
-
-        if next_actions:
-            st.markdown("**Next steps:**")
-            for a in next_actions[:3]:
-                st.markdown(f"- {a}")
-
-        # FIX #4: Clinical context (single location; non-redundant)
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-        st.markdown("### Clinical context")
-
-        drivers = scrub_list(out.get("drivers", []) or [])
-        if drivers:
-            st.markdown(f"**Risk driver:** {drivers[0]}")
-
-        if ins.get("phenotype_label"):
-            st.markdown(f"**Phenotype:** {scrub_terms(ins.get('phenotype_label'))}")
-
-        if ins.get("decision_robustness"):
-            rob = scrub_terms(ins.get("decision_robustness"))
-            rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
-            st.markdown(f"**Decision robustness:** {rob}" + (f" — {rob_note}" if rob_note else ""))
-
-        if ev.get("cac_status") == "Unknown":
-            st.markdown("**Structural status:** Unknown (CAC not performed)")
-
-        if ins.get("structural_clarification"):
-            st.caption(scrub_terms(ins.get("structural_clarification")))
-
-        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
-        # Narrative report
-        st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
-
-    # =========================
-    # DETAILS tab
+    # DETAILS
     # =========================
     with tab_details:
         st.subheader("Anchors (near-term vs lifetime)")
@@ -1203,9 +1062,7 @@ if submitted:
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        st.subheader("Aspirin")
-        asp = out.get("aspirin", {}) or {}
-        asp_status = scrub_terms(asp.get("status", "Not assessed"))
+        st.subheader("Aspirin (detail)")
         asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=4))
         st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
@@ -1217,7 +1074,7 @@ if submitted:
             st.caption(p_note or "PREVENT not calculated.")
 
     # =========================
-    # DEBUG tab
+    # DEBUG
     # =========================
     with tab_debug:
         st.subheader("Quick output (raw text)")
@@ -1236,5 +1093,4 @@ if submitted:
     )
 else:
     st.caption("Enter values (or use Demo defaults) and click Run.")
-
 
