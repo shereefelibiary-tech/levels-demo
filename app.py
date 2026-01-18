@@ -568,16 +568,21 @@ TARGET_PARSE_FIELDS = [
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
 
-    def apply_num(src_key, state_key, coerce_fn, label):
+    def apply_num(src_key, state_key, coerce_fn, label, fallback_val=None):
         nonlocal applied, missing
         v = parsed.get(src_key)
         v2 = coerce_fn(v)
         if v2 is None:
+            if fallback_val is not None:
+                st.session_state[state_key] = fallback_val
             missing.append(label)
             return
         st.session_state[state_key] = v2
         applied.append(label)
 
+    # -------------------------
+    # Core numerics
+    # -------------------------
     apply_num("age", "age_val", coerce_int, "Age")
     apply_num("sbp", "sbp_val", coerce_int, "Systolic BP")
     apply_num("tc", "tc_val", coerce_int, "Total Cholesterol")
@@ -585,6 +590,9 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     apply_num("ldl", "ldl_val", coerce_int, "LDL")
     apply_num("apob", "apob_val", coerce_int, "ApoB")
 
+    # -------------------------
+    # Lp(a)
+    # -------------------------
     lpa_v = coerce_float(parsed.get("lpa"))
     if lpa_v is not None:
         st.session_state["lpa_val"] = int(lpa_v)
@@ -592,6 +600,9 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("Lp(a)")
 
+    # -------------------------
+    # Sex
+    # -------------------------
     sex = parsed.get("sex")
     if sex in ("F", "M"):
         st.session_state["sex_val"] = sex
@@ -599,12 +610,18 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("Gender")
 
+    # -------------------------
+    # Lp(a) unit
+    # -------------------------
     if parsed.get("lpa_unit") in ("nmol/L", "mg/dL"):
         st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
         applied.append("Lp(a) unit")
     else:
         missing.append("Lp(a) unit")
 
+    # -------------------------
+    # A1c
+    # -------------------------
     a1c_v = coerce_float(parsed.get("a1c"))
     if a1c_v is not None:
         st.session_state["a1c_val"] = float(a1c_v)
@@ -612,41 +629,77 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("A1c")
 
-    cac_v = coerce_int(parsed.get("cac"))
-    if cac_v is not None:
-        st.session_state["cac_known_val"] = "Yes"
-        st.session_state["cac_val"] = int(cac_v)
-        applied.append("Calcium score")
-    else:
-        missing.append("Calcium score")
-
+    # -------------------------
+    # Smoking
+    # -------------------------
     if parsed.get("smoker") is not None:
         st.session_state["smoking_val"] = "Yes" if bool(parsed["smoker"]) else "No"
         applied.append("Smoking")
 
-    dm_guard = diabetes_negation_guard(raw_txt)
-    if dm_guard is False:
-        st.session_state["diabetes_choice_val"] = "No"
-        applied.append("Diabetes (negation)")
-    elif dm_guard is True:
-        st.session_state["diabetes_choice_val"] = "Yes"
-        applied.append("Diabetes (affirmed)")
-    elif parsed.get("diabetes") is not None:
+    # -------------------------
+    # Diabetes
+    # IMPORTANT: trust parser (it now supports "Diabetes: No")
+    # and STOP using diabetes_negation_guard() to avoid false positives.
+    # -------------------------
+    if parsed.get("diabetes") is not None:
         st.session_state["diabetes_choice_val"] = "Yes" if bool(parsed["diabetes"]) else "No"
         applied.append("Diabetes")
+    else:
+        missing.append("Diabetes")
 
+    # -------------------------
+    # BP treated
+    # -------------------------
     if parsed.get("bpTreated") is not None:
         st.session_state["bp_treated_val"] = "Yes" if bool(parsed["bpTreated"]) else "No"
         applied.append("BP meds")
     else:
         missing.append("BP meds")
 
+    # -------------------------
+    # Race
+    # -------------------------
     if parsed.get("africanAmerican") is not None:
         st.session_state["race_val"] = (
             "African American" if bool(parsed["africanAmerican"]) else "Other (use non-African American coefficients)"
         )
         applied.append("Race")
 
+    # -------------------------
+    # Family history (NEW)
+    # parser returns fhx_text matching your dropdown options
+    # -------------------------
+    fhx_txt = parsed.get("fhx_text")
+    if fhx_txt:
+        st.session_state["fhx_choice_val"] = fhx_txt
+        applied.append("Premature family history")
+    else:
+        missing.append("Premature family history")
+
+    # -------------------------
+    # CAC (NEW reset logic)
+    # - If parser says "not done" -> reset CAC known to No and value to 0
+    # - If CAC number present -> set known Yes + value
+    # - If missing -> reset to No + 0 (prevents carryover)
+    # -------------------------
+    if parsed.get("cac_not_done") is True:
+        st.session_state["cac_known_val"] = "No"
+        st.session_state["cac_val"] = 0
+        applied.append("Calcium score (not done)")
+    else:
+        cac_v = coerce_int(parsed.get("cac"))
+        if cac_v is not None:
+            st.session_state["cac_known_val"] = "Yes"
+            st.session_state["cac_val"] = int(cac_v)
+            applied.append("Calcium score")
+        else:
+            st.session_state["cac_known_val"] = "No"
+            st.session_state["cac_val"] = 0
+            missing.append("Calcium score")
+
+    # -------------------------
+    # PREVENT fields
+    # -------------------------
     if parsed.get("bmi") is not None:
         try:
             st.session_state["bmi_val"] = float(parsed["bmi"])
@@ -665,6 +718,9 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["lipid_lowering_val"] = "Yes" if bool(parsed["lipidLowering"]) else "No"
         applied.append("Lipid therapy")
 
+    # -------------------------
+    # hsCRP + inflammatory flags (keep as your text-based helpers)
+    # -------------------------
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
@@ -675,16 +731,10 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
+    # De-dupe missing list
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
-def cb_parse_and_apply():
-    raw_txt = st.session_state.get("smartphrase_raw", "") or ""
-    parsed = parse_smartphrase(raw_txt) if raw_txt.strip() else {}
-    st.session_state["parsed_preview_cache"] = parsed
-    applied, missing = apply_parsed_to_session(parsed, raw_txt)
-    st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
-    st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "")
 
 # ============================================================
 # Session defaults
@@ -1333,4 +1383,5 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
