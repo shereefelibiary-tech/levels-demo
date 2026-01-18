@@ -2,16 +2,17 @@
 
 def render_management_bar(level: int, sublevel: str | None = None) -> str:
     """
-    5-step Management Level bar with clinician-native labels.
+    5-step Level bar with clinician-native labels (Risk Continuum™).
+    Backward-compatible function name; renders "Level" (not "Management Level").
     """
-    lvl = max(0, min(5, int(level or 0)))
+    lvl = max(1, min(5, int(level or 1)))
 
     labels = {
-        1: "Minimal risk",
-        2: "Emerging risk",
-        3: "High biologic risk",
-        4: "Subclinical atherosclerosis",
-        5: "Atherosclerosis",
+        1: "Minimal risk signal",
+        2: "Emerging risk signals",
+        3: "Actionable biologic risk",
+        4: "Subclinical atherosclerosis present",
+        5: "Very high risk / ASCVD intensity",
     }
 
     segs = []
@@ -39,10 +40,11 @@ def render_management_bar(level: int, sublevel: str | None = None) -> str:
     return f"""
     <div style="margin-top:8px; margin-bottom:10px;">
       <div style="font-weight:900; font-size:1.0rem; margin-bottom:6px;">
-        Management Level: {lvl}{sub}
+        Level: {lvl}{sub}
       </div>
       <div style="display:flex; gap:8px;">
         {''.join(segs)}
       </div>
     </div>
     """
+
