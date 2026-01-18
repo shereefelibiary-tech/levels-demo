@@ -3,6 +3,7 @@
 # + Internal grammar: Levels 1–5 (+ sublevels)
 # + Evidence-strength tags: Recommended / Consider / Pending more data
 # + Adds Level explainer + legend (engine-driven if available)
+# + Adds PREVENT inputs (BMI, eGFR, lipid-lowering therapy) + displays prevent10 outputs
 
 import json
 import re
@@ -176,10 +177,8 @@ def contains_phi(s: str) -> bool:
 def scrub_terms(s: str) -> str:
     if not s:
         return s
-    # legacy drift -> emerging risk
     s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
     s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
-    # legacy posture wording if any old strings leak through
     s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
     return s
 
@@ -243,25 +242,19 @@ def parse_inflammatory_flags_from_text(txt: str) -> dict:
     return flags
 
 def diabetes_negation_guard(txt: str):
-    """
-    UI-side guard (wins over parser) for common Epic phrasing.
-    """
     if not txt:
         return None
     t = txt.lower()
 
-    # Epic risk calculation language
     if re.search(r"\bdiabetic\s*:\s*(no|false)\b", t):
         return False
     if re.search(r"\bdiabetic\s*:\s*(yes|true)\b", t):
         return True
 
-    # Common negation/affirmation
     if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
         return False
     if re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
         if not re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
-            # Avoid treating Epic smartlist placeholder as "true"
             if re.search(r"\bdiabetes\s*mellitus\s*:\s*\{yes/no:\d+\}\b", t):
                 return None
             return True
@@ -271,8 +264,8 @@ def diabetes_negation_guard(txt: str):
 # Apply-time date-like guards + safe numeric coercion
 # ------------------------------------------------------------
 DATE_LIKE_PATTERNS = [
-    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",  # 01/05/2026
-    r"\b\d{4}-\d{2}-\d{2}\b",        # 2026-01-05
+    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+    r"\b\d{4}-\d{2}-\d{2}\b",
     r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},\s+\d{4}\b",
 ]
 
@@ -400,6 +393,10 @@ def render_high_yield_report(out: dict) -> str:
     next_actions = scrub_list(out.get("nextActions", []) or [])
     asp = out.get("aspirin", {}) or {}
 
+    prevent10 = out.get("prevent10", {}) or {}
+    p_total = prevent10.get("total_cvd_10y_pct")
+    p_ascvd = prevent10.get("ascvd_10y_pct")
+
     level = (lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
         level = int(level)
@@ -445,6 +442,18 @@ def render_high_yield_report(out: dict) -> str:
         html.append(f"<p><strong>10-year ASCVD risk (PCE):</strong> {risk_line} {f'({risk_cat})' if risk_cat else ''}</p>")
     else:
         html.append("<p><strong>10-year ASCVD risk (PCE):</strong> —</p>")
+
+    # PREVENT line (optional comparator)
+    if p_total is not None or p_ascvd is not None:
+        html.append(f"<p><strong>PREVENT (10-year):</strong> total CVD {p_total}% / ASCVD {p_ascvd}%</p>")
+    else:
+        if prevent10.get("missing"):
+            html.append(f"<p class='muted'><strong>PREVENT (10-year):</strong> not calculated (missing {', '.join(prevent10['missing'][:3])})</p>")
+        else:
+            note = prevent10.get("notes")
+            if note:
+                html.append(f"<p class='muted'><strong>PREVENT (10-year):</strong> {scrub_terms(note)}</p>")
+
     html.append(f"<p><strong>Evidence:</strong> {evidence_line}</p>")
     html.append(f"<p><strong>Burden:</strong> {burden_line}</p>")
     html.append("</div>")
@@ -473,7 +482,6 @@ def render_high_yield_report(out: dict) -> str:
 
     plan = lvl.get("defaultPosture")
     if plan:
-        # strip tag prefix (new tags)
         plan_clean = re.sub(
             r"^\s*(Recommended:|Consider:|Pending more data:)\s*",
             "",
@@ -610,11 +618,28 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
+    # PREVENT fields: try to parse BMI/eGFR if present (best-effort)
+    # (No strict parsing rules here; user can enter manually)
+    m_bmi = re.search(r"\bbmi\s*[:=]?\s*(\d{1,2}(?:\.\d+)?)\b", raw_txt or "", flags=re.I)
+    if m_bmi:
+        try:
+            st.session_state["bmi_val"] = float(m_bmi.group(1))
+            applied.append("BMI")
+        except Exception:
+            pass
+    m_egfr = re.search(r"\begfr\s*[:=]?\s*(\d{1,3})\b", raw_txt or "", flags=re.I)
+    if m_egfr:
+        try:
+            st.session_state["egfr_val"] = float(m_egfr.group(1))
+            applied.append("eGFR")
+        except Exception:
+            pass
+
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
 
 # ============================================================
-# Parse & Apply callback (FINAL)
+# Parse & Apply callback
 # ============================================================
 def cb_parse_and_apply():
     raw_txt = st.session_state.get("smartphrase_raw", "") or ""
@@ -647,6 +672,12 @@ st.session_state.setdefault("smoking_val", "No")
 st.session_state.setdefault("diabetes_choice_val", "No")
 st.session_state.setdefault("cac_known_val", "No")
 st.session_state.setdefault("cac_val", 0)
+
+# PREVENT defaults
+st.session_state.setdefault("bmi_val", 0.0)
+st.session_state.setdefault("egfr_val", 0.0)
+st.session_state.setdefault("lipid_lowering_val", "No")
+
 st.session_state.setdefault("smartphrase_raw", "")
 st.session_state.setdefault("parsed_preview_cache", {})
 st.session_state.setdefault("last_applied_msg", "")
@@ -682,6 +713,12 @@ def cb_clear_autofilled_fields():
     st.session_state["diabetes_choice_val"] = "No"
     st.session_state["cac_known_val"] = "No"
     st.session_state["cac_val"] = 0
+
+    # PREVENT clears
+    st.session_state["bmi_val"] = 0.0
+    st.session_state["egfr_val"] = 0.0
+    st.session_state["lipid_lowering_val"] = "No"
+
     for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{k}_val"] = False
     st.session_state["last_applied_msg"] = ""
@@ -714,7 +751,6 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     if smart_txt and contains_phi(smart_txt):
         st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
 
-    # IMPORTANT: Do NOT sanitize dates before parsing; Epic A1c tables use dates.
     parsed_preview = parse_smartphrase(smart_txt or "") if (smart_txt or "").strip() else {}
     st.session_state["parsed_preview_cache"] = parsed_preview
 
@@ -757,6 +793,9 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
   <div>A1c: {st.session_state.get("a1c_val", 0.0) or "—"}</div>
   <div>hsCRP: {st.session_state.get("hscrp_val", 0.0) or "—"}</div>
   <div>Calcium score: {st.session_state.get("cac_val", 0) if st.session_state.get("cac_known_val")=="Yes" else "—"} ({st.session_state.get("cac_known_val", "No")})</div>
+  <div>BMI (PREVENT): {st.session_state.get("bmi_val", 0.0) or "—"}</div>
+  <div>eGFR (PREVENT): {st.session_state.get("egfr_val", 0.0) or "—"}</div>
+  <div>Lipid therapy (PREVENT): {st.session_state.get("lipid_lowering_val", "No")}</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -795,6 +834,15 @@ with st.form("risk_continuum_form"):
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
+    # PREVENT inputs (required)
+    b4, b5, b6 = st.columns(3)
+    with b4:
+        bmi = st.number_input("BMI (kg/m²) (for PREVENT)", 0.0, 80.0, step=0.1, format="%.1f", key="bmi_val")
+    with b5:
+        lipid_lowering = st.radio("On lipid-lowering therapy? (for PREVENT)", ["No", "Yes"], horizontal=True, key="lipid_lowering_val")
+    with b6:
+        st.caption("PREVENT requires BMI, eGFR, and lipid-therapy status.")
+
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Labs")
 
@@ -809,6 +857,7 @@ with st.form("risk_continuum_form"):
         lpa_unit = st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, key="lpa_unit_val")
     with c3:
         hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, step=0.1, format="%.1f", key="hscrp_val")
+        egfr = st.number_input("eGFR (mL/min/1.73m²) (for PREVENT)", 0.0, 200.0, step=1.0, format="%.0f", key="egfr_val")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Imaging")
@@ -912,6 +961,11 @@ if submitted:
         "bleed_nsaid": bool(bleed_nsaid),
         "bleed_disorder": bool(bleed_disorder),
         "bleed_ckd": bool(bleed_ckd),
+
+        # PREVENT required
+        "bmi": float(bmi) if bmi and bmi > 0 else None,
+        "egfr": float(egfr) if egfr and egfr > 0 else None,
+        "lipid_lowering": (lipid_lowering == "Yes"),
     }
     data = {k: v for k, v in data.items() if v is not None}
 
@@ -948,7 +1002,6 @@ if submitted:
     else:
         st.markdown("### **Target: —**")
 
-    # ApoB line with hover anchors + guideline note
     if apob_line is not None:
         hover = (
             "Quick anchors: <80 good • 80–99 borderline • ≥100 high • ≥130 very high (risk signal). "
@@ -967,8 +1020,8 @@ if submitted:
 
     rs = out.get("riskSignal", {}) or {}
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
+    prevent10 = out.get("prevent10", {}) or {}
 
-    # Engine-driven legend/explainer (fallback if missing)
     legend = lvl.get("legend") or FALLBACK_LEVEL_LEGEND
     explainer = scrub_terms(lvl.get("explainer") or "")
     rec_tag = scrub_terms(lvl.get("recommendationStrength") or "—")
@@ -980,7 +1033,6 @@ if submitted:
         st.subheader("Key metrics")
         render_level_ladder(level, sub)
 
-        # very short single-line explainer
         if explainer:
             st.caption(f"Level explainer: {explainer}")
 
@@ -990,6 +1042,18 @@ if submitted:
         m1.metric("Level", f"{level}" + (f" ({sub})" if sub else ""))
         m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
         m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
+
+        # PREVENT metrics row
+        p_total = prevent10.get("total_cvd_10y_pct")
+        p_ascvd = prevent10.get("ascvd_10y_pct")
+        m4, m5 = st.columns(2)
+        m4.metric("PREVENT 10y total CVD", f"{p_total}%" if p_total is not None else "—")
+        m5.metric("PREVENT 10y ASCVD", f"{p_ascvd}%" if p_ascvd is not None else "—")
+        if p_total is None and p_ascvd is None:
+            if prevent10.get("missing"):
+                st.caption("PREVENT not calculated — missing: " + ", ".join(prevent10["missing"][:4]))
+            else:
+                st.caption(scrub_terms(prevent10.get("notes", "PREVENT not calculated.")))
 
         st.markdown(
             f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}"
@@ -1002,6 +1066,17 @@ if submitted:
         with st.expander("What do Levels mean? (Legend)", expanded=False):
             for item in legend:
                 st.write(f"• {scrub_terms(item)}")
+
+        with st.expander("PREVENT (optional comparator)", expanded=False):
+            p_total = prevent10.get("total_cvd_10y_pct")
+            p_ascvd = prevent10.get("ascvd_10y_pct")
+            if p_total is not None or p_ascvd is not None:
+                st.markdown(f"**10-year total CVD:** {p_total}%")
+                st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
+            else:
+                if prevent10.get("missing"):
+                    st.markdown("Not calculated. Missing: " + ", ".join(prevent10["missing"]))
+                st.caption(scrub_terms(prevent10.get("notes", "PREVENT not calculated.")))
 
         if rec_tag and rec_tag != "—":
             st.caption(f"Recommendation tag: {rec_tag}")
@@ -1113,7 +1188,6 @@ if submitted:
                 st.json(out)
 
     st.caption(
-        f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
+        f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
     )
-
 
