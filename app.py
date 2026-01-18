@@ -4,6 +4,7 @@
 # + Evidence-strength tags: Recommended / Consider / Pending more data
 # + Adds Level explainer + legend (engine-driven if available)
 # + Adds PREVENT inputs (BMI, eGFR, lipid-lowering therapy) + displays prevent10 outputs
+# + Adds DEMO DEFAULTS toggle (auto-fill so you can click Run immediately)
 
 import json
 import re
@@ -443,7 +444,6 @@ def render_high_yield_report(out: dict) -> str:
     else:
         html.append("<p><strong>10-year ASCVD risk (PCE):</strong> —</p>")
 
-    # PREVENT line (optional comparator)
     if p_total is not None or p_ascvd is not None:
         html.append(f"<p><strong>PREVENT (10-year):</strong> total CVD {p_total}% / ASCVD {p_ascvd}%</p>")
     else:
@@ -482,11 +482,7 @@ def render_high_yield_report(out: dict) -> str:
 
     plan = lvl.get("defaultPosture")
     if plan:
-        plan_clean = re.sub(
-            r"^\s*(Recommended:|Consider:|Pending more data:)\s*",
-            "",
-            str(plan),
-        ).strip()
+        plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", str(plan)).strip()
         plan_clean = scrub_terms(plan_clean)
         html.append(f"<p><strong>Plan:</strong> {plan_clean}</p>")
 
@@ -524,7 +520,7 @@ TARGET_PARSE_FIELDS = [
 ]
 
 # ------------------------------------------------------------
-# Apply parsed → session (HARDENED)
+# Apply parsed → session
 # ------------------------------------------------------------
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
@@ -608,6 +604,23 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         )
         applied.append("Race")
 
+    # Best-effort BMI/eGFR apply if parser included them
+    if parsed.get("bmi") is not None:
+        try:
+            st.session_state["bmi_val"] = float(parsed["bmi"])
+            applied.append("BMI")
+        except Exception:
+            pass
+    if parsed.get("egfr") is not None:
+        try:
+            st.session_state["egfr_val"] = float(parsed["egfr"])
+            applied.append("eGFR")
+        except Exception:
+            pass
+    if parsed.get("lipidLowering") is not None:
+        st.session_state["lipid_lowering_val"] = "Yes" if bool(parsed["lipidLowering"]) else "No"
+        applied.append("Lipid therapy")
+
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
@@ -617,23 +630,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     for k, v in infl.items():
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
-
-    # PREVENT fields: try to parse BMI/eGFR if present (best-effort)
-    # (No strict parsing rules here; user can enter manually)
-    m_bmi = re.search(r"\bbmi\s*[:=]?\s*(\d{1,2}(?:\.\d+)?)\b", raw_txt or "", flags=re.I)
-    if m_bmi:
-        try:
-            st.session_state["bmi_val"] = float(m_bmi.group(1))
-            applied.append("BMI")
-        except Exception:
-            pass
-    m_egfr = re.search(r"\begfr\s*[:=]?\s*(\d{1,3})\b", raw_txt or "", flags=re.I)
-    if m_egfr:
-        try:
-            st.session_state["egfr_val"] = float(m_egfr.group(1))
-            applied.append("eGFR")
-        except Exception:
-            pass
 
     missing = [m for i, m in enumerate(missing) if m not in missing[:i]]
     return applied, missing
@@ -687,6 +683,68 @@ for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
     st.session_state.setdefault(f"infl_{k}_val", False)
 
 # ============================================================
+# DEMO DEFAULTS (sidebar)
+# ============================================================
+st.session_state.setdefault("demo_defaults_on", True)
+st.session_state.setdefault("demo_defaults_applied", False)
+
+def apply_demo_defaults():
+    # Required minimums
+    st.session_state["age_val"] = 55
+    st.session_state["sex_val"] = "M"
+    st.session_state["race_val"] = "Other (use non-African American coefficients)"
+    st.session_state["sbp_val"] = 128
+    st.session_state["bp_treated_val"] = "No"
+    st.session_state["smoking_val"] = "No"
+    st.session_state["diabetes_choice_val"] = "No"
+
+    st.session_state["tc_val"] = 190
+    st.session_state["hdl_val"] = 50
+    st.session_state["ldl_val"] = 115
+
+    # Optional but useful
+    st.session_state["apob_val"] = 92
+    st.session_state["lpa_val"] = 90
+    st.session_state["lpa_unit_val"] = "nmol/L"
+    st.session_state["a1c_val"] = 5.6
+    st.session_state["hscrp_val"] = 1.2
+
+    # Imaging defaults
+    st.session_state["cac_known_val"] = "No"
+    st.session_state["cac_val"] = 0
+
+    # PREVENT inputs
+    st.session_state["bmi_val"] = 28.0
+    st.session_state["egfr_val"] = 85.0
+    st.session_state["lipid_lowering_val"] = "No"
+
+    # Inflammation off
+    for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
+        st.session_state[f"infl_{kk}_val"] = False
+
+    st.session_state["demo_defaults_applied"] = True
+
+def reset_demo_defaults():
+    st.session_state["demo_defaults_applied"] = False
+
+with st.sidebar:
+    st.markdown("### Demo")
+    demo_on = st.checkbox("Use demo defaults (auto-fill)", value=st.session_state["demo_defaults_on"])
+    st.session_state["demo_defaults_on"] = demo_on
+
+    cA, cB = st.columns(2)
+    with cA:
+        if st.button("Apply demo"):
+            apply_demo_defaults()
+    with cB:
+        if st.button("Reset demo"):
+            reset_demo_defaults()
+
+# Auto-apply demo defaults once on first load (if enabled)
+if st.session_state["demo_defaults_on"] and not st.session_state["demo_defaults_applied"]:
+    apply_demo_defaults()
+
+# ============================================================
 # Callbacks
 # ============================================================
 def cb_clear_pasted_text():
@@ -714,15 +772,17 @@ def cb_clear_autofilled_fields():
     st.session_state["cac_known_val"] = "No"
     st.session_state["cac_val"] = 0
 
-    # PREVENT clears
     st.session_state["bmi_val"] = 0.0
     st.session_state["egfr_val"] = 0.0
     st.session_state["lipid_lowering_val"] = "No"
 
-    for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
-        st.session_state[f"infl_{k}_val"] = False
+    for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
+        st.session_state[f"infl_{kk}_val"] = False
     st.session_state["last_applied_msg"] = ""
     st.session_state["last_missing_msg"] = ""
+
+    # allow demo to be applied again easily
+    st.session_state["demo_defaults_applied"] = False
 
 # ============================================================
 # Top-level mode
@@ -834,12 +894,16 @@ with st.form("risk_continuum_form"):
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
-    # PREVENT inputs (required)
     b4, b5, b6 = st.columns(3)
     with b4:
         bmi = st.number_input("BMI (kg/m²) (for PREVENT)", 0.0, 80.0, step=0.1, format="%.1f", key="bmi_val")
     with b5:
-        lipid_lowering = st.radio("On lipid-lowering therapy? (for PREVENT)", ["No", "Yes"], horizontal=True, key="lipid_lowering_val")
+        lipid_lowering = st.radio(
+            "On lipid-lowering therapy? (for PREVENT)",
+            ["No", "Yes"],
+            horizontal=True,
+            key="lipid_lowering_val",
+        )
     with b6:
         st.caption("PREVENT requires BMI, eGFR, and lipid-therapy status.")
 
@@ -977,7 +1041,6 @@ if submitted:
 
     view_mode = st.radio("View", ["Simple", "Standard", "Details"], horizontal=True, index=1)
 
-    # ---------- LDL-first targets (ApoB secondary) ----------
     t_pick = pick_dual_targets_ldl_first(out, data)
     primary = t_pick["primary"]
     apob_line = t_pick["secondary"]
@@ -1007,16 +1070,10 @@ if submitted:
             "Quick anchors: <80 good • 80–99 borderline • ≥100 high • ≥130 very high (risk signal). "
             "ApoB is a particle-count check—especially helpful when TG/metabolic risk is present."
         )
-        st.markdown(
-            f"**{apob_line[0]} {apob_line[1]}** <span title=\"{hover}\">ⓘ</span>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"**{apob_line[0]} {apob_line[1]}** <span title=\"{hover}\">ⓘ</span>", unsafe_allow_html=True)
         st.caption("Guideline anchor: ApoB used as a risk-enhancing lipid marker (ACC/AHA) and as a treatment target in higher-risk tiers (ESC/EAS).")
         if not apob_measured:
             st.caption("ApoB not measured here — optional add-on to check for discordance.")
-    else:
-        if view_mode != "Simple":
-            st.caption("ApoB not available (no engine target).")
 
     rs = out.get("riskSignal", {}) or {}
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
@@ -1043,7 +1100,6 @@ if submitted:
         m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
         m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
-        # PREVENT metrics row
         p_total = prevent10.get("total_cvd_10y_pct")
         p_ascvd = prevent10.get("ascvd_10y_pct")
         m4, m5 = st.columns(2)
@@ -1055,9 +1111,7 @@ if submitted:
             else:
                 st.caption(scrub_terms(prevent10.get("notes", "PREVENT not calculated.")))
 
-        st.markdown(
-            f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}"
-        )
+        st.markdown(f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}")
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
         st.subheader("Clinical report (high-yield)")
@@ -1068,8 +1122,6 @@ if submitted:
                 st.write(f"• {scrub_terms(item)}")
 
         with st.expander("PREVENT (optional comparator)", expanded=False):
-            p_total = prevent10.get("total_cvd_10y_pct")
-            p_ascvd = prevent10.get("ascvd_10y_pct")
             if p_total is not None or p_ascvd is not None:
                 st.markdown(f"**10-year total CVD:** {p_total}%")
                 st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
@@ -1111,30 +1163,18 @@ if submitted:
 
         with st.expander("Interpretation (why / plan / explainer)", expanded=False):
             st.markdown("<div class='level-card'>", unsafe_allow_html=True)
-            st.markdown(
-                f"<h3>Interpretation — Level {level}: {LEVEL_NAMES.get(level,'—')}</h3>",
-                unsafe_allow_html=True,
-            )
+            st.markdown(f"<h3>Interpretation — Level {level}: {LEVEL_NAMES.get(level,'—')}</h3>", unsafe_allow_html=True)
 
             meaning = scrub_terms(lvl.get("meaning") or "")
             if meaning:
-                st.markdown(
-                    f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>", unsafe_allow_html=True)
 
             if explainer:
-                st.markdown(
-                    f"<p class='small-help'><strong>Level explainer:</strong> {explainer}</p>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"<p class='small-help'><strong>Level explainer:</strong> {explainer}</p>", unsafe_allow_html=True)
 
             why_list = scrub_list((lvl.get("why") or [])[:3])
             if why_list:
-                st.markdown(
-                    "<div class='small-help'><strong>Why this level:</strong></div>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown("<div class='small-help'><strong>Why this level:</strong></div>", unsafe_allow_html=True)
                 st.markdown("<ul>", unsafe_allow_html=True)
                 for w in why_list:
                     st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
@@ -1142,26 +1182,16 @@ if submitted:
 
             plan = lvl.get("defaultPosture")
             if plan:
-                plan_clean = re.sub(
-                    r"^\s*(Recommended:|Consider:|Pending more data:)\s*",
-                    "",
-                    str(plan),
-                ).strip()
+                plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", str(plan)).strip()
                 plan_clean = scrub_terms(plan_clean)
-                st.markdown(
-                    f"<p class='small-help'><strong>Plan:</strong> {plan_clean}</p>",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"<p class='small-help'><strong>Plan:</strong> {plan_clean}</p>", unsafe_allow_html=True)
 
             if sub:
                 expl, chips = sublevel_explainer(sub)
                 expl = scrub_terms(expl)
                 chips = scrub_list(chips)
                 if expl:
-                    st.markdown(
-                        f"<p class='small-help'><strong>Sublevel {sub}:</strong> {expl}</p>",
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown(f"<p class='small-help'><strong>Sublevel {sub}:</strong> {expl}</p>", unsafe_allow_html=True)
                 if chips:
                     st.markdown("<div class='next-row'>", unsafe_allow_html=True)
                     for c in chips:
@@ -1188,6 +1218,7 @@ if submitted:
                 st.json(out)
 
     st.caption(
-        f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
+        f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
+        f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
     )
 
