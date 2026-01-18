@@ -1,16 +1,8 @@
-# app.py (fully consolidated, single-file, stable)
-# + LDL-first targets (ApoB shown as secondary) + ApoB hover anchors
-# + calcium score always visible + CAC payload uses session_state
-# + Parse & Apply callback + drift removed via scrub_terms
-#
-# FINAL BEHAVIOR:
-# - SmartPhrase parsing uses RAW text (no date-scrubbing before parsing; Epic A1c tables rely on dates)
-# - Parse & Apply parses fresh on click (no stale cache issues)
-# - Apply-time date guards prevent date strings from filling numeric boxes
-# - Diabetes guard respects "Diabetic: No/Yes" and avoids Epic smartlist placeholders
-# - CAC input is NOT disabled inside the form (Streamlit forms don't re-render live; disabling feels "locked")
-# - UI uses "Management" language (no "posture")
-# - Lipid targets show a small guideline anchor note (ACC/AHA + ESC/EAS)
+# app.py (Risk Continuum consolidated, single-file, stable)
+# + System name: Risk Continuum
+# + Internal grammar: Levels 1–5 (+ sublevels)
+# + Evidence-strength tags: Recommended / Consider / Pending more data
+# + Adds Level explainer + legend (engine-driven if available)
 
 import json
 import re
@@ -20,25 +12,42 @@ import levels_engine as le
 with st.expander("DEBUG: engine version", expanded=False):
     st.write("Engine sentinel:", getattr(le, "PCE_DEBUG_SENTINEL", "MISSING"))
     st.write("Has PCE:", hasattr(le, "PCE"))
+    st.write("Engine VERSION:", getattr(le, "VERSION", {}))
 
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
 
 # ============================================================
+# System naming (locked)
+# ============================================================
+SYSTEM_NAME = "Risk Continuum™"
+
+# ============================================================
 # Clinician-native Level names (locked)
 # ============================================================
 LEVEL_NAMES = {
-    1: "Minimal risk",
-    2: "Emerging risk",
-    3: "High biologic risk",
-    4: "Subclinical atherosclerosis",
-    5: "Atherosclerosis",
+    1: "Minimal risk signal",
+    2: "Emerging risk signals",
+    3: "Actionable biologic risk",
+    4: "Subclinical atherosclerosis present",
+    5: "Very high risk / ASCVD intensity",
 }
+
+# Optional fallback legend (used only if engine doesn't supply one)
+FALLBACK_LEVEL_LEGEND = [
+    "Level 1: minimal signal → reinforce basics, periodic reassess",
+    "Level 2A: mild/isolated signal → education, complete data, lifestyle sprint",
+    "Level 2B: converging signals → lifestyle sprint + shorter reassess",
+    "Level 3A: actionable biologic risk → shared decision; consider therapy based on trajectory",
+    "Level 3B: biologic risk + enhancers → therapy often favored; refine with CAC if unknown",
+    "Level 4: subclinical plaque present → treat like early disease; target-driven therapy",
+    "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
+]
 
 # ============================================================
 # Page + styling
 # ============================================================
-st.set_page_config(page_title="LEVELS", layout="wide")
+st.set_page_config(page_title="Risk Continuum", layout="wide")
 
 st.markdown(
     """
@@ -132,8 +141,8 @@ html, body, [class*="css"] {
 st.markdown(
     f"""
 <div class="header-card">
-  <div class="header-title">LEVELS™ {VERSION.get("levels","")} — De-identified Demo</div>
-  <p class="header-sub">Fast entry • SmartPhrase paste → auto-fill • Management Levels 1–5 • high-yield clinical report</p>
+  <div class="header-title">{SYSTEM_NAME} {VERSION.get("levels","")} — De-identified Demo</div>
+  <p class="header-sub">Fast entry • SmartPhrase paste → auto-fill • Levels 1–5 (+ sublevels) • high-yield clinical report</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -162,13 +171,16 @@ def contains_phi(s: str) -> bool:
     return False
 
 # ============================================================
-# TEXT SCRUB: remove drift everywhere
+# TEXT SCRUB: legacy terminology cleanup (keep minimal)
 # ============================================================
 def scrub_terms(s: str) -> str:
     if not s:
         return s
+    # legacy drift -> emerging risk
     s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
     s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
+    # legacy posture wording if any old strings leak through
+    s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
     return s
 
 def scrub_list(xs):
@@ -299,9 +311,9 @@ def coerce_float(v):
         return None
 
 # ------------------------------------------------------------
-# Streamlit-native "Management Level ladder" (always renders)
+# Streamlit-native Level ladder (always renders)
 # ------------------------------------------------------------
-def render_management_ladder(level: int, sublevel: str | None = None):
+def render_level_ladder(level: int, sublevel: str | None = None):
     try:
         lvl = int(level or 0)
     except Exception:
@@ -309,7 +321,7 @@ def render_management_ladder(level: int, sublevel: str | None = None):
     lvl = max(1, min(5, lvl))
 
     st.markdown(
-        f"### Management Level: **{lvl} — {LEVEL_NAMES.get(lvl, '—')}**"
+        f"### Level: **{lvl} — {LEVEL_NAMES.get(lvl, '—')}**"
         + (f" (**{sublevel}**)" if sublevel else "")
     )
 
@@ -321,23 +333,23 @@ def render_management_ladder(level: int, sublevel: str | None = None):
             st.caption(LEVEL_NAMES[i])
 
 # ------------------------------------------------------------
-# Sublevel explainer
+# Sublevel explainer (optional UI-only helper)
 # ------------------------------------------------------------
 def sublevel_explainer(sub: str):
     if sub == "3A":
         return (
             "High biology without strong enhancers; plaque not proven.",
-            ["Trend labs", "Lifestyle sprint", "Shared decision on statin", "Consider calcium score if unknown"],
+            ["Trend labs", "Lifestyle sprint", "Shared decision on therapy", "Consider calcium score if unknown"],
         )
     if sub == "3B":
         return (
             "High biology with enhancers (Lp(a)/FHx/inflammation) → higher lifetime acceleration.",
-            ["Statin default often reasonable", "Address enhancers", "Consider calcium score if unknown", "ApoB-guided targets"],
+            ["Therapy often favored", "Address enhancers", "Consider calcium score if unknown", "ApoB-guided targets"],
         )
     if sub == "3C":
         return (
             "Higher near-term risk phenotype despite no proven plaque.",
-            ["Treat risk seriously", "Statin default often reasonable", "Confirm BP/lipids", "Consider calcium score if unknown"],
+            ["Treat risk seriously", "Therapy often favored", "Confirm BP/lipids", "Consider calcium score if unknown"],
         )
     return ("", [])
 
@@ -345,12 +357,6 @@ def sublevel_explainer(sub: str):
 # LDL-FIRST targets (ApoB secondary)
 # ------------------------------------------------------------
 def pick_dual_targets_ldl_first(out: dict, patient_data: dict) -> dict:
-    """
-    Returns:
-      primary: ('LDL-C', '<100 mg/dL') if LDL goal exists, otherwise ApoB
-      secondary: ApoB line if ApoB goal exists
-      apob_measured: bool
-    """
     targets = out.get("targets", {}) or {}
     ldl_goal = targets.get("ldl")
     apob_goal = targets.get("apob")
@@ -370,17 +376,14 @@ def pick_dual_targets_ldl_first(out: dict, patient_data: dict) -> dict:
 
     return {"primary": primary, "secondary": secondary, "apob_measured": apob_measured}
 
-def guideline_anchor_note(mgmt_level: int, clinical_ascvd: bool) -> str:
-    """
-    Short, non-intrusive provenance note for lipid targets.
-    """
+def guideline_anchor_note(level: int, clinical_ascvd: bool) -> str:
     if clinical_ascvd:
         return "Guideline anchor: ACC/AHA secondary prevention (LDL-C <70). ESC/EAS very-high-risk often targets <55."
-    if mgmt_level >= 4:
+    if level >= 4:
         return "Guideline anchor: ACC/AHA & ESC/EAS targets for subclinical atherosclerosis (LDL-C <70)."
-    if mgmt_level == 3:
+    if level == 3:
         return "Guideline anchor: ACC/AHA primary prevention—risk-enhanced approach; ApoB thresholds used as risk-enhancing markers."
-    if mgmt_level == 2:
+    if level == 2:
         return "Guideline anchor: ACC/AHA primary prevention—individualized targets based on overall risk and trajectory."
     return "Guideline anchor: ACC/AHA primary prevention—lifestyle-first and periodic reassessment."
 
@@ -397,15 +400,16 @@ def render_high_yield_report(out: dict) -> str:
     next_actions = scrub_list(out.get("nextActions", []) or [])
     asp = out.get("aspirin", {}) or {}
 
-    mgmt_level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
+    level = (lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
-        mgmt_level = int(mgmt_level)
+        level = int(level)
     except Exception:
-        mgmt_level = 1
-    mgmt_level = max(1, min(5, mgmt_level))
+        level = 1
+    level = max(1, min(5, level))
+
     sub = lvl.get("sublevel")
-    name = LEVEL_NAMES.get(mgmt_level, "—")
-    title = f"LEVELS™ — Management Level {mgmt_level}: {name}" + (f" ({sub})" if sub else "")
+    name = LEVEL_NAMES.get(level, "—")
+    title = f"{SYSTEM_NAME} — Level {level}: {name}" + (f" ({sub})" if sub else "")
 
     risk_pct = risk10.get("risk_pct")
     risk_line = f"{risk_pct}%" if risk_pct is not None else "—"
@@ -414,6 +418,9 @@ def render_high_yield_report(out: dict) -> str:
     evidence_line = scrub_terms(ev.get("cac_status") or out.get("diseaseBurden") or "—")
     burden_line = scrub_terms(ev.get("burden_band") or "—")
 
+    rec_tag = scrub_terms(lvl.get("recommendationStrength") or "—")
+    explainer = scrub_terms(lvl.get("explainer") or "")
+
     html = []
     html.append('<div class="report">')
     html.append(f"<h2>{title}</h2>")
@@ -421,7 +428,14 @@ def render_high_yield_report(out: dict) -> str:
     html.append('<div class="section">')
     html.append('<div class="section-title">Summary</div>')
     meaning = scrub_terms(lvl.get("meaning") or "")
-    html.append(f"<p>{meaning}</p>" if meaning else "<p class='muted'>No summary available.</p>")
+    if meaning:
+        html.append(f"<p>{meaning}</p>")
+    else:
+        html.append("<p class='muted'>No summary available.</p>")
+    if explainer:
+        html.append(f"<p class='small-help'><strong>Level explainer:</strong> {explainer}</p>")
+    if rec_tag and rec_tag != "—":
+        html.append(f"<p class='small-help'><strong>Recommendation tag:</strong> {rec_tag}</p>")
     html.append("</div>")
 
     html.append('<div class="section">')
@@ -457,11 +471,16 @@ def render_high_yield_report(out: dict) -> str:
     if tar_lines:
         html.append("<p><strong>Targets:</strong> " + " • ".join(tar_lines) + "</p>")
 
-    posture = lvl.get("defaultPosture")
-    if posture:
-        posture_clean = re.sub(r"^\s*(Default posture:|Consider:|Defer—need data:)\s*", "", str(posture)).strip()
-        posture_clean = scrub_terms(posture_clean)
-        html.append(f"<p><strong>Plan:</strong> {posture_clean}</p>")
+    plan = lvl.get("defaultPosture")
+    if plan:
+        # strip tag prefix (new tags)
+        plan_clean = re.sub(
+            r"^\s*(Recommended:|Consider:|Pending more data:)\s*",
+            "",
+            str(plan),
+        ).strip()
+        plan_clean = scrub_terms(plan_clean)
+        html.append(f"<p><strong>Plan:</strong> {plan_clean}</p>")
 
     if next_actions:
         html.append("<p><strong>Next steps:</strong></p>")
@@ -648,7 +667,7 @@ def cb_clear_pasted_text():
 def cb_clear_autofilled_fields():
     st.session_state["age_val"] = 0
     st.session_state["sex_val"] = "F"
-    st.session_state["race_val"] = "Other (use non-African American coefficients)"
+    st.session_state["race_val"] = "Other (use non-African American coefficients)")
     st.session_state["sbp_val"] = 0
     st.session_state["tc_val"] = 0
     st.session_state["ldl_val"] = 0
@@ -746,7 +765,7 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
 # ============================================================
 # Main form
 # ============================================================
-with st.form("levels_form"):
+with st.form("risk_continuum_form"):
     st.subheader("Patient context")
 
     a1, a2, a3 = st.columns(3)
@@ -798,8 +817,6 @@ with st.form("levels_form"):
     with d1:
         cac_known = st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
     with d2:
-        # IMPORTANT: In a Streamlit form, disabling based on another widget feels "locked" until submit.
-        # Keep it editable; ignore if CAC is unknown.
         st.number_input(
             "Calcium score (Agatston)",
             min_value=0,
@@ -861,7 +878,6 @@ if submitted:
         st.stop()
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
-
     cac_to_send = int(st.session_state["cac_val"]) if cac_known == "Yes" else None
 
     data = {
@@ -903,7 +919,6 @@ if submitted:
     out = evaluate(patient)
 
     note_text = render_quick_text(patient, out)
-    note_text = note_text.replace("Posture Level", "Management Level")
     note_text = scrub_terms(note_text)
 
     view_mode = st.radio("View", ["Simple", "Standard", "Details"], horizontal=True, index=1)
@@ -918,18 +933,18 @@ if submitted:
     ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
     clinical_ascvd = bool(ev.get("clinical_ascvd")) if isinstance(ev, dict) else False
 
-    mgmt_level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
+    level = (lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
-        mgmt_level = int(mgmt_level)
+        level = int(level)
     except Exception:
-        mgmt_level = 1
-    mgmt_level = max(1, min(5, mgmt_level))
+        level = 1
+    level = max(1, min(5, level))
     sub = lvl.get("sublevel")
 
     st.markdown("## Recommended lipid targets")
     if primary:
         st.markdown(f"### **{primary[0]} {primary[1]}**")
-        st.caption(guideline_anchor_note(mgmt_level, clinical_ascvd))
+        st.caption(guideline_anchor_note(level, clinical_ascvd))
     else:
         st.markdown("### **Target: —**")
 
@@ -950,21 +965,29 @@ if submitted:
         if view_mode != "Simple":
             st.caption("ApoB not available (no engine target).")
 
-    # -------------------------------------------------------
-
     rs = out.get("riskSignal", {}) or {}
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
 
+    # Engine-driven legend/explainer (fallback if missing)
+    legend = lvl.get("legend") or FALLBACK_LEVEL_LEGEND
+    explainer = scrub_terms(lvl.get("explainer") or "")
+    rec_tag = scrub_terms(lvl.get("recommendationStrength") or "—")
+
     if view_mode == "Simple":
-        st.caption(f"Management Level: {mgmt_level}" + (f" ({sub})" if sub else ""))
+        st.caption(f"Level: {level}" + (f" ({sub})" if sub else ""))
         st.caption(f"Evidence: {scrub_terms(ev.get('cac_status','—'))}")
     else:
         st.subheader("Key metrics")
-        render_management_ladder(mgmt_level, sub)
-        st.caption("Legend: Management Level reflects prevention intensity. Evidence reflects plaque certainty (Calcium score / ASCVD).")
+        render_level_ladder(level, sub)
+
+        # very short single-line explainer
+        if explainer:
+            st.caption(f"Level explainer: {explainer}")
+
+        st.caption("Evidence reflects plaque certainty (calcium score / ASCVD). Risk Signal reflects biologic + plaque signal (not event probability).")
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("Management Level", f"{mgmt_level}" + (f" ({sub})" if sub else ""))
+        m1.metric("Level", f"{level}" + (f" ({sub})" if sub else ""))
         m2.metric("Risk Signal Score", f"{rs.get('score','—')}/100")
         m3.metric("10-year ASCVD risk", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—")
 
@@ -976,12 +999,19 @@ if submitted:
         st.subheader("Clinical report (high-yield)")
         st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
 
+        with st.expander("What do Levels mean? (Legend)", expanded=False):
+            for item in legend:
+                st.write(f"• {scrub_terms(item)}")
+
+        if rec_tag and rec_tag != "—":
+            st.caption(f"Recommendation tag: {rec_tag}")
+
     d1, d2 = st.columns(2)
     with d1:
         st.download_button(
             "Download clinical text (.txt)",
             data=note_text.encode("utf-8"),
-            file_name="levels_note.txt",
+            file_name="risk_continuum_note.txt",
             mime="text/plain",
             use_container_width=True,
         )
@@ -989,7 +1019,7 @@ if submitted:
         st.download_button(
             "Download JSON",
             data=json.dumps(out, indent=2).encode("utf-8"),
-            file_name="levels_output.json",
+            file_name="risk_continuum_output.json",
             mime="application/json",
             use_container_width=True,
         )
@@ -1007,7 +1037,7 @@ if submitted:
         with st.expander("Interpretation (why / plan / explainer)", expanded=False):
             st.markdown("<div class='level-card'>", unsafe_allow_html=True)
             st.markdown(
-                f"<h3>Interpretation — Management Level {mgmt_level}: {LEVEL_NAMES.get(mgmt_level,'—')}</h3>",
+                f"<h3>Interpretation — Level {level}: {LEVEL_NAMES.get(level,'—')}</h3>",
                 unsafe_allow_html=True,
             )
 
@@ -1015,6 +1045,12 @@ if submitted:
             if meaning:
                 st.markdown(
                     f"<p class='small-help'><strong>What this means:</strong> {meaning}</p>",
+                    unsafe_allow_html=True,
+                )
+
+            if explainer:
+                st.markdown(
+                    f"<p class='small-help'><strong>Level explainer:</strong> {explainer}</p>",
                     unsafe_allow_html=True,
                 )
 
@@ -1029,15 +1065,16 @@ if submitted:
                     st.markdown(f"<li>{w}</li>", unsafe_allow_html=True)
                 st.markdown("</ul>", unsafe_allow_html=True)
 
-            if lvl.get("defaultPosture"):
-                posture_clean = re.sub(
-                    r"^\s*(Default posture:|Consider:|Defer—need data:)\s*",
+            plan = lvl.get("defaultPosture")
+            if plan:
+                plan_clean = re.sub(
+                    r"^\s*(Recommended:|Consider:|Pending more data:)\s*",
                     "",
-                    str(lvl["defaultPosture"]),
+                    str(plan),
                 ).strip()
-                posture_clean = scrub_terms(posture_clean)
+                plan_clean = scrub_terms(plan_clean)
                 st.markdown(
-                    f"<p class='small-help'><strong>Plan:</strong> {posture_clean}</p>",
+                    f"<p class='small-help'><strong>Plan:</strong> {plan_clean}</p>",
                     unsafe_allow_html=True,
                 )
 
@@ -1047,7 +1084,7 @@ if submitted:
                 chips = scrub_list(chips)
                 if expl:
                     st.markdown(
-                        f"<p class='small-help'><strong>Explainer {sub}:</strong> {expl}</p>",
+                        f"<p class='small-help'><strong>Sublevel {sub}:</strong> {expl}</p>",
                         unsafe_allow_html=True,
                     )
                 if chips:
