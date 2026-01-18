@@ -1,13 +1,10 @@
-# app.py (Risk Continuum — cleaned + tabbed clinician-friendly layout)
-# Goals:
-# - Tight "Overview" (10-second read): Level/Evidence + 3 metrics (RSS/PCE/PREVENT) + Plan + Next steps + Targets
-# - "Report" is the single copy/paste clinical narrative source of truth
-# - "Details" holds anchors/why/sublevel/aspirin
-# - "Debug" holds raw text/trace/json
-# - Keep PREVENT visible in Overview (even if not active yet)
-# - Keep LDL-first targets visible in Overview
-# - Keep SmartPhrase ingest + Parse&Apply
-# - Optional DEMO defaults toggle so you can click Run immediately
+# app.py (Risk Continuum — clinician-clean layout + continuum visualization)
+# - Adds a visual "Risk Continuum" bar (5 segments) with active Level highlighted
+# - Makes the Overview part of the Report tab (continuum bar + overview bullets at top)
+# - Keeps PREVENT visible (even if not active yet)
+# - Keeps SmartPhrase ingest + Parse&Apply
+# - Keeps Demo defaults toggle so you can click Run immediately
+# - Keeps LDL-first targets visible
 
 import json
 import re
@@ -107,16 +104,6 @@ html, body, [class*="css"] {
 .kv div { font-size:0.9rem; }
 .kv strong { font-weight:800; }
 
-.level-strip {
-  border:1px solid rgba(31,41,55,0.10);
-  background: rgba(31,41,55,0.03);
-  border-radius:12px;
-  padding:12px 14px;
-  margin: 8px 0 10px 0;
-}
-.level-strip .title { font-weight:900; font-size:1.05rem; margin:0 0 2px 0; }
-.level-strip .sub { color: rgba(31,41,55,0.70); font-size:0.90rem; margin:0; }
-
 .next-box {
   border:1px solid rgba(31,41,55,0.10);
   border-radius:12px;
@@ -148,7 +135,7 @@ with st.expander("DEBUG: engine version", expanded=False):
     st.write("Engine VERSION:", getattr(le, "VERSION", {}))
 
 # ============================================================
-# Guardrails
+# Guardrails + scrubbing
 # ============================================================
 PHI_PATTERNS = [
     r"\b\d{3}-\d{2}-\d{4}\b",
@@ -179,6 +166,77 @@ def scrub_list(xs):
     if not xs:
         return xs
     return [scrub_terms(str(x)) for x in xs]
+
+# ============================================================
+# Visual: Risk Continuum bar
+# ============================================================
+def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
+    lvl = max(1, min(5, int(level or 1)))
+    sub = f" ({sublevel})" if sublevel else ""
+
+    labels = {
+        1: "Minimal risk signal",
+        2: "Emerging risk signals",
+        3: "Actionable biologic risk",
+        4: "Subclinical atherosclerosis present",
+        5: "Very high risk / ASCVD intensity",
+    }
+
+    colors = {
+        1: "rgba(59,130,246,0.10)",
+        2: "rgba(16,185,129,0.10)",
+        3: "rgba(245,158,11,0.12)",
+        4: "rgba(249,115,22,0.12)",
+        5: "rgba(239,68,68,0.12)",
+    }
+    borders = {
+        1: "rgba(59,130,246,0.28)",
+        2: "rgba(16,185,129,0.28)",
+        3: "rgba(245,158,11,0.30)",
+        4: "rgba(249,115,22,0.30)",
+        5: "rgba(239,68,68,0.30)",
+    }
+
+    segs = []
+    for i in range(1, 6):
+        active = (i == lvl)
+        segs.append(f"""
+        <div style="
+            flex:1;
+            padding:10px 10px;
+            border:1px solid {borders[i]};
+            border-radius:12px;
+            background:{colors[i]};
+            box-shadow:{'0 0 0 2px rgba(31,41,55,0.12) inset' if active else 'none'};
+            font-weight:{'900' if active else '700'};
+            text-align:center;
+            font-size:0.90rem;
+            line-height:1.15;
+        ">
+          <div>Level {i}</div>
+          <div style="font-weight:600; font-size:0.78rem; color:rgba(31,41,55,0.75); margin-top:2px;">
+            {labels[i]}
+          </div>
+        </div>
+        """)
+
+    return f"""
+    <div style="margin-top:6px; margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
+        <div style="font-weight:900; font-size:1.02rem;">Risk Continuum</div>
+        <div style="font-weight:800; color:rgba(31,41,55,0.70); font-size:0.92rem;">Current: Level {lvl}{sub}</div>
+      </div>
+
+      <div style="display:flex; gap:8px;">
+        {''.join(segs)}
+      </div>
+
+      <div style="display:flex; justify-content:space-between; margin-top:6px; color:rgba(31,41,55,0.65); font-size:0.82rem;">
+        <div>Lower signal / lower urgency</div>
+        <div>Higher signal / higher urgency</div>
+      </div>
+    </div>
+    """
 
 # ============================================================
 # Helpers
@@ -319,6 +377,9 @@ def guideline_anchor_note(level: int, clinical_ascvd: bool) -> str:
         return "Guideline anchor: ACC/AHA primary prevention—individualized targets based on overall risk and trajectory."
     return "Guideline anchor: ACC/AHA primary prevention—lifestyle-first and periodic reassessment."
 
+# ============================================================
+# High-yield report HTML (unchanged except tidy bullets)
+# ============================================================
 def render_high_yield_report(out: dict) -> str:
     lvl = out.get("levels", {}) or {}
     rs = out.get("riskSignal", {}) or {}
@@ -333,7 +394,7 @@ def render_high_yield_report(out: dict) -> str:
     p_total = prevent10.get("total_cvd_10y_pct")
     p_ascvd = prevent10.get("ascvd_10y_pct")
 
-    level = (lvl.get("postureLevel") or lvl.get("level") or 1)
+    level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
         level = int(level)
     except Exception:
@@ -637,52 +698,18 @@ def apply_demo_defaults():
 
     st.session_state["demo_defaults_applied"] = True
 
-def reset_demo_defaults():
-    st.session_state["demo_defaults_applied"] = False
-
 with st.sidebar:
     st.markdown("### Demo")
     demo_on = st.checkbox("Use demo defaults (auto-fill)", value=st.session_state["demo_defaults_on"])
     st.session_state["demo_defaults_on"] = demo_on
 
-    cA, cB = st.columns(2)
+    cA, _ = st.columns([1, 1])
     with cA:
         if st.button("Apply demo"):
             apply_demo_defaults()
-    with cB:
-        if st.button("Reset demo"):
-            reset_demo_defaults()
 
 if st.session_state["demo_defaults_on"] and not st.session_state["demo_defaults_applied"]:
     apply_demo_defaults()
-
-# ============================================================
-# Clear callbacks
-# ============================================================
-def cb_clear_pasted_text():
-    st.session_state["smartphrase_raw"] = ""
-    st.session_state["parsed_preview_cache"] = {}
-    st.session_state["last_applied_msg"] = ""
-    st.session_state["last_missing_msg"] = ""
-
-def cb_clear_autofilled_fields():
-    for k, v in [
-        ("age_val", 0), ("sex_val", "F"), ("race_val", "Other (use non-African American coefficients)"),
-        ("sbp_val", 0), ("tc_val", 0), ("ldl_val", 0), ("hdl_val", 0),
-        ("apob_val", 0), ("lpa_val", 0), ("lpa_unit_val", "nmol/L"),
-        ("a1c_val", 0.0), ("hscrp_val", 0.0),
-        ("bp_treated_val", "No"), ("smoking_val", "No"), ("diabetes_choice_val", "No"),
-        ("cac_known_val", "No"), ("cac_val", 0),
-        ("bmi_val", 0.0), ("egfr_val", 0.0), ("lipid_lowering_val", "No"),
-    ]:
-        st.session_state[k] = v
-
-    for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
-        st.session_state[f"infl_{kk}_val"] = False
-
-    st.session_state["last_applied_msg"] = ""
-    st.session_state["last_missing_msg"] = ""
-    st.session_state["demo_defaults_applied"] = False
 
 # ============================================================
 # SmartPhrase ingest
@@ -718,9 +745,9 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     with c1:
         st.button("Parse & Apply", type="primary", on_click=cb_parse_and_apply)
     with c2:
-        st.button("Clear pasted text", on_click=cb_clear_pasted_text)
+        st.button("Clear pasted text", on_click=lambda: st.session_state.update({"smartphrase_raw": "", "parsed_preview_cache": {}, "last_applied_msg": "", "last_missing_msg": ""}))
     with c3:
-        st.button("Clear auto-filled fields", on_click=cb_clear_autofilled_fields)
+        st.button("Clear auto-filled fields", on_click=lambda: st.session_state.update({"demo_defaults_applied": False}))
     with c4:
         st.caption("Parsed preview")
         st.json(parsed_preview)
@@ -765,17 +792,11 @@ with st.form("risk_continuum_form"):
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
 
-    # PREVENT inputs (required)
     b4, b5, b6 = st.columns(3)
     with b4:
         bmi = st.number_input("BMI (kg/m²) (for PREVENT)", 0.0, 80.0, step=0.1, format="%.1f", key="bmi_val")
     with b5:
-        lipid_lowering = st.radio(
-            "On lipid-lowering therapy? (for PREVENT)",
-            ["No", "Yes"],
-            horizontal=True,
-            key="lipid_lowering_val",
-        )
+        lipid_lowering = st.radio("On lipid-lowering therapy? (for PREVENT)", ["No", "Yes"], horizontal=True, key="lipid_lowering_val")
     with b6:
         st.caption("PREVENT requires BMI, eGFR, and lipid-therapy status.")
 
@@ -843,9 +864,10 @@ with st.form("risk_continuum_form"):
     submitted = st.form_submit_button("Run", type="primary")
 
 # ============================================================
-# Output rendering (Tabbed)
+# Output rendering (Tabs)
 # ============================================================
 if submitted:
+    # Required field checks
     req_errors = []
     if age <= 0:
         req_errors.append("Age is required (must be > 0).")
@@ -855,7 +877,6 @@ if submitted:
         req_errors.append("Total cholesterol is required (must be > 0).")
     if hdl <= 0:
         req_errors.append("HDL is required (must be > 0).")
-
     if req_errors:
         st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
         st.stop()
@@ -905,9 +926,9 @@ if submitted:
 
     patient = Patient(data)
     out = evaluate(patient)
-
     note_text = scrub_terms(render_quick_text(patient, out))
 
+    # Pull objects
     lvl = out.get("levels", {}) or {}
     ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
     rs = out.get("riskSignal", {}) or {}
@@ -926,7 +947,7 @@ if submitted:
     explainer = scrub_terms(lvl.get("explainer") or "")
     rec_tag = scrub_terms(lvl.get("recommendationStrength") or "—")
 
-    # LDL-first targets block
+    # Targets block
     t_pick = pick_dual_targets_ldl_first(out, data)
     primary = t_pick["primary"]
     apob_line = t_pick["secondary"]
@@ -939,7 +960,6 @@ if submitted:
     plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", str(plan)).strip()
     plan_clean = scrub_terms(plan_clean)
 
-    # Next steps bullets (engine)
     next_actions = scrub_list(out.get("nextActions", []) or [])
 
     # PREVENT values
@@ -950,33 +970,27 @@ if submitted:
     tab_overview, tab_report, tab_details, tab_debug = st.tabs(["Overview", "Report", "Details", "Debug"])
 
     # =========================
-    # OVERVIEW (tight)
+    # OVERVIEW tab
     # =========================
     with tab_overview:
-        title_line = f"Level {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}"
-        evidence_line = f"Evidence: {scrub_terms(ev.get('cac_status','—'))}  |  Burden: {scrub_terms(ev.get('burden_band','—'))}"
+        st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
-        st.markdown(
-            f"""
-<div class="level-strip">
-  <div class="title">{title_line}</div>
-  <div class="sub">{evidence_line}</div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-        # Metrics row (RSS / PCE / PREVENT total / PREVENT ASCVD)
+        # Metrics row
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Risk Signal Score", f"{rs.get('score','—')}/100", rs.get("band","—"))
-        m2.metric("PCE 10y ASCVD", f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—", risk10.get("category",""))
+        m2.metric(
+            "PCE 10y ASCVD",
+            f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—",
+            risk10.get("category",""),
+        )
         m3.metric("PREVENT 10y total CVD", f"{p_total}%" if p_total is not None else "—")
         m4.metric("PREVENT 10y ASCVD", f"{p_ascvd}%" if p_ascvd is not None else "—")
-
         if (p_total is None and p_ascvd is None) and p_note:
             st.caption(f"PREVENT: {p_note}")
 
-        # Lipid targets (compact)
+        st.markdown("### Evidence")
+        st.write(f"{scrub_terms(ev.get('cac_status','—'))} / {scrub_terms(ev.get('burden_band','—'))}")
+
         st.markdown("### Lipid targets")
         if primary:
             st.markdown(f"**{primary[0]} {primary[1]}**")
@@ -994,10 +1008,8 @@ if submitted:
             if not apob_measured:
                 st.caption("ApoB not measured here — optional add-on to check for discordance.")
 
-        # Plan + Next steps (tight)
         st.markdown("### Plan")
         st.write(plan_clean if plan_clean else "—")
-
         if explainer:
             st.caption(f"Explainer: {explainer}")
 
@@ -1007,20 +1019,6 @@ if submitted:
         else:
             st.markdown("<div class='next-box'>—</div>", unsafe_allow_html=True)
 
-        # Optional quick references
-        with st.expander("How Levels work (legend + quick reference)", expanded=False):
-            st.caption("Legend:")
-            for item in legend:
-                st.write(f"• {scrub_terms(item)}")
-
-        with st.expander("PREVENT comparator (details)", expanded=False):
-            if p_total is not None or p_ascvd is not None:
-                st.markdown(f"**10-year total CVD:** {p_total}%")
-                st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
-            else:
-                st.caption(p_note or "PREVENT not calculated.")
-
-        # Downloads
         d1, d2 = st.columns(2)
         with d1:
             st.download_button(
@@ -1039,15 +1037,57 @@ if submitted:
                 use_container_width=True,
             )
 
+        with st.expander("How Levels work (legend)", expanded=False):
+            for item in legend:
+                st.write(f"• {scrub_terms(item)}")
+
     # =========================
-    # REPORT (single source of truth narrative)
+    # REPORT tab — overview embedded at top (as requested)
     # =========================
     with tab_report:
         st.subheader("Clinical report (high-yield)")
+
+        # Continuum visualization at top of the report
+        st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
+
+        # Overview (embedded into report)
+        st.markdown("### Overview")
+        st.markdown(f"**Level:** {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
+        st.markdown(f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}")
+
+        pce_line = f"{risk10.get('risk_pct')}%" if risk10.get("risk_pct") is not None else "—"
+        pce_cat = risk10.get("category") or ""
+        st.markdown(f"**Key metrics:** RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • PCE 10y {pce_line} {pce_cat}".strip())
+
+        # PREVENT always visible (even if not active)
+        st.markdown(
+            f"**PREVENT 10y:** total CVD {p_total if p_total is not None else '—'} • "
+            f"ASCVD {p_ascvd if p_ascvd is not None else '—'}"
+        )
+        if (p_total is None and p_ascvd is None) and p_note:
+            st.caption(f"PREVENT: {p_note}")
+
+        if primary:
+            lipid_targets_line = f"{primary[0]} {primary[1]}"
+            if apob_line:
+                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+            st.markdown(f"**Lipid targets:** {lipid_targets_line}")
+
+        if plan_clean:
+            st.markdown(f"**Plan:** {plan_clean}")
+
+        if next_actions:
+            st.markdown("**Next steps:**")
+            for a in next_actions[:3]:
+                st.markdown(f"- {a}")
+
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+        # Narrative report
         st.markdown(render_high_yield_report(out), unsafe_allow_html=True)
 
     # =========================
-    # DETAILS (when you need it)
+    # DETAILS tab
     # =========================
     with tab_details:
         st.subheader("Anchors (near-term vs lifetime)")
@@ -1076,8 +1116,15 @@ if submitted:
         asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=4))
         st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
+        st.subheader("PREVENT (details)")
+        if p_total is not None or p_ascvd is not None:
+            st.markdown(f"**10-year total CVD:** {p_total}%")
+            st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
+        else:
+            st.caption(p_note or "PREVENT not calculated.")
+
     # =========================
-    # DEBUG (raw output)
+    # DEBUG tab
     # =========================
     with tab_debug:
         st.subheader("Quick output (raw text)")
@@ -1096,4 +1143,3 @@ if submitted:
     )
 else:
     st.caption("Enter values (or use Demo defaults) and click Run.")
-
