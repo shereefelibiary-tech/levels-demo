@@ -488,10 +488,8 @@ def render_high_yield_report(out: dict) -> str:
 
     if next_actions:
         html.append("<p><strong>Next steps:</strong></p>")
-        html.append("<ul>")
-        for a in next_actions[:3]:
-            html.append(f"<li>{a}</li>")
-        html.append("</ul>")
+        html.append("<p>" + "<br>".join([f"• {a}" for a in next_actions[:3]]) + "</p>")
+
 
     asp_status = scrub_terms(asp.get("status") or "")
     if asp_status:
@@ -1221,4 +1219,5 @@ if submitted:
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
         f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
     )
+
 
