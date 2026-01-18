@@ -1,7 +1,7 @@
 # levels_engine.py
-# Risk Continuum™ Engine — v2.7 (PREVENT added; CV module)
+# Risk Continuum™ Engine — v2.8 (PREVENT added; CV module; snapshot insights)
 #
-# Preserves v2.6-risk-continuum:
+# Preserves v2.7:
 # - RSS scoring (biologic + plaque signal, not event probability)
 # - PCE 10y risk (ACC/AHA 2013; other→non-Black coefficients)
 # - Inflammatory states + hsCRP + metabolic + Lp(a) unit-aware thresholds
@@ -10,25 +10,25 @@
 # - Drivers + next actions + confidence assessment
 # - Anchors (near-term vs lifetime)
 # - Rule trace (auditable)
+# - Optional PREVENT 10-year risks (total CVD + ASCVD)
 #
-# Adds:
-# - Optional PREVENT 10-year risks:
-#     - total CVD 10y
-#     - ASCVD 10y
-#   (non-breaking, additive output under out["prevent10"])
+# Adds v2.8 (snapshot-only, non-prescriptive insights):
+# - out["insights"]:
+#     - phenotype_label: "Atherogenic-leaning" (hybrid label; plaque-predilection meaning)
+#         * only when CAC=0 and biologic exposure gate + exposure context gate met
+#     - phenotype_definition: single immutable definition (for hover/help text)
+#     - structural_clarification: one-line non-directive CAC advisory
+#         * only when CAC unknown AND (aspirin candidacy could be informed OR level>=3 intensity refinement)
+#     - decision_robustness: High/Moderate/Low (static)
+#     - decision_robustness_note: short clause explaining robustness
 #
-# Terminology:
-# - System name: Risk Continuum™ (external)
-# - Internal decision grammar: Levels 1–5 (+ sublevels)
-# - Evidence-strength tags: Recommended / Consider / Pending more data
-# - Removes "posture" wording from user-facing outputs (keys preserved for compatibility)
-# - Adds Level explainer + compact Level legend in output payload
+# Design intent:
+# - These insights are meant to be displayed ONCE in a single "Clinical context" block.
+# - They should reduce narrative clutter, not add to it.
 #
 # Notes:
 # - Keys like levels.postureLevel and levels.defaultPosture are preserved for UI/backward compatibility.
 # - UI should display these as "Level" and "Plan" as appropriate.
-# - PREVENT requires additional inputs (bmi, egfr, lipid_lowering). Until UI provides them and
-#   coefficients are loaded in PREVENT_COEFS, prevent10 will return "not calculated".
 
 import math
 from dataclasses import dataclass
@@ -40,11 +40,12 @@ SYSTEM_NAME = "Risk Continuum™"
 
 VERSION = {
     "system": SYSTEM_NAME,
-    "levels": "v2.7-risk-continuum-prevent",
+    "levels": "v2.8-risk-continuum-prevent-insights",
     "riskSignal": "RSS v1.0",
     "riskCalc": "Pooled Cohort Equations (ACC/AHA 2013; Race other→non-Black)",
     "aspirin": "Aspirin v1.0 (CAC≥100 OR 10y risk≥10%, age 40–69, low bleed risk)",
     "prevent": "PREVENT (AHA) base model 10y: total CVD + ASCVD (requires BMI/eGFR/lipid therapy + coefficients)",
+    "insights": "Snapshot insights v1.0 (phenotype + CAC clarification + robustness)",
 }
 
 # ----------------------------
@@ -228,8 +229,6 @@ def prevent_prep_terms_base(
     Base-model term prep for PREVENT style models (10y/30y share most terms).
     For 10y models, age_squared is omitted downstream.
     """
-    # Centering/scaling anchors:
-    # age 55; non-HDL 3.5 mmol/L; HDL 1.3 mmol/L; SBP 130; BMI 25; eGFR 90; no DM/smoking/meds
     age_term = (age - 55.0) / 10.0
     age_sq = age_term ** 2
 
@@ -254,29 +253,21 @@ def prevent_prep_terms_base(
         "constant": 1.0,
         "age": age_term,
         "age_squared": age_sq,
-
         "non_hdl_c": non_hdl_mmol,
         "hdl_c": hdl_term,
-
         "sbp_lt_110": sbp_lt_110,
         "sbp_gte_110": sbp_gte_110,
-
         "dm": dm01,
         "smoking": smk01,
-
         "bmi_lt_30": bmi_lt_30,
         "bmi_gte_30": bmi_gte_30,
-
         "egfr_lt_60": egfr_lt_60,
         "egfr_gte_60": egfr_gte_60,
-
         "bp_tx": bp01,
         "statin": st01,
-
         # interactions
         "bp_tx_sbp_gte_110": bp01 * sbp_gte_110,
         "statin_non_hdl_c": st01 * non_hdl_mmol,
-
         "age_non_hdl_c": age_term * non_hdl_mmol,
         "age_hdl_c": age_term * hdl_term,
         "age_sbp_gte_110": age_term * sbp_gte_110,
@@ -288,10 +279,6 @@ def prevent_prep_terms_base(
     return terms
 
 def prevent_apply_logistic(beta: Dict[str, float], terms: Dict[str, float], dp: int = 2) -> float:
-    """
-    log_odds = sum(beta_i * term_i), risk = exp(log_odds)/(1+exp(log_odds))
-    Returns percent.
-    """
     log_odds = 0.0
     for k, b in beta.items():
         log_odds += float(b) * float(terms.get(k, 0.0))
@@ -299,10 +286,6 @@ def prevent_apply_logistic(beta: Dict[str, float], terms: Dict[str, float], dp: 
     return _round_half_up(r * 100.0, dp=dp)
 
 def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Optional comparator: PREVENT 10y total CVD + 10y ASCVD.
-    Requires extra inputs: bmi, egfr, lipid_lowering (statin/LLT flag).
-    """
     req = ["age","sex","tc","hdl","sbp","bp_treated","smoking","diabetes","bmi","egfr","lipid_lowering"]
     missing = [k for k in req if not p.has(k)]
     if missing:
@@ -339,8 +322,7 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
         bp_tx=bool(p.get("bp_treated")),
         statin=bool(p.get("lipid_lowering")),
     )
-    # 10-year models omit age_squared
-    terms.pop("age_squared", None)
+    terms.pop("age_squared", None)  # 10-year models omit age_squared
 
     coef_bank = PREVENT_COEFS.get("10yr", {}).get(sex_key, {})
     b_total = (coef_bank.get("total_cvd") or {})
@@ -635,12 +617,8 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any
 # ----------------------------
 # Aspirin module
 # ----------------------------
-def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-    age = int(p.get("age", 0)) if p.has("age") else None
-    cac = int(p.get("cac", 0)) if p.has("cac") else None
-    ascvd = (p.get("ascvd") is True)
-
-    bleed_flags = []
+def _bleeding_flags(p: Patient) -> Tuple[bool, List[str]]:
+    flags = []
     for k, label in [
         ("bleed_gi", "Prior GI bleed/ulcer"),
         ("bleed_ich", "Prior intracranial hemorrhage"),
@@ -650,25 +628,58 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         ("bleed_ckd", "Advanced CKD / eGFR<45"),
     ]:
         if p.get(k) is True:
-            bleed_flags.append(label)
+            flags.append(label)
+    return (len(flags) > 0), flags
+
+def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    age = int(p.get("age", 0)) if p.has("age") else None
+    cac = int(p.get("cac", 0)) if p.has("cac") else None
+    ascvd = (p.get("ascvd") is True)
+
+    bleed_high, bleed_flags = _bleeding_flags(p)
 
     if ascvd:
         add_trace(trace, "Aspirin_ASCVD", True, "Secondary prevention aspirin consideration")
         if bleed_flags:
-            return {"status": "Secondary prevention: typically indicated, but bleeding risk flags present", "rationale": bleed_flags}
-        return {"status": "Secondary prevention: typically indicated if no contraindication", "rationale": ["ASCVD present"]}
+            return {
+                "status": "Secondary prevention: typically indicated, but bleeding risk flags present",
+                "rationale": bleed_flags,
+                "bleeding_risk_high": bleed_high,
+                "bleeding_flags": bleed_flags,
+            }
+        return {
+            "status": "Secondary prevention: typically indicated if no contraindication",
+            "rationale": ["ASCVD present"],
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
 
     if age is None:
         add_trace(trace, "Aspirin_age_missing", None, "Not assessed")
-        return {"status": "Not assessed", "rationale": ["Age missing"]}
+        return {
+            "status": "Not assessed",
+            "rationale": ["Age missing"],
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
 
     if age < 40 or age >= 70:
         add_trace(trace, "Aspirin_age_out_of_range", age, "Avoid primary prevention aspirin by age rule")
-        return {"status": "Avoid (primary prevention)", "rationale": [f"Age {age} (bleeding risk likely outweighs benefit)"]}
+        return {
+            "status": "Avoid (primary prevention)",
+            "rationale": [f"Age {age} (bleeding risk likely outweighs benefit)"],
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
 
     if bleed_flags:
         add_trace(trace, "Aspirin_bleed_flags", bleed_flags, "Avoid due to bleed risk")
-        return {"status": "Avoid (primary prevention)", "rationale": ["High bleeding risk: " + "; ".join(bleed_flags)]}
+        return {
+            "status": "Avoid (primary prevention)",
+            "rationale": ["High bleeding risk: " + "; ".join(bleed_flags)],
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
 
     risk_pct = risk10.get("risk_pct")
     risk_ok = (risk_pct is not None and risk_pct >= 10.0)
@@ -679,10 +690,20 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         if cac_ok: reasons.append("CAC ≥100")
         if risk_ok: reasons.append(f"Pooled Cohort Equations 10-year risk ≥10% ({risk_pct}%)")
         add_trace(trace, "Aspirin_consider", reasons, "Consider aspirin shared decision")
-        return {"status": "Consider (shared decision)", "rationale": reasons + ["Bleeding risk low by available flags"]}
+        return {
+            "status": "Consider (shared decision)",
+            "rationale": reasons + ["Bleeding risk low by available flags"],
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
 
     add_trace(trace, "Aspirin_avoid_low_benefit", risk_pct, "Avoid/individualize (low benefit)")
-    return {"status": "Avoid / individualize", "rationale": ["Primary prevention benefit likely small at current risk level"]}
+    return {
+        "status": "Avoid / individualize",
+        "rationale": ["Primary prevention benefit likely small at current risk level"],
+        "bleeding_risk_high": bleed_high,
+        "bleeding_flags": bleed_flags,
+    }
 
 
 # ----------------------------
@@ -895,6 +916,10 @@ def ranked_drivers(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, A
 # Next actions (brief)
 # ----------------------------
 def next_actions(p: Patient, level: int, targets: Dict[str, int], evidence: Dict[str, Any]) -> List[str]:
+    """
+    Keep next actions concise and avoid repeating structural clarification.
+    CAC advisory belongs in out["insights"]["structural_clarification"] (displayed once in UI).
+    """
     acts = []
 
     if p.has("apob"):
@@ -905,10 +930,17 @@ def next_actions(p: Patient, level: int, targets: Dict[str, int], evidence: Dict
         except Exception:
             pass
 
+    if p.has("ldl"):
+        ld = fmt_int(p.get("ldl"))
+        try:
+            if float(ld) > targets["ldl"]:
+                acts.append(f"Reduce LDL-C toward <{targets['ldl']} mg/dL.")
+        except Exception:
+            pass
+
+    # CAC=0 nuance (not duplicative; only when CAC known)
     if str(evidence.get("cac_status", "")).startswith("Known zero") and level in (2, 3):
         acts.append("CAC=0 supports staged escalation; consider repeat CAC in 3–5y if risk persists.")
-    elif evidence.get("cac_status") == "Unknown" and level >= 3:
-        acts.append("Consider CAC to clarify plaque burden and refine intensity.")
 
     return acts[:2]
 
@@ -938,8 +970,6 @@ def levels_legend_compact() -> List[str]:
         "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
     ]
 
-# ✅ PATCH: embed MESA CAC reclassification text into the Level explainer output
-# Add/replace this function in levels_engine.py
 
 def level_explainer_for_patient(
     level: int,
@@ -957,7 +987,6 @@ def level_explainer_for_patient(
 
     top = "; ".join(drivers[:2]) if drivers else ""
 
-    # ---- MESA clinician note (only when CAC > 0) ----
     mesa_note = ""
     try:
         if isinstance(cac_val, int) and cac_val > 0:
@@ -999,7 +1028,6 @@ def level_explainer_for_patient(
         )
 
     if level == 4:
-        # CAC is usually >0 here; MESA note will appear automatically
         return (
             f"Level 4 means subclinical plaque is present (early disease); prevention should be more decisive and "
             f"target-driven.{mesa_note} Key signals: {top}."
@@ -1012,7 +1040,6 @@ def level_explainer_for_patient(
                 f"reduction. Key signals: {top}."
             )
 
-        # Advanced plaque burden often CAC >= 100; include MESA note if CAC > 0
         return (
             f"Level 5 means very high plaque burden or disease-equivalent intensity; management should be aggressive "
             f"and target-driven.{mesa_note} Key signals: {top}."
@@ -1023,6 +1050,185 @@ def level_explainer_for_patient(
         "based on available data."
     )
 
+
+# ----------------------------
+# Snapshot insights: phenotype + CAC advisory + robustness
+# ----------------------------
+PHENOTYPE_DEFINITION = (
+    "Biologic profile associated with a predilection toward atherosclerotic plaque formation, "
+    "without current structural expression."
+)
+
+def _exposure_context_ok(p: Patient) -> bool:
+    # Conservative: ensure enough exposure context to make CAC=0 meaningful.
+    # Premature FHx overrides age threshold.
+    if p.get("fhx") is True:
+        return True
+    if not p.has("age") or not p.has("sex"):
+        return False
+    age = int(p.get("age"))
+    sex = str(p.get("sex","")).lower()
+    if sex in ("m","male") and age >= 40:
+        return True
+    if sex in ("f","female") and age >= 45:
+        return True
+    return False
+
+def _meets_predilection_biology(p: Patient, trace: List[Dict[str, Any]]) -> bool:
+    """
+    Static gate: ≥1 major OR ≥2 minor.
+    Uses existing engine thresholds (unit-aware Lp(a) elevation via lpa_elevated()).
+    """
+    # Major
+    major = 0
+    if p.has("apob") and float(p.get("apob")) >= 100:
+        major += 1
+    if p.has("ldl") and float(p.get("ldl")) >= 160:
+        major += 1
+    if lpa_elevated(p, trace):
+        major += 1
+    if p.get("diabetes") is True:
+        major += 1
+    if p.get("smoking") is True:
+        major += 1
+    if major >= 1:
+        return True
+
+    # Minor (need 2)
+    minor = 0
+    if p.has("apob") and 90 <= float(p.get("apob")) <= 99:
+        minor += 1
+    if p.has("ldl") and 130 <= float(p.get("ldl")) <= 159:
+        minor += 1
+    if a1c_status(p) == "prediabetes":
+        minor += 1
+    if p.has("hscrp"):
+        try:
+            if float(p.get("hscrp")) >= 2:
+                minor += 1
+        except Exception:
+            pass
+    if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
+        minor += 1
+    if p.get("bp_treated") is True:
+        minor += 1
+    if p.get("fhx") is True:
+        minor += 1
+
+    return minor >= 2
+
+def atherogenic_leaning_phenotype(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, Any]]) -> Optional[str]:
+    """
+    Hybrid phenotype: displayed as "Atherogenic-leaning" when CAC=0 + exposure + biology gates.
+    """
+    if evidence.get("clinical_ascvd") is True:
+        return None
+    if evidence.get("plaque_present") is not False:
+        # Only fire when CAC=0 → plaque_present=False
+        return None
+    if not _exposure_context_ok(p):
+        add_trace(trace, "Phenotype_blocked_context", None, "Atherogenic-leaning not assigned (insufficient exposure context)")
+        return None
+    if not _meets_predilection_biology(p, trace):
+        add_trace(trace, "Phenotype_blocked_biology", None, "Atherogenic-leaning not assigned (biology gate not met)")
+        return None
+
+    add_trace(trace, "Phenotype_atherogenic_leaning", True, "Assigned (CAC=0 + exposure + biology gate)")
+    return "Atherogenic-leaning"
+
+def _aspirin_cac_window(p: Patient, risk10: Dict[str, Any], level: int, aspirin: Dict[str, Any]) -> bool:
+    """
+    Determines whether CAC could meaningfully inform aspirin candidacy in primary prevention.
+    Conservative: age 40–69, low bleed risk, no ASCVD, and either actionable biology (level>=3)
+    or at least borderline/intermediate estimated risk.
+    """
+    if p.get("ascvd") is True:
+        return False
+    if not p.has("age"):
+        return False
+    age = int(p.get("age"))
+    if age < 40 or age >= 70:
+        return False
+    if bool((aspirin or {}).get("bleeding_risk_high", False)):
+        return False
+
+    rp = risk10.get("risk_pct")
+    if rp is not None and rp >= 7.5:
+        return True
+    if level >= 3:
+        return True
+    return False
+
+def structural_clarification_advisory(
+    p: Patient,
+    evidence: Dict[str, Any],
+    risk10: Dict[str, Any],
+    aspirin: Dict[str, Any],
+    level: int,
+    trace: List[Dict[str, Any]],
+) -> Optional[str]:
+    """
+    One-line, non-directive CAC advisory answering: "worth the trouble?"
+    Only when CAC is unknown.
+    - If aspirin candidacy could be informed: mention aspirin explicitly.
+    - Else if level>=3: mention intensity confidence.
+    """
+    if evidence.get("cac_status") != "Unknown":
+        return None
+
+    if _aspirin_cac_window(p, risk10, level, aspirin):
+        add_trace(trace, "CAC_advisory_aspirin", True, "CAC unknown; aspirin candidacy could be informed")
+        return "Structural clarification: Coronary calcium imaging could meaningfully inform aspirin candidacy and treatment confidence."
+
+    if level >= 3:
+        add_trace(trace, "CAC_advisory_intensity", True, "CAC unknown; level≥3 intensity refinement")
+        return "Structural clarification: Coronary calcium imaging could meaningfully refine confidence in treatment intensity."
+
+    return None
+
+def decision_robustness(
+    p: Patient,
+    evidence: Dict[str, Any],
+    conf: Dict[str, Any],
+    level: int,
+    risk10: Dict[str, Any],
+    aspirin: Dict[str, Any],
+    trace: List[Dict[str, Any]],
+) -> Dict[str, str]:
+    """
+    Static, concise robustness signal (High/Moderate/Low) + short note.
+    - Low: overall data confidence low.
+    - High: clinical ASCVD or CAC positive (structure known) OR decision unlikely to hinge on missing structure.
+    - Moderate: CAC=0 (staged escalation) or CAC unknown where structure could change confidence (aspirin window or level≥3).
+    """
+    conf_band = (conf or {}).get("confidence", "Low")
+    if conf_band == "Low":
+        add_trace(trace, "Robustness_low_confidence", conf.get("pct"), "Decision robustness=Low")
+        return {"band": "Low", "note": "Key inputs missing; conclusions limited."}
+
+    if evidence.get("clinical_ascvd") is True:
+        add_trace(trace, "Robustness_high_structural", "ASCVD", "Decision robustness=High")
+        return {"band": "High", "note": "Clinical ASCVD defines intensity."}
+
+    if evidence.get("plaque_present") is True:
+        add_trace(trace, "Robustness_high_structural", evidence.get("cac_value"), "Decision robustness=High")
+        return {"band": "High", "note": "Plaque present defines intensity."}
+
+    # CAC=0
+    if evidence.get("plaque_present") is False:
+        add_trace(trace, "Robustness_moderate_cac0", 0, "Decision robustness=Moderate")
+        return {"band": "Moderate", "note": "CAC=0 lowers plaque signal; escalation may be staged."}
+
+    # CAC unknown
+    if evidence.get("cac_status") == "Unknown":
+        if _aspirin_cac_window(p, risk10, level, aspirin) or level >= 3:
+            add_trace(trace, "Robustness_moderate_cac_unknown", True, "Decision robustness=Moderate")
+            return {"band": "Moderate", "note": "Structural status unknown; may affect confidence."}
+        add_trace(trace, "Robustness_high_cac_unknown_low_level", level, "Decision robustness=High")
+        return {"band": "High", "note": "Structural testing unlikely to change management."}
+
+    add_trace(trace, "Robustness_default", None, "Decision robustness=Moderate (default)")
+    return {"band": "Moderate", "note": "Moderate robustness with available data."}
 
 
 # ----------------------------
@@ -1065,19 +1271,15 @@ def explain_levels(
 
     clinical = bool(evidence.get("clinical_ascvd"))
 
-    # ----- Meaning + base plan (CAC-aware for Level 3) -----
     if clinical:
         meaning = "Clinical ASCVD is present; management reflects secondary prevention intensity."
         base_plan = "High-intensity therapy; aggressive ApoB/LDL targets; address all enhancers."
-
     elif level == 1:
         meaning = "Low biologic risk signals and no evidence of plaque with current data."
         base_plan = "Lifestyle-first; periodic reassessment; avoid over-medicalization."
-
     elif level == 2:
         meaning = "Mild–moderate emerging risk without proven plaque."
         base_plan = "Confirm and trend; lifestyle sprint; shared decision on medications based on trajectory."
-
     elif level == 3:
         meaning = "High biologic risk; plaque is possible but unproven (or CAC=0 suggests low short-term signal)."
         cac_status = str(evidence.get("cac_status", "Unknown"))
@@ -1085,14 +1287,12 @@ def explain_levels(
         if cac_status.startswith("Known zero"):
             base_plan = "Shared decision toward lipid lowering; CAC=0 supports staged escalation; treat enhancers aggressively."
         elif cac_status == "Unknown":
-            base_plan = "Shared decision toward lipid lowering; consider CAC to clarify plaque burden if it would change intensity; treat enhancers aggressively."
+            base_plan = "Shared decision toward lipid lowering; structural clarification may refine intensity; treat enhancers aggressively."
         else:
             base_plan = "Shared decision toward lipid lowering; treat enhancers aggressively; target-driven prevention."
-
     elif level == 4:
         meaning = "Subclinical plaque is present (early disease)."
         base_plan = "Treat like early disease: statin generally recommended; target-driven therapy; reassess response."
-
     else:
         meaning = "High plaque burden or disease-equivalent intensity."
         base_plan = "Aggressive lipid targets; consider add-ons; treat as disease-equivalent intensity."
@@ -1137,7 +1337,6 @@ def explain_levels(
     }
 
 
-
 # ----------------------------
 # Public API
 # ----------------------------
@@ -1151,7 +1350,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     rs = risk_signal_score(p, trace)
     anchors = build_anchors(p, risk10, evidence)
 
-    # Optional PREVENT comparator (safe; may return missing/none)
     prevent10 = prevent10_total_and_ascvd(p, trace)
 
     level, level_triggers = posture_level(p, evidence, trace)
@@ -1179,6 +1377,19 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     next_acts = next_actions(p, level, targets, evidence)
 
+    # ---- insights (single source of truth for UI/EMR note) ----
+    phenotype = atherogenic_leaning_phenotype(p, evidence, trace)
+    cac_msg = structural_clarification_advisory(p, evidence, risk10, asp, level, trace)
+    robust = decision_robustness(p, evidence, conf, level, risk10, asp, trace)
+
+    insights = {
+        "phenotype_label": phenotype,
+        "phenotype_definition": PHENOTYPE_DEFINITION if phenotype else None,
+        "structural_clarification": cac_msg,
+        "decision_robustness": robust.get("band"),
+        "decision_robustness_note": robust.get("note"),
+    }
+
     out = {
         "version": VERSION,
         "system": SYSTEM_NAME,
@@ -1186,7 +1397,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "riskSignal": rs,
         "pooledCohortEquations10yAscvdRisk": risk10,
 
-        # New: PREVENT (optional comparator)
+        # PREVENT (optional comparator)
         "prevent10": prevent10,
 
         "targets": targets,
@@ -1199,6 +1410,10 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "aspirin": asp,
         "anchors": anchors,
         "lpaInfo": lpa_info(p, trace),
+
+        # New in v2.8
+        "insights": insights,
+
         "trace": trace,
     }
 
@@ -1216,6 +1431,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     t = out["targets"]
     conf = out["confidence"]
     prev = out.get("prevent10", {}) or {}
+    ins = out.get("insights", {}) or {}
 
     lines: List[str] = []
     lines.append(f"{SYSTEM_NAME} {out['version']['levels']} — Quick Reference")
@@ -1236,6 +1452,15 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     miss = ", ".join(conf["top_missing"]) if conf["top_missing"] else "none"
     lines.append(f"Confidence: {conf['confidence']} ({conf['pct']}% complete; missing: {miss})")
     lines.append(f"Recommendation tag: {lvl.get('recommendationStrength','—')}")
+    lines.append("")
+
+    # Snapshot insights (kept minimal)
+    if ins.get("decision_robustness"):
+        lines.append(f"Decision robustness: {ins.get('decision_robustness')} — {ins.get('decision_robustness_note','')}".strip())
+    if ins.get("phenotype_label"):
+        lines.append(f"Phenotype: {ins.get('phenotype_label')}")
+    if ins.get("structural_clarification"):
+        lines.append(ins.get("structural_clarification"))
     lines.append("")
 
     # RSS line
@@ -1307,7 +1532,5 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
-
-
 
 
