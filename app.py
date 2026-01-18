@@ -10,6 +10,7 @@ import json
 import re
 import streamlit as st
 import levels_engine as le
+import textwrap
 
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
@@ -200,43 +201,37 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
     segs = []
     for i in range(1, 6):
         active = (i == lvl)
-        segs.append(f"""
-        <div style="
-            flex:1;
-            padding:10px 10px;
-            border:1px solid {borders[i]};
-            border-radius:12px;
-            background:{colors[i]};
+        seg_html = f"""
+<div style="flex:1;padding:10px 10px;border:1px solid {borders[i]};border-radius:12px;background:{colors[i]};
             box-shadow:{'0 0 0 2px rgba(31,41,55,0.12) inset' if active else 'none'};
-            font-weight:{'900' if active else '700'};
-            text-align:center;
-            font-size:0.90rem;
-            line-height:1.15;
-        ">
-          <div>Level {i}</div>
-          <div style="font-weight:600; font-size:0.78rem; color:rgba(31,41,55,0.75); margin-top:2px;">
-            {labels[i]}
-          </div>
-        </div>
-        """)
+            font-weight:{'900' if active else '700'};text-align:center;font-size:0.90rem;line-height:1.15;">
+  <div>Level {i}</div>
+  <div style="font-weight:600;font-size:0.78rem;color:rgba(31,41,55,0.75);margin-top:2px;">
+    {labels[i]}
+  </div>
+</div>
+"""
+        segs.append(textwrap.dedent(seg_html).strip())
 
-    return f"""
-    <div style="margin-top:6px; margin-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;">
-        <div style="font-weight:900; font-size:1.02rem;">Risk Continuum</div>
-        <div style="font-weight:800; color:rgba(31,41,55,0.70); font-size:0.92rem;">Current: Level {lvl}{sub}</div>
-      </div>
+    html = f"""
+<div style="margin-top:6px;margin-bottom:10px;">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+    <div style="font-weight:900;font-size:1.02rem;">Risk Continuum</div>
+    <div style="font-weight:800;color:rgba(31,41,55,0.70);font-size:0.92rem;">Current: Level {lvl}{sub}</div>
+  </div>
 
-      <div style="display:flex; gap:8px;">
-        {''.join(segs)}
-      </div>
+  <div style="display:flex;gap:8px;">
+    {''.join(segs)}
+  </div>
 
-      <div style="display:flex; justify-content:space-between; margin-top:6px; color:rgba(31,41,55,0.65); font-size:0.82rem;">
-        <div>Lower signal / lower urgency</div>
-        <div>Higher signal / higher urgency</div>
-      </div>
-    </div>
-    """
+  <div style="display:flex;justify-content:space-between;margin-top:6px;color:rgba(31,41,55,0.65);font-size:0.82rem;">
+    <div>Lower signal / lower urgency</div>
+    <div>Higher signal / higher urgency</div>
+  </div>
+</div>
+"""
+    return textwrap.dedent(html).strip()
+
 
 # ============================================================
 # Helpers
@@ -1143,3 +1138,4 @@ if submitted:
     )
 else:
     st.caption("Enter values (or use Demo defaults) and click Run.")
+
