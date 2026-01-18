@@ -938,31 +938,91 @@ def levels_legend_compact() -> List[str]:
         "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
     ]
 
-def level_explainer_for_patient(level: int, sublevel: Optional[str], evidence: Dict[str, Any], drivers: List[str]) -> str:
+# ✅ PATCH: embed MESA CAC reclassification text into the Level explainer output
+# Add/replace this function in levels_engine.py
+
+def level_explainer_for_patient(
+    level: int,
+    sublevel: Optional[str],
+    evidence: Dict[str, Any],
+    drivers: List[str],
+) -> str:
+    """
+    Short context-specific explanation of what the Level means.
+    Clinician-facing tone, with conditional MESA CAC reclassification note when CAC > 0.
+    """
     cac_status = evidence.get("cac_status", "Unknown")
     plaque = evidence.get("plaque_present", None)
+    cac_val = evidence.get("cac_value", None)
+
     top = "; ".join(drivers[:2]) if drivers else ""
 
+    # ---- MESA clinician note (only when CAC > 0) ----
+    mesa_note = ""
+    try:
+        if isinstance(cac_val, int) and cac_val > 0:
+            mesa_note = (
+                " CAC reclassifies risk: In MESA, any detectable coronary calcium identified established "
+                "atherosclerotic plaque and higher observed event rates compared with CAC=0, independent of "
+                "traditional risk scores."
+            )
+    except Exception:
+        mesa_note = ""
+
     if level == 1:
-        return "Level 1 means we do not see a strong biologic or plaque signal with the data available; focus is maintaining healthy baseline habits and periodic reassessment."
+        return (
+            "Level 1 means we do not see a strong biologic or plaque signal with the data available; focus is "
+            "maintaining healthy baseline habits and periodic reassessment."
+        )
+
     if level == 2:
-        return f"Level 2 means early risk signals are emerging without proven plaque; best next step is a structured lifestyle sprint and/or completing key missing data. Key signals: {top}."
+        return (
+            f"Level 2 means early risk signals are emerging without proven plaque; best next step is a structured "
+            f"lifestyle sprint and/or completing key missing data. Key signals: {top}."
+        )
+
     if level == 3:
         suffix = ""
         if str(cac_status).startswith("Known zero"):
-            suffix = " CAC=0 lowers short-term plaque signal, but biology may still justify action based on lifetime trajectory."
+            suffix = (
+                " CAC=0 lowers short-term plaque signal, but biology may still justify action based on lifetime trajectory."
+            )
         elif plaque is None:
             suffix = " Plaque status is uncertain; CAC can improve certainty when it would change management."
+
         if sublevel:
             suffix = (suffix + f" (Sublevel {sublevel} refines intensity.)").strip()
-        return f"Level 3 means biologic risk is high enough to justify deliberate action and shared decision-making.{suffix} Key signals: {top}."
+
+        return (
+            f"Level 3 means biologic risk is high enough to justify deliberate action and shared decision-making."
+            f"{suffix}{mesa_note} Key signals: {top}."
+        )
+
     if level == 4:
-        return f"Level 4 means subclinical plaque is present (early disease); prevention should be more decisive and target-driven. Key signals: {top}."
+        # CAC is usually >0 here; MESA note will appear automatically
+        return (
+            f"Level 4 means subclinical plaque is present (early disease); prevention should be more decisive and "
+            f"target-driven.{mesa_note} Key signals: {top}."
+        )
+
     if level == 5:
         if evidence.get("clinical_ascvd"):
-            return f"Level 5 means clinical ASCVD is present; focus is secondary prevention intensity and aggressive risk reduction. Key signals: {top}."
-        return f"Level 5 means very high plaque burden or disease-equivalent intensity; management should be aggressive and target-driven. Key signals: {top}."
-    return "This Level represents the system’s current best estimate of where the patient falls on the Risk Continuum based on available data."
+            return (
+                f"Level 5 means clinical ASCVD is present; focus is secondary prevention intensity and aggressive risk "
+                f"reduction. Key signals: {top}."
+            )
+
+        # Advanced plaque burden often CAC >= 100; include MESA note if CAC > 0
+        return (
+            f"Level 5 means very high plaque burden or disease-equivalent intensity; management should be aggressive "
+            f"and target-driven.{mesa_note} Key signals: {top}."
+        )
+
+    return (
+        "This Level represents the system’s current best estimate of where the patient falls on the Risk Continuum "
+        "based on available data."
+    )
+
 
 
 # ----------------------------
@@ -1230,4 +1290,5 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
 
