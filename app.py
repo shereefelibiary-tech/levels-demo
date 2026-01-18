@@ -667,7 +667,7 @@ def cb_clear_pasted_text():
 def cb_clear_autofilled_fields():
     st.session_state["age_val"] = 0
     st.session_state["sex_val"] = "F"
-    st.session_state["race_val"] = "Other (use non-African American coefficients)")
+    st.session_state["race_val"] = "Other (use non-African American coefficients)"
     st.session_state["sbp_val"] = 0
     st.session_state["tc_val"] = 0
     st.session_state["ldl_val"] = 0
@@ -1115,4 +1115,5 @@ if submitted:
     st.caption(
         f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')}. No storage intended."
     )
+
 
