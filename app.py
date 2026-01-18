@@ -1,16 +1,23 @@
 # app.py (Risk Continuum — clinician-clean layout + continuum visualization)
-# - Adds a visual "Risk Continuum" bar (5 segments) with active Level highlighted
-# - Makes the Overview part of the Report tab (continuum bar + overview bullets at top)
-# - Keeps PREVENT visible (even if not active yet)
-# - Keeps SmartPhrase ingest + Parse&Apply
-# - Keeps Demo defaults toggle so you can click Run immediately
-# - Keeps LDL-first targets visible
+# PATCHED (v2.8-compatible) — applies 4 fixes:
+#   1) ASCVD radio now has key="ascvd_val" and is read from session_state
+#   2) FHx selectbox now has key="fhx_choice_val" and is read from session_state
+#   3) Bleeding-risk checkboxes now have stable keys (bleed_*) and are read from session_state
+#   4) Renders engine snapshot insights (out["insights"]) once, in Report tab (and lightly in Overview)
+#
+# Keeps:
+# - Risk Continuum bar visualization
+# - SmartPhrase ingest + Parse&Apply + parse coverage
+# - Demo defaults toggle
+# - LDL-first targets visible
+# - PREVENT visible (even if not active yet)
 
 import json
 import re
+import textwrap
+
 import streamlit as st
 import levels_engine as le
-import textwrap
 
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
@@ -202,13 +209,7 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
         if active:
             arrow = """
 <div style="display:flex;justify-content:center;margin-bottom:2px;">
-  <div style="
-      font-size:1.15rem;
-      line-height:1;
-      font-weight:900;
-      color:#111827;">
-    ▼
-  </div>
+  <div style="font-size:1.15rem;line-height:1;font-weight:900;color:#111827;">▼</div>
 </div>
 """
 
@@ -254,8 +255,6 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
 </div>
 """
     return textwrap.dedent(html).strip()
-
-
 
 # ============================================================
 # Helpers
@@ -397,7 +396,7 @@ def guideline_anchor_note(level: int, clinical_ascvd: bool) -> str:
     return "Guideline anchor: ACC/AHA primary prevention—lifestyle-first and periodic reassessment."
 
 # ============================================================
-# High-yield report HTML (unchanged except tidy bullets)
+# High-yield report HTML
 # ============================================================
 def render_high_yield_report(out: dict) -> str:
     lvl = out.get("levels", {}) or {}
@@ -653,6 +652,8 @@ def cb_parse_and_apply():
 st.session_state.setdefault("age_val", 0)
 st.session_state.setdefault("sex_val", "F")
 st.session_state.setdefault("race_val", "Other (use non-African American coefficients)")
+st.session_state.setdefault("ascvd_val", "No")              # FIX #1
+st.session_state.setdefault("fhx_choice_val", "None / Unknown")  # FIX #2
 st.session_state.setdefault("sbp_val", 0)
 st.session_state.setdefault("tc_val", 0)
 st.session_state.setdefault("ldl_val", 0)
@@ -667,6 +668,10 @@ st.session_state.setdefault("smoking_val", "No")
 st.session_state.setdefault("diabetes_choice_val", "No")
 st.session_state.setdefault("cac_known_val", "No")
 st.session_state.setdefault("cac_val", 0)
+
+# Bleeding flags (FIX #3)
+for bk in ["bleed_gi","bleed_nsaid","bleed_anticoag","bleed_disorder","bleed_ich","bleed_ckd"]:
+    st.session_state.setdefault(bk, False)
 
 # PREVENT defaults
 st.session_state.setdefault("bmi_val", 0.0)
@@ -691,6 +696,9 @@ def apply_demo_defaults():
     st.session_state["age_val"] = 55
     st.session_state["sex_val"] = "M"
     st.session_state["race_val"] = "Other (use non-African American coefficients)"
+    st.session_state["ascvd_val"] = "No"
+    st.session_state["fhx_choice_val"] = "None / Unknown"
+
     st.session_state["sbp_val"] = 128
     st.session_state["bp_treated_val"] = "No"
     st.session_state["smoking_val"] = "No"
@@ -715,17 +723,17 @@ def apply_demo_defaults():
     for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{kk}_val"] = False
 
+    for bk in ["bleed_gi","bleed_nsaid","bleed_anticoag","bleed_disorder","bleed_ich","bleed_ckd"]:
+        st.session_state[bk] = False
+
     st.session_state["demo_defaults_applied"] = True
 
 with st.sidebar:
     st.markdown("### Demo")
     demo_on = st.checkbox("Use demo defaults (auto-fill)", value=st.session_state["demo_defaults_on"])
     st.session_state["demo_defaults_on"] = demo_on
-
-    cA, _ = st.columns([1, 1])
-    with cA:
-        if st.button("Apply demo"):
-            apply_demo_defaults()
+    if st.button("Apply demo"):
+        apply_demo_defaults()
 
 if st.session_state["demo_defaults_on"] and not st.session_state["demo_defaults_applied"]:
     apply_demo_defaults()
@@ -764,7 +772,12 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     with c1:
         st.button("Parse & Apply", type="primary", on_click=cb_parse_and_apply)
     with c2:
-        st.button("Clear pasted text", on_click=lambda: st.session_state.update({"smartphrase_raw": "", "parsed_preview_cache": {}, "last_applied_msg": "", "last_missing_msg": ""}))
+        st.button(
+            "Clear pasted text",
+            on_click=lambda: st.session_state.update(
+                {"smartphrase_raw": "", "parsed_preview_cache": {}, "last_applied_msg": "", "last_missing_msg": ""}
+            ),
+        )
     with c3:
         st.button("Clear auto-filled fields", on_click=lambda: st.session_state.update({"demo_defaults_applied": False}))
     with c4:
@@ -792,9 +805,11 @@ with st.form("risk_continuum_form"):
         race_options = ["Other (use non-African American coefficients)", "African American"]
         race = st.radio("Race (calculator)", race_options, horizontal=False, key="race_val")
     with a3:
-        ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True)
+        # FIX #1: key
+        ascvd = st.radio("ASCVD (clinical)", ["No", "Yes"], horizontal=True, key="ascvd_val")
 
-    fhx_choice = st.selectbox("Premature family history", FHX_OPTIONS, index=0)
+    # FIX #2: key
+    fhx_choice = st.selectbox("Premature family history", FHX_OPTIONS, index=0, key="fhx_choice_val")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Cardiometabolic profile")
@@ -815,7 +830,9 @@ with st.form("risk_continuum_form"):
     with b4:
         bmi = st.number_input("BMI (kg/m²) (for PREVENT)", 0.0, 80.0, step=0.1, format="%.1f", key="bmi_val")
     with b5:
-        lipid_lowering = st.radio("On lipid-lowering therapy? (for PREVENT)", ["No", "Yes"], horizontal=True, key="lipid_lowering_val")
+        lipid_lowering = st.radio(
+            "On lipid-lowering therapy? (for PREVENT)", ["No", "Yes"], horizontal=True, key="lipid_lowering_val"
+        )
     with b6:
         st.caption("PREVENT requires BMI, eGFR, and lipid-therapy status.")
 
@@ -867,17 +884,18 @@ with st.form("risk_continuum_form"):
         osa = st.checkbox("OSA", key="infl_osa_val")
         nafld = st.checkbox("NAFLD/MASLD", key="infl_nafld_val")
 
+    # FIX #3: keys for bleeding checkboxes
     with st.expander("Bleeding risk (for aspirin decision-support) — optional"):
         f1, f2, f3 = st.columns(3)
         with f1:
-            bleed_gi = st.checkbox("Prior GI bleed / ulcer", value=False)
-            bleed_nsaid = st.checkbox("Chronic NSAID/steroid use", value=False)
+            st.checkbox("Prior GI bleed / ulcer", value=st.session_state["bleed_gi"], key="bleed_gi")
+            st.checkbox("Chronic NSAID/steroid use", value=st.session_state["bleed_nsaid"], key="bleed_nsaid")
         with f2:
-            bleed_anticoag = st.checkbox("Anticoagulant use", value=False)
-            bleed_disorder = st.checkbox("Bleeding disorder / thrombocytopenia", value=False)
+            st.checkbox("Anticoagulant use", value=st.session_state["bleed_anticoag"], key="bleed_anticoag")
+            st.checkbox("Bleeding disorder / thrombocytopenia", value=st.session_state["bleed_disorder"], key="bleed_disorder")
         with f3:
-            bleed_ich = st.checkbox("Prior intracranial hemorrhage", value=False)
-            bleed_ckd = st.checkbox("Advanced CKD / eGFR <45", value=False)
+            st.checkbox("Prior intracranial hemorrhage", value=st.session_state["bleed_ich"], key="bleed_ich")
+            st.checkbox("Advanced CKD / eGFR <45", value=st.session_state["bleed_ckd"], key="bleed_ckd")
 
     show_json = st.checkbox("Show JSON (debug)", value=False)
     submitted = st.form_submit_button("Run", type="primary")
@@ -888,17 +906,43 @@ with st.form("risk_continuum_form"):
 if submitted:
     # Required field checks
     req_errors = []
-    if age <= 0:
+    if st.session_state["age_val"] <= 0:
         req_errors.append("Age is required (must be > 0).")
-    if sbp <= 0:
+    if st.session_state["sbp_val"] <= 0:
         req_errors.append("Systolic BP is required (must be > 0).")
-    if tc <= 0:
+    if st.session_state["tc_val"] <= 0:
         req_errors.append("Total cholesterol is required (must be > 0).")
-    if hdl <= 0:
+    if st.session_state["hdl_val"] <= 0:
         req_errors.append("HDL is required (must be > 0).")
     if req_errors:
         st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
         st.stop()
+
+    # Pull values from session_state (avoids local-variable drift)
+    age = st.session_state["age_val"]
+    gender = st.session_state["sex_val"]
+    race = st.session_state["race_val"]
+    ascvd = st.session_state["ascvd_val"]
+    fhx_choice = st.session_state["fhx_choice_val"]
+
+    sbp = st.session_state["sbp_val"]
+    bp_treated = st.session_state["bp_treated_val"]
+    smoking = st.session_state["smoking_val"]
+    diabetes_choice = st.session_state["diabetes_choice_val"]
+    a1c = st.session_state["a1c_val"]
+
+    tc = st.session_state["tc_val"]
+    ldl = st.session_state["ldl_val"]
+    hdl = st.session_state["hdl_val"]
+    apob = st.session_state["apob_val"]
+    lpa = st.session_state["lpa_val"]
+    lpa_unit = st.session_state["lpa_unit_val"]
+    hscrp = st.session_state["hscrp_val"]
+
+    cac_known = st.session_state["cac_known_val"]
+    bmi = st.session_state["bmi_val"]
+    egfr = st.session_state["egfr_val"]
+    lipid_lowering = st.session_state["lipid_lowering_val"]
 
     diabetes_effective = True if a1c >= 6.5 else (diabetes_choice == "Yes")
     cac_to_send = int(st.session_state["cac_val"]) if cac_known == "Yes" else None
@@ -922,19 +966,22 @@ if submitted:
         "lpa_unit": lpa_unit,
         "hscrp": float(hscrp) if hscrp and hscrp > 0 else None,
         "cac": cac_to_send,
-        "ra": bool(ra),
-        "psoriasis": bool(psoriasis),
-        "sle": bool(sle),
-        "ibd": bool(ibd),
-        "hiv": bool(hiv),
-        "osa": bool(osa),
-        "nafld": bool(nafld),
-        "bleed_gi": bool(bleed_gi),
-        "bleed_ich": bool(bleed_ich),
-        "bleed_anticoag": bool(bleed_anticoag),
-        "bleed_nsaid": bool(bleed_nsaid),
-        "bleed_disorder": bool(bleed_disorder),
-        "bleed_ckd": bool(bleed_ckd),
+
+        "ra": bool(st.session_state.get("infl_ra_val", False)),
+        "psoriasis": bool(st.session_state.get("infl_psoriasis_val", False)),
+        "sle": bool(st.session_state.get("infl_sle_val", False)),
+        "ibd": bool(st.session_state.get("infl_ibd_val", False)),
+        "hiv": bool(st.session_state.get("infl_hiv_val", False)),
+        "osa": bool(st.session_state.get("infl_osa_val", False)),
+        "nafld": bool(st.session_state.get("infl_nafld_val", False)),
+
+        # FIX #3: read from session_state keys
+        "bleed_gi": bool(st.session_state.get("bleed_gi", False)),
+        "bleed_ich": bool(st.session_state.get("bleed_ich", False)),
+        "bleed_anticoag": bool(st.session_state.get("bleed_anticoag", False)),
+        "bleed_nsaid": bool(st.session_state.get("bleed_nsaid", False)),
+        "bleed_disorder": bool(st.session_state.get("bleed_disorder", False)),
+        "bleed_ckd": bool(st.session_state.get("bleed_ckd", False)),
 
         # PREVENT required inputs
         "bmi": float(bmi) if bmi and bmi > 0 else None,
@@ -953,6 +1000,7 @@ if submitted:
     rs = out.get("riskSignal", {}) or {}
     risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
     prevent10 = out.get("prevent10", {}) or {}
+    ins = out.get("insights", {}) or {}  # FIX #4
 
     level = (lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
     try:
@@ -1006,6 +1054,13 @@ if submitted:
         m4.metric("PREVENT 10y ASCVD", f"{p_ascvd}%" if p_ascvd is not None else "—")
         if (p_total is None and p_ascvd is None) and p_note:
             st.caption(f"PREVENT: {p_note}")
+
+        # Light-touch snapshot insight (kept minimal here)
+        if ins.get("decision_robustness"):
+            st.markdown(
+                f"**Decision robustness:** {ins.get('decision_robustness')}"
+                + (f" — {scrub_terms(ins.get('decision_robustness_note',''))}" if ins.get("decision_robustness_note") else "")
+            )
 
         st.markdown("### Evidence")
         st.write(f"{scrub_terms(ev.get('cac_status','—'))} / {scrub_terms(ev.get('burden_band','—'))}")
@@ -1061,15 +1116,13 @@ if submitted:
                 st.write(f"• {scrub_terms(item)}")
 
     # =========================
-    # REPORT tab — overview embedded at top (as requested)
+    # REPORT tab — overview embedded + insights block (FIX #4)
     # =========================
     with tab_report:
         st.subheader("Clinical report (high-yield)")
 
-        # Continuum visualization at top of the report
         st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
-        # Overview (embedded into report)
         st.markdown("### Overview")
         st.markdown(f"**Level:** {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
         st.markdown(f"**Evidence:** {scrub_terms(ev.get('cac_status','—'))} / **Burden:** {scrub_terms(ev.get('burden_band','—'))}")
@@ -1078,7 +1131,6 @@ if submitted:
         pce_cat = risk10.get("category") or ""
         st.markdown(f"**Key metrics:** RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • PCE 10y {pce_line} {pce_cat}".strip())
 
-        # PREVENT always visible (even if not active)
         st.markdown(
             f"**PREVENT 10y:** total CVD {p_total if p_total is not None else '—'} • "
             f"ASCVD {p_ascvd if p_ascvd is not None else '—'}"
@@ -1099,6 +1151,28 @@ if submitted:
             st.markdown("**Next steps:**")
             for a in next_actions[:3]:
                 st.markdown(f"- {a}")
+
+        # FIX #4: Clinical context (single location; non-redundant)
+        st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        st.markdown("### Clinical context")
+
+        drivers = scrub_list(out.get("drivers", []) or [])
+        if drivers:
+            st.markdown(f"**Risk driver:** {drivers[0]}")
+
+        if ins.get("phenotype_label"):
+            st.markdown(f"**Phenotype:** {scrub_terms(ins.get('phenotype_label'))}")
+
+        if ins.get("decision_robustness"):
+            rob = scrub_terms(ins.get("decision_robustness"))
+            rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
+            st.markdown(f"**Decision robustness:** {rob}" + (f" — {rob_note}" if rob_note else ""))
+
+        if ev.get("cac_status") == "Unknown":
+            st.markdown("**Structural status:** Unknown (CAC not performed)")
+
+        if ins.get("structural_clarification"):
+            st.caption(scrub_terms(ins.get("structural_clarification")))
 
         st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
