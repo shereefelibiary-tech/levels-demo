@@ -900,7 +900,9 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
 
     c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
     with c1:
-        st.button("Parse & Apply", type="primary", on_click=cb_parse_and_apply)
+        if st.button("Parse & Apply", type="primary"):
+    cb_parse_and_apply()
+
     with c2:
         st.button(
             "Clear pasted text",
@@ -1383,5 +1385,6 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
