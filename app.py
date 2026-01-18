@@ -190,37 +190,60 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
         4: "rgba(249,115,22,0.12)",
         5: "rgba(239,68,68,0.12)",
     }
-    borders = {
-        1: "rgba(59,130,246,0.28)",
-        2: "rgba(16,185,129,0.28)",
-        3: "rgba(245,158,11,0.30)",
-        4: "rgba(249,115,22,0.30)",
-        5: "rgba(239,68,68,0.30)",
-    }
 
     segs = []
     for i in range(1, 6):
         active = (i == lvl)
+
+        outline = "2px solid #111827" if active else "1px solid rgba(31,41,55,0.25)"
+        shadow = "0 8px 20px rgba(0,0,0,0.18)" if active else "none"
+
+        arrow = ""
+        if active:
+            arrow = """
+<div style="display:flex;justify-content:center;margin-bottom:2px;">
+  <div style="
+      font-size:1.15rem;
+      line-height:1;
+      font-weight:900;
+      color:#111827;">
+    ▼
+  </div>
+</div>
+"""
+
         seg_html = f"""
-<div style="flex:1;padding:10px 10px;border:1px solid {borders[i]};border-radius:12px;background:{colors[i]};
-            box-shadow:{'0 0 0 2px rgba(31,41,55,0.12) inset' if active else 'none'};
-            font-weight:{'900' if active else '700'};text-align:center;font-size:0.90rem;line-height:1.15;">
-  <div>Level {i}</div>
-  <div style="font-weight:600;font-size:0.78rem;color:rgba(31,41,55,0.75);margin-top:2px;">
-    {labels[i]}
+<div style="flex:1; display:flex; flex-direction:column; align-items:stretch;">
+  {arrow}
+  <div style="
+      padding:10px 10px;
+      border:{outline};
+      border-radius:12px;
+      background:{colors[i]};
+      box-shadow:{shadow};
+      font-weight:{'900' if active else '700'};
+      text-align:center;
+      font-size:0.90rem;
+      line-height:1.15;">
+    <div>Level {i}</div>
+    <div style="font-weight:600;font-size:0.78rem;color:rgba(31,41,55,0.75);margin-top:2px;">
+      {labels[i]}
+    </div>
   </div>
 </div>
 """
         segs.append(textwrap.dedent(seg_html).strip())
 
     html = f"""
-<div style="margin-top:6px;margin-bottom:10px;">
+<div style="margin-top:8px;margin-bottom:12px;">
   <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-    <div style="font-weight:900;font-size:1.02rem;">Risk Continuum</div>
-    <div style="font-weight:800;color:rgba(31,41,55,0.70);font-size:0.92rem;">Current: Level {lvl}{sub}</div>
+    <div style="font-weight:900;font-size:1.05rem;">Risk Continuum</div>
+    <div style="font-weight:800;color:rgba(31,41,55,0.70);font-size:0.92rem;">
+      Current: Level {lvl}{sub}
+    </div>
   </div>
 
-  <div style="display:flex;gap:8px;">
+  <div style="display:flex;gap:10px;align-items:flex-start;">
     {''.join(segs)}
   </div>
 
@@ -231,6 +254,7 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
 </div>
 """
     return textwrap.dedent(html).strip()
+
 
 
 # ============================================================
@@ -1138,4 +1162,5 @@ if submitted:
     )
 else:
     st.caption("Enter values (or use Demo defaults) and click Run.")
+
 
