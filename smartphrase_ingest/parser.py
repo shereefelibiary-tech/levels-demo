@@ -110,16 +110,28 @@ def extract_age(raw: str) -> Tuple[Optional[int], Optional[str]]:
 
 
 def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
+    """
+    Returns (SBP, DBP). DBP may be 0 if not available.
+    Supports:
+      - Systolic blood pressure: 128
+      - Systolic BP: 128
+      - SBP: 128
+      - BP 128/78
+      - Any 128/78
+    """
     t = raw
 
-    m = re.search(r"\bsystolic\s+blood\s+pressure\s*:\s*(\d{2,3})\b", t, flags=re.I)
+    # Explicit systolic-only variants
+    m = re.search(r"\b(?:systolic\s+blood\s+pressure|systolic\s*bp|sbp)\s*[:=]?\s*(\d{2,3})\b", t, flags=re.I)
     if m:
         try:
             sbp = int(m.group(1))
-            return sbp, 0
+            if 50 <= sbp <= 300:
+                return sbp, 0
         except Exception:
             pass
 
+    # BP 128/78
     m = re.search(r"\bBP\b[^\d]{0,10}(\d{2,3})\s*/\s*(\d{2,3})\b", t, flags=re.I)
     if m:
         try:
@@ -129,6 +141,7 @@ def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
         except Exception:
             pass
 
+    # Any 128/78
     for m in re.finditer(r"\b(\d{2,3})\s*/\s*(\d{2,3})\b", t):
         try:
             sbp, dbp = int(m.group(1)), int(m.group(2))
@@ -142,20 +155,38 @@ def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
     return None
 
 
-def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
+def extract_diabetes_flag(raw: str) -> Optional[bool]:
     """
-    FIXES:
-      - Diabetes negation should not be overwritten by generic 'diabetes' token.
-      - Smoking: 'Tobacco smoker: No' and 'Smoking status: Never' should not set smoker=True.
+    Stronger diabetes parsing:
+      - Diabetes: No / Yes
+      - Diabetic: No / Yes
+      - Common negations
+      - Then keywords like T2DM
     """
     t = raw.lower()
 
-    diabetes: Optional[bool] = None
-    if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
-        diabetes = False
-    elif re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
-        diabetes = True
+    # explicit fields (highest priority)
+    m = re.search(r"\b(diabetes|diabetic)\b\s*[:=]\s*(yes|no|true|false)\b", t)
+    if m:
+        v = m.group(2)
+        return True if v in ("yes", "true") else False
 
+    # standard negations
+    if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
+        return False
+
+    # keyword positives
+    if re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
+        return True
+
+    return None
+
+
+def extract_smoking_flags(raw: str) -> Dict[str, Optional[bool]]:
+    """
+    Smoking parsing with better negation handling.
+    """
+    t = raw.lower()
     smoker: Optional[bool] = None
     former_smoker: Optional[bool] = None
 
@@ -176,11 +207,28 @@ def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
         or re.search(r"\bcurrent smoker\b", t)
         or re.search(r"\bsmoking\s*status\s*:\s*every day\b", t)
         or re.search(r"\bsmoking\s*status\s*:\s*some days\b", t)
+        or re.search(r"\bsmoker\s*[:=]\s*(yes|true)\b", t)
     ):
         smoker = True
         former_smoker = False
 
-    return {"diabetes": diabetes, "smoker": smoker, "former_smoker": former_smoker}
+    # also allow "Smoking: No/Yes"
+    m = re.search(r"\bsmoking\b\s*[:=]\s*(yes|no|true|false)\b", t)
+    if m:
+        v = m.group(1)
+        smoker = True if v in ("yes", "true") else False
+        former_smoker = False if smoker else former_smoker
+
+    return {"smoker": smoker, "former_smoker": former_smoker}
+
+
+def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
+    """
+    Boolean flags: diabetes, smoker, former_smoker
+    """
+    diabetes = extract_diabetes_flag(raw)
+    smoke = extract_smoking_flags(raw)
+    return {"diabetes": diabetes, **smoke}
 
 
 def extract_lpa_unit(raw: str) -> Optional[str]:
@@ -205,6 +253,11 @@ def extract_bp_treated(raw: str) -> Optional[bool]:
         return False
     if re.search(r"\bis\s*bp\s*treated\s*:\s*(yes|true)\b", t):
         return True
+    # support "BP treated: No/Yes"
+    m = re.search(r"\bbp\s*treated\s*[:=]\s*(yes|no|true|false)\b", t)
+    if m:
+        v = m.group(1)
+        return True if v in ("yes","true") else False
     return None
 
 
@@ -224,54 +277,71 @@ def extract_race_african_american(raw: str) -> Optional[bool]:
 
 
 # ----------------------------
+# Family history
+# ----------------------------
+def extract_fhx(raw: str) -> Tuple[Optional[bool], Optional[str]]:
+    """
+    Returns (fhx_bool, fhx_text)
+    fhx_text is a normalized descriptor the UI can map to a dropdown choice.
+    """
+    if not raw or not raw.strip():
+        return None, None
+
+    t = raw.lower()
+
+    # explicit negative
+    if re.search(r"\b(family history|famhx)\b\s*[:=]\s*(none|no|negative)\b", t):
+        return False, "None / Unknown"
+
+    # broad string in your test case: "Family history: Father with premature ASCVD <55"
+    if re.search(r"\bfather\b.*\b(premature|<\s*55)\b", t):
+        return True, "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55"
+    if re.search(r"\bmother\b.*\b(premature|<\s*65)\b", t):
+        return True, "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65"
+    if re.search(r"\bsibling\b.*\bpremature\b", t):
+        return True, "Sibling with premature ASCVD"
+    if re.search(r"\bmultiple\b.*\b(first[- ]degree)\b", t):
+        return True, "Multiple first-degree relatives"
+    if re.search(r"\bfamily history\b.*\bpremature\b", t):
+        return True, "Other premature relative"
+
+    return None, None
+
+
+# ----------------------------
+# CAC "not done" detection
+# ----------------------------
+def extract_cac_not_done(raw: str) -> bool:
+    t = raw.lower()
+    # any of these implies absence
+    return bool(re.search(r"\b(cac|calcium|agatston)\b.*\b(not\s*done|not\s*performed|unknown|n/?a|none)\b", t))
+
+
+# ----------------------------
 # PREVENT helpers: BMI, eGFR, lipid-lowering therapy
 # ----------------------------
 def extract_bmi(raw: str) -> Optional[float]:
-    """
-    Attempts to capture BMI from common formats:
-      - BMI: 28.4
-      - Body Mass Index 28.4
-      - "BMI 28.4"
-    """
     t = raw
     return _first_float(r"\b(?:bmi|body\s*mass\s*index)\s*[:=]?\s*(\d{1,2}(?:\.\d+)?)\b", t)
 
 
 def extract_egfr(raw: str) -> Optional[float]:
-    """
-    Attempts to capture eGFR from common formats:
-      - eGFR: 72
-      - EGFR 72
-      - Estimated GFR 72
-    """
     t = raw
     v = _first_float(r"\b(?:eGFR|egfr|estimated\s*gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
     if v is None:
-        # Sometimes appears as "GFR 72"
         v = _first_float(r"\b(?:gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
     return v
 
 
 def extract_lipid_lowering(raw: str) -> Optional[bool]:
-    """
-    Best-effort detection of lipid-lowering therapy use.
-
-    Returns:
-      True  -> clear evidence of statin/ezetimibe/PCSK9/etc or "on statin"
-      False -> explicit negation like "not on statin"
-      None  -> unknown
-    """
     t = raw.lower()
 
-    # explicit negation first
     if re.search(r"\b(not on|no)\s+(a\s+)?(statin|lipid[-\s]?lowering|cholesterol\s+meds)\b", t):
         return False
 
-    # explicit yes
     if re.search(r"\bon\s+(a\s+)?statin\b", t) or re.search(r"\bstatin\s*(use|therapy)\s*:\s*(yes|true)\b", t):
         return True
 
-    # med list hits (broad but still specific)
     meds = [
         r"atorvastatin", r"rosuvastatin", r"simvastatin", r"pravastatin", r"lovastatin",
         r"pitavastatin", r"fluvastatin",
@@ -283,16 +353,16 @@ def extract_lipid_lowering(raw: str) -> Optional[bool]:
     if any(re.search(rf"\b{m}\b", t) for m in meds):
         return True
 
+    # support "On lipid lowering: No/Yes"
+    m = re.search(r"\b(on\s+lipid\s*lowering|lipid\s*lowering)\s*[:=]\s*(yes|no|true|false)\b", t)
+    if m:
+        v = m.group(2)
+        return True if v in ("yes","true") else False
+
     return None
 
 
 def extract_labs(raw: str) -> Dict[str, Optional[float]]:
-    """
-    FIXES:
-      - A1c should be captured from Epic table format:
-        "Hemoglobin A1C ... 01/05/2026  5.7 (H)"
-      - LDL-C variants like "LDL-C: 128"
-    """
     t = raw
 
     a1c_table = _first_float(
@@ -302,7 +372,7 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
     a1c_inline = _first_float(r"\b(?:a1c|hba1c|hb\s*a1c)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t)
 
     return {
-        "tc": _first_float(r"\b(?:total\s*cholesterol|total\s*chol|tc|cholesterol|chol)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
+        "tc": _first_float(r"\b(?:total\s*cholesterol|total\s*chol|tc)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
         "ldl": _first_float(r"\bldl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
         "hdl": _first_float(r"\bhdl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
         "tg": _first_float(r"\b(?:triglycerides|trigs|tgs|tg)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
@@ -324,7 +394,6 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
 
     sex, sex_warn = extract_sex(raw)
     age, age_warn = extract_age(raw)
-
     extracted["sex"] = sex
     extracted["age"] = age
 
@@ -350,6 +419,18 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
     extracted["africanAmerican"] = extract_race_african_american(raw)
     extracted["lpa_unit"] = extract_lpa_unit(raw)
 
+    # Family history
+    fhx_bool, fhx_text = extract_fhx(raw)
+    extracted["fhx"] = fhx_bool
+    extracted["fhx_text"] = fhx_text
+
+    # CAC not-done logic
+    cac_nd = extract_cac_not_done(raw)
+    extracted["cac_not_done"] = cac_nd
+    if cac_nd:
+        # Prefer explicit "not done" over any spurious CAC number matches
+        extracted["cac"] = None
+
     # PREVENT-related
     extracted["bmi"] = extract_bmi(raw)
     extracted["egfr"] = extract_egfr(raw)
@@ -366,15 +447,16 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
         ("apob", "ApoB"),
         ("lpa", "Lp(a)"),
         ("lpa_unit", "Lp(a) unit"),
-        ("cac", "CAC"),
-        ("ascvd", "ASCVD 10-year risk"),
         ("a1c", "A1c"),
-        # PREVENT
         ("bmi", "BMI (PREVENT)"),
         ("egfr", "eGFR (PREVENT)"),
     ]:
         if extracted.get(key) is None:
             warnings.append(f"{label} not detected")
+
+    # Only warn about CAC if it wasn't explicitly not done
+    if extracted.get("cac") is None and not extracted.get("cac_not_done", False):
+        warnings.append("CAC not detected")
 
     return ParseReport(extracted=extracted, warnings=warnings, conflicts=conflicts)
 
@@ -386,6 +468,7 @@ def parse_ascvd_block(raw: str) -> Dict[str, Any]:
 def parse_smartphrase(raw: str) -> Dict[str, Any]:
     """
     UI adapter: returns exactly what your app expects.
+    (Additive keys: fhx, fhx_text, cac_not_done)
     """
     rep = parse_ascvd_block_with_report(raw)
     x = rep.extracted
@@ -400,8 +483,9 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
         "a1c",
         "smoker", "diabetes",
         "bpTreated", "africanAmerican",
-        # PREVENT additions:
         "bmi", "egfr", "lipidLowering",
+        # new additive keys:
+        "fhx", "fhx_text", "cac_not_done",
     )
     for k in keys:
         if x.get(k) is not None:
