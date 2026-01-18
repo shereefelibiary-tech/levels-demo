@@ -1073,7 +1073,17 @@ def explain_levels(
         base_plan = "Confirm and trend; lifestyle sprint; shared decision on medications based on trajectory."
     elif level == 3:
         meaning = "High biologic risk; plaque is possible but unproven (or CAC=0 suggests low short-term signal)."
-        base_plan = "Shared decision toward lipid lowering; refine with CAC if unknown; treat enhancers aggressively."
+        cac_status = str(evidence.get("cac_status", "Unknown"))
+    if cac_status.startswith("Known zero"):
+        # CAC is known and 0 → don't say "refine with CAC if unknown"
+        base_plan = "Shared decision toward lipid lowering; CAC=0 supports staged escalation; treat enhancers aggressively."
+    elif cac_status == "Unknown":
+        # CAC truly unknown → suggest CAC as a clarifier
+        base_plan = "Shared decision toward lipid lowering; consider CAC to clarify plaque burden if it would change intensity; treat enhancers aggressively."
+    else:
+        # CAC positive shouldn't usually land in level 3 (it escalates), but keep safe
+        base_plan = "Shared decision toward lipid lowering; treat enhancers aggressively; target-driven prevention."
+
     elif level == 4:
         meaning = "Subclinical plaque is present (early disease)."
         base_plan = "Treat like early disease: statin generally recommended; target-driven therapy; reassess response."
@@ -1290,5 +1300,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
 
 
