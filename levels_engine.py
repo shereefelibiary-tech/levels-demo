@@ -1,7 +1,7 @@
 # levels_engine.py
-# Risk Continuum™ Engine — v2.6 (terminology revamp; CV module)
+# Risk Continuum™ Engine — v2.7 (PREVENT added; CV module)
 #
-# Preserves v2.5-defensible:
+# Preserves v2.6-risk-continuum:
 # - RSS scoring (biologic + plaque signal, not event probability)
 # - PCE 10y risk (ACC/AHA 2013; other→non-Black coefficients)
 # - Inflammatory states + hsCRP + metabolic + Lp(a) unit-aware thresholds
@@ -11,7 +11,13 @@
 # - Anchors (near-term vs lifetime)
 # - Rule trace (auditable)
 #
-# Terminology updates (Risk Continuum system naming):
+# Adds:
+# - Optional PREVENT 10-year risks:
+#     - total CVD 10y
+#     - ASCVD 10y
+#   (non-breaking, additive output under out["prevent10"])
+#
+# Terminology:
 # - System name: Risk Continuum™ (external)
 # - Internal decision grammar: Levels 1–5 (+ sublevels)
 # - Evidence-strength tags: Recommended / Consider / Pending more data
@@ -21,6 +27,8 @@
 # Notes:
 # - Keys like levels.postureLevel and levels.defaultPosture are preserved for UI/backward compatibility.
 # - UI should display these as "Level" and "Plan" as appropriate.
+# - PREVENT requires additional inputs (bmi, egfr, lipid_lowering). Until UI provides them and
+#   coefficients are loaded in PREVENT_COEFS, prevent10 will return "not calculated".
 
 import math
 from dataclasses import dataclass
@@ -32,10 +40,11 @@ SYSTEM_NAME = "Risk Continuum™"
 
 VERSION = {
     "system": SYSTEM_NAME,
-    "levels": "v2.6-risk-continuum",
+    "levels": "v2.7-risk-continuum-prevent",
     "riskSignal": "RSS v1.0",
     "riskCalc": "Pooled Cohort Equations (ACC/AHA 2013; Race other→non-Black)",
     "aspirin": "Aspirin v1.0 (CAC≥100 OR 10y risk≥10%, age 40–69, low bleed risk)",
+    "prevent": "PREVENT (AHA) base model 10y: total CVD + ASCVD (requires BMI/eGFR/lipid therapy + coefficients)",
 }
 
 # ----------------------------
@@ -174,6 +183,190 @@ def lpa_elevated(p: Patient, trace: List[Dict[str, Any]]) -> bool:
     return bool(info.get("present") and info.get("elevated"))
 
 
+# ============================================================
+# PREVENT (AHA) — optional comparator (10y total CVD + 10y ASCVD)
+# ============================================================
+
+# PREVENT coefficient bank (base model only, 10-year only)
+# Paste coefficients here when you have them (from a validated source).
+# Structure:
+# PREVENT_COEFS["10yr"]["female"]["total_cvd"] -> dict(term -> beta)
+# PREVENT_COEFS["10yr"]["female"]["ascvd"]     -> dict(term -> beta)
+# ... same for male
+PREVENT_COEFS: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {
+    "10yr": {
+        "female": {"total_cvd": {}, "ascvd": {}},
+        "male": {"total_cvd": {}, "ascvd": {}},
+    }
+}
+
+def _chol_mgdl_to_mmol(x: float) -> float:
+    # 1 mmol/L cholesterol ≈ 38.67 mg/dL
+    return float(x) / 38.67
+
+def _as01(x: Any) -> float:
+    return 1.0 if bool(x) else 0.0
+
+def _round_half_up(x: float, dp: int = 2) -> float:
+    m = 10 ** int(dp)
+    return float(math.floor(x * m + 0.5) / m)
+
+def prevent_prep_terms_base(
+    *,
+    age: float,
+    total_c_mgdl: float,
+    hdl_c_mgdl: float,
+    sbp: float,
+    dm: bool,
+    smoking: bool,
+    bmi: float,
+    egfr: float,
+    bp_tx: bool,
+    statin: bool,
+) -> Dict[str, float]:
+    """
+    Base-model term prep for PREVENT style models (10y/30y share most terms).
+    For 10y models, age_squared is omitted downstream.
+    """
+    # Centering/scaling anchors:
+    # age 55; non-HDL 3.5 mmol/L; HDL 1.3 mmol/L; SBP 130; BMI 25; eGFR 90; no DM/smoking/meds
+    age_term = (age - 55.0) / 10.0
+    age_sq = age_term ** 2
+
+    non_hdl_mmol = _chol_mgdl_to_mmol(total_c_mgdl - hdl_c_mgdl) - 3.5
+    hdl_term = (_chol_mgdl_to_mmol(hdl_c_mgdl) - 1.3) / 0.3
+
+    sbp_lt_110 = (min(sbp, 110.0) - 110.0) / 20.0
+    sbp_gte_110 = (max(sbp, 110.0) - 130.0) / 20.0
+
+    bmi_lt_30 = (min(bmi, 30.0) - 25.0) / 5.0
+    bmi_gte_30 = (max(bmi, 30.0) - 30.0) / 5.0
+
+    egfr_lt_60 = (min(egfr, 60.0) - 60.0) / -15.0
+    egfr_gte_60 = (max(egfr, 60.0) - 90.0) / -15.0
+
+    dm01 = _as01(dm)
+    smk01 = _as01(smoking)
+    bp01 = _as01(bp_tx)
+    st01 = _as01(statin)
+
+    terms = {
+        "constant": 1.0,
+        "age": age_term,
+        "age_squared": age_sq,
+
+        "non_hdl_c": non_hdl_mmol,
+        "hdl_c": hdl_term,
+
+        "sbp_lt_110": sbp_lt_110,
+        "sbp_gte_110": sbp_gte_110,
+
+        "dm": dm01,
+        "smoking": smk01,
+
+        "bmi_lt_30": bmi_lt_30,
+        "bmi_gte_30": bmi_gte_30,
+
+        "egfr_lt_60": egfr_lt_60,
+        "egfr_gte_60": egfr_gte_60,
+
+        "bp_tx": bp01,
+        "statin": st01,
+
+        # interactions
+        "bp_tx_sbp_gte_110": bp01 * sbp_gte_110,
+        "statin_non_hdl_c": st01 * non_hdl_mmol,
+
+        "age_non_hdl_c": age_term * non_hdl_mmol,
+        "age_hdl_c": age_term * hdl_term,
+        "age_sbp_gte_110": age_term * sbp_gte_110,
+        "age_dm": age_term * dm01,
+        "age_smoking": age_term * smk01,
+        "age_bmi_gte_30": age_term * bmi_gte_30,
+        "age_egfr_lt_60": age_term * egfr_lt_60,
+    }
+    return terms
+
+def prevent_apply_logistic(beta: Dict[str, float], terms: Dict[str, float], dp: int = 2) -> float:
+    """
+    log_odds = sum(beta_i * term_i), risk = exp(log_odds)/(1+exp(log_odds))
+    Returns percent.
+    """
+    log_odds = 0.0
+    for k, b in beta.items():
+        log_odds += float(b) * float(terms.get(k, 0.0))
+    r = math.exp(log_odds) / (1.0 + math.exp(log_odds))
+    return _round_half_up(r * 100.0, dp=dp)
+
+def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Optional comparator: PREVENT 10y total CVD + 10y ASCVD.
+    Requires extra inputs: bmi, egfr, lipid_lowering (statin/LLT flag).
+    """
+    req = ["age","sex","tc","hdl","sbp","bp_treated","smoking","diabetes","bmi","egfr","lipid_lowering"]
+    missing = [k for k in req if not p.has(k)]
+    if missing:
+        add_trace(trace, "PREVENT_missing_inputs", missing, "PREVENT not calculated")
+        return {
+            "total_cvd_10y_pct": None,
+            "ascvd_10y_pct": None,
+            "missing": missing,
+            "notes": "PREVENT not calculated (missing required inputs).",
+        }
+
+    age = int(p.get("age"))
+    if age < 30 or age > 79:
+        add_trace(trace, "PREVENT_age_out_of_range", age, "Validated for ages 30–79")
+        return {
+            "total_cvd_10y_pct": None,
+            "ascvd_10y_pct": None,
+            "missing": [],
+            "notes": "PREVENT validated for ages 30–79.",
+        }
+
+    sex = str(p.get("sex", "")).lower()
+    sex_key = "male" if sex in ("m","male") else "female"
+
+    terms = prevent_prep_terms_base(
+        age=float(age),
+        total_c_mgdl=float(p.get("tc")),
+        hdl_c_mgdl=float(p.get("hdl")),
+        sbp=float(p.get("sbp")),
+        dm=bool(p.get("diabetes")),
+        smoking=bool(p.get("smoking")),
+        bmi=float(p.get("bmi")),
+        egfr=float(p.get("egfr")),
+        bp_tx=bool(p.get("bp_treated")),
+        statin=bool(p.get("lipid_lowering")),
+    )
+    # 10-year models omit age_squared
+    terms.pop("age_squared", None)
+
+    coef_bank = PREVENT_COEFS.get("10yr", {}).get(sex_key, {})
+    b_total = (coef_bank.get("total_cvd") or {})
+    b_ascvd = (coef_bank.get("ascvd") or {})
+
+    if not b_total or not b_ascvd:
+        add_trace(trace, "PREVENT_coefficients_missing", sex_key, "Coefficients not loaded into PREVENT_COEFS")
+        return {
+            "total_cvd_10y_pct": None,
+            "ascvd_10y_pct": None,
+            "missing": [],
+            "notes": "PREVENT coefficients not loaded into PREVENT_COEFS.",
+        }
+
+    total_pct = prevent_apply_logistic(b_total, terms, dp=2)
+    ascvd_pct = prevent_apply_logistic(b_ascvd, terms, dp=2)
+
+    add_trace(trace, "PREVENT_calculated", {"sex": sex_key, "total": total_pct, "ascvd": ascvd_pct}, "PREVENT 10y calculated")
+    return {
+        "total_cvd_10y_pct": total_pct,
+        "ascvd_10y_pct": ascvd_pct,
+        "missing": [],
+        "notes": "PREVENT base model (10-year): total CVD and ASCVD.",
+    }
+
+
 # ----------------------------
 # CAC three-state evidence model
 # ----------------------------
@@ -241,9 +434,6 @@ def completeness(p: Patient) -> Dict[str, Any]:
     return {"pct": pct, "confidence": conf, "top_missing": missing[:2], "missing": missing}
 
 def recommendation_strength(confidence: Dict[str, Any]) -> str:
-    """
-    Evidence-strength tag used throughout Risk Continuum outputs.
-    """
     conf = (confidence or {}).get("confidence", "Low")
     if conf == "High":
         return "Recommended"
@@ -346,7 +536,6 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
 # Pooled Cohort Equations (10-year ASCVD risk)
 # ----------------------------
 def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-    # Local PCE coefficients to prevent NameError if module constant was lost during edits.
     PCE = {
         ("white", "female"): {"s0": 0.9665, "mean": -29.18,
             "ln_age": -29.799, "ln_age_sq": 4.884, "ln_tc": 13.540, "ln_age_ln_tc": -3.114,
@@ -560,9 +749,6 @@ def _has_any_data(p: Patient) -> bool:
     return bool(p.data)
 
 def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[int, List[str]]:
-    """
-    Returns (level, triggers). Function name preserved for compatibility.
-    """
     triggers: List[str] = []
 
     if evidence.get("clinical_ascvd"):
@@ -731,10 +917,6 @@ def next_actions(p: Patient, level: int, targets: Dict[str, int], evidence: Dict
 # Level labels, legend, and patient explainer
 # ----------------------------
 def posture_labels(level: int) -> str:
-    """
-    Internal Levels (1–5) are thresholds along the Risk Continuum.
-    Function name preserved for compatibility with older UI.
-    """
     labels = {
         0: "Level 0 — Not assessed (insufficient data)",
         1: "Level 1 — Minimal risk signal (no evidence of plaque with available data)",
@@ -746,9 +928,6 @@ def posture_labels(level: int) -> str:
     return labels.get(level, f"Level {level}")
 
 def levels_legend_compact() -> List[str]:
-    """
-    Compact legend intended for UI expander or report footer.
-    """
     return [
         "Level 1: minimal signal → reinforce basics, periodic reassess",
         "Level 2A: mild/isolated signal → education, complete data, lifestyle sprint",
@@ -759,15 +938,7 @@ def levels_legend_compact() -> List[str]:
         "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
     ]
 
-def level_explainer_for_patient(
-    level: int,
-    sublevel: Optional[str],
-    evidence: Dict[str, Any],
-    drivers: List[str],
-) -> str:
-    """
-    Short context-specific explanation of what the Level means.
-    """
+def level_explainer_for_patient(level: int, sublevel: Optional[str], evidence: Dict[str, Any], drivers: List[str]) -> str:
     cac_status = evidence.get("cac_status", "Unknown")
     plaque = evidence.get("plaque_present", None)
     top = "; ".join(drivers[:2]) if drivers else ""
@@ -872,24 +1043,19 @@ def explain_levels(
     legend = levels_legend_compact()
 
     return {
-        # Backward compatible keys
         "postureLevel": level,
-        "managementLevel": level,  # convenience for newer UI
+        "managementLevel": level,
         "label": posture_labels(level),
         "sublevel": sublevel,
         "meaning": meaning,
         "why": why,
-        "defaultPosture": plan,  # keep key for older UIs; this is the "Plan"
-        "recommendationStrength": strength,  # Recommended/Consider/Pending more data
-
-        # Supporting context
+        "defaultPosture": plan,
+        "recommendationStrength": strength,
         "evidence": evidence,
         "anchorsSummary": {
             "nearTerm": anchors["nearTerm"]["summary"],
             "lifetime": anchors["lifetime"]["summary"],
         },
-
-        # New additions for explainability
         "explainer": explainer,
         "legend": legend,
     }
@@ -907,6 +1073,9 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     conf = completeness(p)
     rs = risk_signal_score(p, trace)
     anchors = build_anchors(p, risk10, evidence)
+
+    # Optional PREVENT comparator (safe; may return missing/none)
+    prevent10 = prevent10_total_and_ascvd(p, trace)
 
     level, level_triggers = posture_level(p, evidence, trace)
 
@@ -939,6 +1108,10 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "levels": levels_obj,
         "riskSignal": rs,
         "pooledCohortEquations10yAscvdRisk": risk10,
+
+        # New: PREVENT (optional comparator)
+        "prevent10": prevent10,
+
         "targets": targets,
         "confidence": conf,
         "diseaseBurden": burden_str,
@@ -965,6 +1138,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     risk10 = out["pooledCohortEquations10yAscvdRisk"]
     t = out["targets"]
     conf = out["confidence"]
+    prev = out.get("prevent10", {}) or {}
 
     lines: List[str] = []
     lines.append(f"{SYSTEM_NAME} {out['version']['levels']} — Quick Reference")
@@ -987,7 +1161,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Recommendation tag: {lvl.get('recommendationStrength','—')}")
     lines.append("")
 
-    # RSS line (already includes band)
+    # RSS line
     lines.append(f"Risk Signal Score: {rs['score']}/100 ({rs['band']}) — {rs['note']}")
 
     # PCE line
@@ -1002,9 +1176,19 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         else:
             lines.append("Pooled Cohort Equations (10-year ASCVD risk): not calculated")
 
-    # One-line clarity note (kept short to avoid clutter)
+    # PREVENT line(s) — optional comparator
+    if prev.get("total_cvd_10y_pct") is not None or prev.get("ascvd_10y_pct") is not None:
+        lines.append(
+            f"PREVENT (10-year): total CVD {prev.get('total_cvd_10y_pct','—')}% / ASCVD {prev.get('ascvd_10y_pct','—')}%"
+        )
+    else:
+        if prev.get("missing"):
+            lines.append(f"PREVENT (10-year): not calculated (missing {', '.join(prev['missing'][:3])})")
+        else:
+            lines.append("PREVENT (10-year): not calculated")
+
     lines.append(
-        "Note: Risk Signal reflects biologic/plaque signal; ASCVD risk reflects 10-year event probability—"
+        "Note: Risk Signal reflects biologic/plaque signal; risk calculators estimate event probability—"
         "discordance is expected and informative."
     )
 
@@ -1038,7 +1222,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
     lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
 
-    # Optional legend (compact)
     legend = (lvl.get("legend") or [])[:7]
     if legend:
         lines.append("")
@@ -1047,3 +1230,4 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
