@@ -767,12 +767,13 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
                 st.rerun()
 
     with c2:
-        if st.button("Clear pasted text"):
+        def clear_text():
             st.session_state.smartphrase_raw = ""
             st.session_state.parsed_preview_cache = {}
             st.session_state.last_applied_msg = ""
             st.session_state.last_missing_msg = ""
-            st.rerun()
+
+        st.button("Clear pasted text", on_click=clear_text)
 
     with c3:
         st.caption("Parsed preview")
@@ -1229,4 +1230,5 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
