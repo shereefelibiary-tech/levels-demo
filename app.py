@@ -1,18 +1,19 @@
 # app.py (Risk Continuum — v2.8 clinician-clean layout)
 #
-# COMPLETE, UPDATED, "NO OVERVIEW" VERSION
-# - Tabs: Report | Details | Debug
-# - All directions/recommendations clustered together in Report
-# - Uses levels_engine v2.8 outputs
-# - Polished Clinical Report Box with real COPY button
-# - SmartPhrase ingest + Parse & Apply + explicit coverage
-# - Demo defaults, PREVENT visible, LDL-first targets, Risk Continuum visualization
+# COMPLETE, UPDATED, "NO OVERVIEW" VERSION with improvements:
+# - Input validation warnings
+# - Engine caching for speed
+# - Markdown download button
+# - Last calculation timestamp
+# - Clearer PREVENT fallback message
+# - Disabled CAC input when "No" selected
 
 import json
 import re
 import textwrap
 import html as _html
 import uuid
+from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 import levels_engine as le
@@ -795,13 +796,15 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.warning(st.session_state["last_missing_msg"])
 
 # ============================================================
-# Main Form
+# Main Form with Validation Warnings
 # ============================================================
 with st.form("risk_continuum_form"):
     st.subheader("Patient context")
     a1, a2, a3 = st.columns(3)
     with a1:
-        st.number_input("Age (years)", 0, 120, step=1, key="age_val")
+        age = st.number_input("Age (years)", 18, 120, step=1, key="age_val")
+        if age < 30 or age > 79:
+            st.warning("Age outside validated range (30–79 for PREVENT/PCE)")
         st.radio("Gender", ["F", "M"], horizontal=True, key="sex_val")
     with a2:
         race_options = ["Other (use non-African American coefficients)", "African American"]
@@ -814,7 +817,9 @@ with st.form("risk_continuum_form"):
     st.subheader("Cardiometabolic profile")
     b1, b2, b3 = st.columns(3)
     with b1:
-        st.number_input("Systolic BP (mmHg)", 0, 250, step=1, key="sbp_val")
+        sbp = st.number_input("Systolic BP (mmHg)", 50, 300, step=1, key="sbp_val")
+        if sbp < 90 or sbp > 220:
+            st.warning("SBP value looks unusual — please double-check")
         st.radio("On BP meds?", ["No", "Yes"], horizontal=True, key="bp_treated_val")
     with b2:
         st.radio("Smoking (current)", ["No", "Yes"], horizontal=True, key="smoking_val")
@@ -823,9 +828,13 @@ with st.form("risk_continuum_form"):
         a1c = st.number_input("A1c (%)", 0.0, 15.0, step=0.1, format="%.1f", key="a1c_val")
         if a1c >= 6.5:
             st.info("A1c ≥ 6.5% ⇒ Diabetes will be set to YES automatically.")
+        if a1c > 15:
+            st.warning("A1c >15% — verify value")
     b4, b5, b6 = st.columns(3)
     with b4:
-        st.number_input("BMI (kg/m²) (for PREVENT)", 0.0, 80.0, step=0.1, format="%.1f", key="bmi_val")
+        bmi = st.number_input("BMI (kg/m²) (for PREVENT)", 10.0, 80.0, step=0.1, format="%.1f", key="bmi_val")
+        if bmi < 15 or bmi > 60:
+            st.warning("BMI value looks unusual — please double-check")
     with b5:
         st.radio("On lipid-lowering therapy? (for PREVENT)", ["No", "Yes"], horizontal=True, key="lipid_lowering_val")
     with b6:
@@ -835,16 +844,24 @@ with st.form("risk_continuum_form"):
     st.subheader("Labs")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.number_input("Total cholesterol (mg/dL)", 0, 500, step=1, key="tc_val")
-        st.number_input("LDL-C (mg/dL)", 0, 400, step=1, key="ldl_val")
-        st.number_input("HDL cholesterol (mg/dL)", 0, 300, step=1, key="hdl_val")
+        tc = st.number_input("Total cholesterol (mg/dL)", 50, 500, step=1, key="tc_val")
+        if tc < 50 or tc > 400:
+            st.warning("TC value looks unusual — please double-check")
+        ldl = st.number_input("LDL-C (mg/dL)", 20, 400, step=1, key="ldl_val")
+        if ldl < 20 or ldl > 300:
+            st.warning("LDL value looks unusual — please double-check")
+        hdl = st.number_input("HDL cholesterol (mg/dL)", 20, 300, step=1, key="hdl_val")
     with c2:
-        st.number_input("ApoB (mg/dL)", 0, 300, step=1, key="apob_val")
-        st.number_input("Lp(a) value", 0, 2000, step=1, key="lpa_val")
+        apob = st.number_input("ApoB (mg/dL)", 20, 300, step=1, key="apob_val")
+        if apob < 20 or apob > 250:
+            st.warning("ApoB value looks unusual — please double-check")
+        lpa = st.number_input("Lp(a) value", 0, 2000, step=1, key="lpa_val")
         st.radio("Lp(a) unit", ["nmol/L", "mg/dL"], horizontal=True, key="lpa_unit_val")
     with c3:
-        st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, step=0.1, format="%.1f", key="hscrp_val")
-        st.number_input("eGFR (mL/min/1.73m²) (for PREVENT)", 0.0, 200.0, step=1.0, format="%.0f", key="egfr_val")
+        hscrp = st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, step=0.1, format="%.1f", key="hscrp_val")
+        egfr = st.number_input("eGFR (mL/min/1.73m²) (for PREVENT)", 0.0, 200.0, step=1.0, format="%.0f", key="egfr_val")
+        if egfr < 15 or egfr > 150:
+            st.warning("eGFR value looks unusual — please double-check")
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     st.subheader("Imaging")
@@ -890,6 +907,14 @@ with st.form("risk_continuum_form"):
 
     show_json = st.checkbox("Show JSON (debug)", value=False)
     submitted = st.form_submit_button("Run", type="primary")
+
+# ============================================================
+# Cached Engine Call
+# ============================================================
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def run_engine(data_tuple):
+    patient = Patient(dict(data_tuple))
+    return evaluate(patient)
 
 # ============================================================
 # Run & Tabs
@@ -975,8 +1000,10 @@ data = {
 }
 
 data = {k: v for k, v in data.items() if v is not None}
-patient = Patient(data)
-out = evaluate(patient)
+
+# Cached engine call
+data_tuple = tuple(sorted(data.items()))  # Make hashable for caching
+out = run_engine(data_tuple)
 
 # Quick text for debug
 note_text = scrub_terms(render_quick_text(patient, out))
@@ -1019,6 +1046,10 @@ asp_status = scrub_terms(asp.get("status", "Not assessed"))
 anchors = out.get("anchors", {}) or {}
 near_anchor = scrub_terms(anchors.get("nearTerm", {}).get("summary", "—"))
 life_anchor = scrub_terms(anchors.get("lifetime", {}).get("summary", "—"))
+
+# Show timestamp
+if submitted:
+    st.caption(f"Last calculation: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ============================================================
 # Build EMR note
@@ -1068,6 +1099,10 @@ def build_emr_note() -> str:
         lines.append(f"- Risk driver: {drivers[0]}")
     if ins.get("phenotype_label"):
         lines.append(f"- Phenotype: {scrub_terms(ins.get('phenotype_label'))}")
+    if ins.get("decision_robustness"):
+        rob = scrub_terms(ins.get("decision_robustness"))
+        rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
+        lines.append(f"Decision robustness: {rob}" + (f" — {rob_note}" if rob_note else ""))
     if ev.get("cac_status") == "Unknown":
         lines.append("- Structural status: Unknown (CAC not performed)")
     lines.append(f"- Anchors: Near-term: {near_anchor} | Lifetime: {life_anchor}")
@@ -1099,7 +1134,7 @@ with tab_report:
     )
 
     if (p_total is None and p_ascvd is None) and p_note:
-        st.caption(f"PREVENT: {p_note}")
+        st.caption(f"PREVENT not calculated yet (coefficients pending implementation). Using PCE only for now.")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1150,6 +1185,14 @@ with tab_report:
     st.caption("Click **Copy**. Then paste into your EMR note.")
     emr_copy_box("Clinical Report (EMR paste)", emr_note, height_px=520)
 
+    # Download button
+    st.download_button(
+        label="Download Report (Markdown)",
+        data=emr_note,
+        file_name="Risk_Continuum_Report.md",
+        mime="text/markdown"
+    )
+
 with tab_details:
     st.subheader("Anchors (near-term vs lifetime)")
     st.markdown(f"**Near-term anchor:** {near_anchor}")
@@ -1166,7 +1209,7 @@ with tab_details:
         st.markdown(f"**10-year total CVD:** {p_total}%")
         st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
     else:
-        st.caption(p_note or "PREVENT not calculated.")
+        st.caption(p_note or "PREVENT not calculated (coefficients pending).")
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     with st.expander("High-yield narrative (optional)", expanded=False):
