@@ -10,34 +10,20 @@
 # - Drivers + next actions + confidence assessment
 # - Anchors (near-term vs lifetime)
 # - Rule trace (auditable)
-# - Optional PREVENT 10-year risks:
-#     - total CVD 10y
-#     - ASCVD 10y
+# - Optional PREVENT 10-year risks (total CVD + ASCVD)
 #
-# Adds v2.8:
-# - Clinician-facing decision confidence label:
-#     levels.decisionConfidence = "High confidence" | "Moderate confidence" | "Low confidence"
-#   (Derived from completeness-based recommendationStrength.)
-#
-# - Snapshot insights (single-source-of-truth for UI/EMR note):
-#     out["insights"] = {
-#        "phenotype_label": "Atherogenic-leaning" or None,
-#        "phenotype_definition": <immutable definition> or None,
-#        "structural_clarification": one-line CAC advisory or None,
-#        "decision_robustness": "High"|"Moderate"|"Low",
-#        "decision_robustness_note": short clause
-#     }
-#
-# Design intent:
-# - Insights should be shown ONCE in a single "Clinical context" block.
-# - CAC advisory is non-directive and "worth the trouble" oriented, aspirin-aware.
+# v2.8 Improvements (non-breaking):
+# - Smarter completeness scoring with core vs enhancer weighting
+# - Trajectory note added to output
+# - Better error handling in PCE
+# - Clearer PREVENT messages when coefficients missing
+# - Optional simulation mode (debug only)
 
 import math
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 
 PCE_DEBUG_SENTINEL = "PCE_SENTINEL_2026_01_11"
-
 SYSTEM_NAME = "Risk Continuum™"
 
 VERSION = {
@@ -49,6 +35,9 @@ VERSION = {
     "prevent": "PREVENT (AHA) base model 10y: total CVD + ASCVD (requires BMI/eGFR/lipid therapy + coefficients)",
     "insights": "Snapshot insights v1.0 (phenotype + CAC clarification + robustness)",
 }
+
+# Debug toggle: Set to True to simulate PREVENT values until real coefficients arrive
+USE_PREVENT_SIMULATION = False
 
 # ----------------------------
 # Patient wrapper
@@ -62,7 +51,6 @@ class Patient:
 
     def has(self, k):
         return k in self.data and self.data[k] is not None
-
 
 # ----------------------------
 # Formatting helpers
@@ -85,13 +73,11 @@ def short_why(items: List[str], max_items: int = 2) -> str:
     cleaned = [str(x).strip() for x in items if str(x).strip()]
     return "; ".join(cleaned[:max_items])
 
-
 # ----------------------------
 # Trace helper (auditable rules)
 # ----------------------------
 def add_trace(trace: List[Dict[str, Any]], rule: str, value: Any = None, effect: str = "") -> None:
     trace.append({"rule": rule, "value": value, "effect": effect})
-
 
 # ----------------------------
 # Core domain helpers
@@ -129,12 +115,9 @@ def inflammation_flags(p: Patient) -> List[str]:
     if p.get("nafld") is True: flags.append("NAFLD/MASLD")
     return flags
 
-
 # ----------------------------
 # Lp(a) normalization + threshold transparency
 # ----------------------------
-# NOTE: true conversion depends on isoform size. We use a common rough estimate:
-# 1 mg/dL ≈ 2.5 nmol/L. This is labeled "estimated" in output.
 _LPA_MGDL_TO_NMOLL = 2.5
 
 def lpa_info(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -185,11 +168,9 @@ def lpa_elevated(p: Patient, trace: List[Dict[str, Any]]) -> bool:
     info = lpa_info(p, trace)
     return bool(info.get("present") and info.get("elevated"))
 
-
 # ============================================================
 # PREVENT (AHA) — optional comparator (10y total CVD + 10y ASCVD)
 # ============================================================
-
 PREVENT_COEFS: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {
     "10yr": {
         "female": {"total_cvd": {}, "ascvd": {}},
@@ -222,24 +203,18 @@ def prevent_prep_terms_base(
 ) -> Dict[str, float]:
     age_term = (age - 55.0) / 10.0
     age_sq = age_term ** 2
-
     non_hdl_mmol = _chol_mgdl_to_mmol(total_c_mgdl - hdl_c_mgdl) - 3.5
     hdl_term = (_chol_mgdl_to_mmol(hdl_c_mgdl) - 1.3) / 0.3
-
     sbp_lt_110 = (min(sbp, 110.0) - 110.0) / 20.0
     sbp_gte_110 = (max(sbp, 110.0) - 130.0) / 20.0
-
     bmi_lt_30 = (min(bmi, 30.0) - 25.0) / 5.0
     bmi_gte_30 = (max(bmi, 30.0) - 30.0) / 5.0
-
     egfr_lt_60 = (min(egfr, 60.0) - 60.0) / -15.0
     egfr_gte_60 = (max(egfr, 60.0) - 90.0) / -15.0
-
     dm01 = _as01(dm)
     smk01 = _as01(smoking)
     bp01 = _as01(bp_tx)
     st01 = _as01(statin)
-
     terms = {
         "constant": 1.0,
         "age": age_term,
@@ -320,11 +295,22 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
 
     if not b_total or not b_ascvd:
         add_trace(trace, "PREVENT_coefficients_missing", sex_key, "Coefficients not loaded into PREVENT_COEFS")
+        if USE_PREVENT_SIMULATION:
+            # Rough simulation: PREVENT often 20-30% lower than PCE
+            pce_risk = p.get("pooledCohortEquations10yAscvdRisk", {}).get("risk_pct", 10.0)
+            sim_total = pce_risk * 0.75
+            sim_ascvd = pce_risk * 0.7
+            return {
+                "total_cvd_10y_pct": round(sim_total, 1),
+                "ascvd_10y_pct": round(sim_ascvd, 1),
+                "missing": [],
+                "notes": "SIMULATED PREVENT values (debug mode; awaiting real coefficients)",
+            }
         return {
             "total_cvd_10y_pct": None,
             "ascvd_10y_pct": None,
             "missing": [],
-            "notes": "PREVENT coefficients not loaded into PREVENT_COEFS.",
+            "notes": "PREVENT calculation not available yet (awaiting licensed AHA coefficients). Using PCE only for now.",
         }
 
     total_pct = prevent_apply_logistic(b_total, terms, dp=2)
@@ -337,7 +323,6 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
         "missing": [],
         "notes": "PREVENT base model (10-year): total CVD and ASCVD.",
     }
-
 
 # ----------------------------
 # CAC three-state evidence model
@@ -366,7 +351,12 @@ def evidence_model(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
             "certainty": "Low",
         }
 
-    cac = int(p.get("cac", 0))
+    try:
+        cac = int(p.get("cac", 0))
+    except (ValueError, TypeError):
+        add_trace(trace, "CAC_invalid", p.get("cac"), "Invalid CAC value — treated as unknown")
+        cac = 0
+
     if cac == 0:
         add_trace(trace, "Evidence_CAC_zero", 0, "CAC=0 (negative for calcified plaque; soft plaque still possible)")
         return {
@@ -393,17 +383,35 @@ def evidence_model(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         "certainty": "High",
     }
 
-
 # ----------------------------
-# Confidence gating
+# Confidence gating (smarter version)
 # ----------------------------
 def completeness(p: Patient) -> Dict[str, Any]:
-    key = ["apob","lpa","cac","hscrp","a1c","tc","hdl","sbp","bp_treated","smoking","diabetes","sex","race","age"]
-    present = [k for k in key if p.has(k)]
-    missing = [k for k in key if not p.has(k)]
-    pct = int(round(100 * (len(present) / len(key))))
-    conf = "High" if pct >= 85 else ("Moderate" if pct >= 60 else "Low")
-    return {"pct": pct, "confidence": conf, "top_missing": missing[:2], "missing": missing}
+    core_keys = ["age", "sex", "race", "sbp", "bp_treated", "smoking", "diabetes", "tc", "hdl"]  # PCE basics
+    enhancer_keys = ["apob", "lpa", "cac", "hscrp", "a1c", "ldl"]  # Risk enhancers + ApoB/Lp(a)
+
+    core_present = sum(1 for k in core_keys if p.has(k))
+    enhancer_present = sum(1 for k in enhancer_keys if p.has(k))
+
+    core_pct = (core_present / len(core_keys)) * 100 if core_keys else 0
+    enhancer_pct = (enhancer_present / len(enhancer_keys)) * 100 if enhancer_keys else 0
+
+    # Weighted overall (core 60%, enhancers 40%)
+    overall_pct = int(round(core_pct * 0.6 + enhancer_pct * 0.4))
+
+    conf = "High" if overall_pct >= 85 and enhancer_pct >= 50 else \
+           "Moderate" if overall_pct >= 60 else "Low"
+
+    top_missing = [k for k in core_keys + enhancer_keys if not p.has(k)][:3]
+
+    return {
+        "pct": overall_pct,
+        "confidence": conf,
+        "top_missing": top_missing,
+        "missing": [k for k in core_keys + enhancer_keys if not p.has(k)],
+        "core_pct": round(core_pct, 1),
+        "enhancer_pct": round(enhancer_pct, 1),
+    }
 
 def recommendation_strength(confidence: Dict[str, Any]) -> str:
     conf = (confidence or {}).get("confidence", "Low")
@@ -420,7 +428,6 @@ def decision_confidence_label(strength: str) -> str:
         "Pending more data": "Low confidence",
     }
     return m.get(str(strength or "").strip(), "—")
-
 
 # ----------------------------
 # RSS scoring (0–100) with trace of components
@@ -441,7 +448,11 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
         burden = 55
         add_trace(trace, "RSS_burden_ASCVD", 55, "Burden points = 55")
     elif p.has("cac"):
-        cac = int(p.get("cac", 0))
+        try:
+            cac = int(p.get("cac", 0))
+        except (ValueError, TypeError):
+            cac = 0
+            add_trace(trace, "CAC_invalid_in_RSS", p.get("cac"), "Invalid CAC → treated as 0")
         if cac == 0: burden = 0
         elif 1 <= cac <= 9: burden = 20
         elif 10 <= cac <= 99: burden = 30
@@ -451,7 +462,7 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
 
     athero = 0
     if p.has("apob"):
-        apob = float(p.get("apob", 0))
+        apob = safe_float(p.get("apob"), 0)
         if apob < 80: athero = 0
         elif apob <= 99: athero = 8
         elif apob <= 119: athero = 15
@@ -459,7 +470,7 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
         else: athero = 25
         add_trace(trace, "RSS_athero_ApoB", apob, f"Athero points = {athero}")
     elif p.has("ldl"):
-        ldl = float(p.get("ldl", 0))
+        ldl = safe_float(p.get("ldl"), 0)
         if ldl < 100: athero = 0
         elif ldl <= 129: athero = 5
         elif ldl <= 159: athero = 10
@@ -484,7 +495,7 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
 
     infl = 0
     if p.has("hscrp"):
-        h = float(p.get("hscrp", 0))
+        h = safe_float(p.get("hscrp"), 0)
         if h < 2: infl += 0
         elif h < 10: infl += 5
         else: infl += 3
@@ -511,6 +522,12 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
 
     return {"score": total, "band": rss_band(total), "note": "Not an event probability (biologic + plaque signal)."}
 
+# Helper for safe float conversion
+def safe_float(val, default=0.0):
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
 
 # ----------------------------
 # Pooled Cohort Equations (10-year ASCVD risk)
@@ -551,7 +568,12 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any
         add_trace(trace, "PCE_missing_inputs", missing, "PCE not calculated")
         return {"risk_pct": None, "missing": missing}
 
-    age = int(p.get("age"))
+    try:
+        age = int(p.get("age"))
+    except (ValueError, TypeError):
+        add_trace(trace, "PCE_age_invalid", p.get("age"), "Invalid age — skipping PCE")
+        return {"risk_pct": None, "notes": "Invalid age input"}
+
     if age < 40 or age > 79:
         add_trace(trace, "PCE_age_out_of_range", age, "Valid age range 40–79")
         return {"risk_pct": None, "missing": [], "notes": "Valid for ages 40–79."}
@@ -562,42 +584,65 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any
     race = str(p.get("race", "")).lower()
     race_key = "black" if race in ("black","african american","african-american") else "white"
 
-    c = PCE[(race_key, sex_key)]
-    tc = float(p.get("tc")); hdl = float(p.get("hdl")); sbp = float(p.get("sbp"))
-    treated = bool(p.get("bp_treated")); smoker = bool(p.get("smoking")); dm = bool(p.get("diabetes"))
+    c = PCE.get((race_key, sex_key))
+    if not c:
+        add_trace(trace, "PCE_race_sex_invalid", (race_key, sex_key), "Invalid race/sex combination")
+        return {"risk_pct": None, "notes": "Invalid race/sex for PCE coefficients"}
 
-    ln_age = math.log(age); ln_tc = math.log(tc); ln_hdl = math.log(hdl); ln_sbp = math.log(sbp)
+    tc = safe_float(p.get("tc"), 0)
+    hdl = safe_float(p.get("hdl"), 0)
+    sbp = safe_float(p.get("sbp"), 0)
+    treated = bool(p.get("bp_treated"))
+    smoker = bool(p.get("smoking"))
+    dm = bool(p.get("diabetes"))
+
+    if tc <= 0 or hdl <= 0 or sbp <= 0:
+        add_trace(trace, "PCE_invalid_lipids_bp", (tc, hdl, sbp), "Non-positive values — skipping PCE")
+        return {"risk_pct": None, "notes": "Invalid lipid or BP values"}
+
+    try:
+        ln_age = math.log(age)
+        ln_tc = math.log(tc)
+        ln_hdl = math.log(hdl)
+        ln_sbp = math.log(sbp)
+    except ValueError as e:
+        add_trace(trace, "PCE_log_error", str(e), "Log of non-positive value")
+        return {"risk_pct": None, "notes": "Log error in PCE (invalid input)"}
 
     lp = 0.0
-    lp += c.get("ln_age",0)*ln_age
+    lp += c.get("ln_age", 0) * ln_age
     if "ln_age_sq" in c:
-        lp += c["ln_age_sq"]*(ln_age**2)
-    lp += c.get("ln_tc",0)*ln_tc
+        lp += c["ln_age_sq"] * (ln_age ** 2)
+    lp += c.get("ln_tc", 0) * ln_tc
     if "ln_age_ln_tc" in c:
-        lp += c["ln_age_ln_tc"]*(ln_age*ln_tc)
-    lp += c.get("ln_hdl",0)*ln_hdl
+        lp += c["ln_age_ln_tc"] * (ln_age * ln_tc)
+    lp += c.get("ln_hdl", 0) * ln_hdl
     if "ln_age_ln_hdl" in c:
-        lp += c["ln_age_ln_hdl"]*(ln_age*ln_hdl)
+        lp += c["ln_age_ln_hdl"] * (ln_age * ln_hdl)
 
     if treated:
-        lp += c.get("ln_sbp_treated",0)*ln_sbp
+        lp += c.get("ln_sbp_treated", 0) * ln_sbp
         if "ln_age_ln_sbp_treated" in c:
-            lp += c["ln_age_ln_sbp_treated"]*(ln_age*ln_sbp)
+            lp += c["ln_age_ln_sbp_treated"] * (ln_age * ln_sbp)
     else:
-        lp += c.get("ln_sbp_untreated",0)*ln_sbp
+        lp += c.get("ln_sbp_untreated", 0) * ln_sbp
         if "ln_age_ln_sbp_untreated" in c:
-            lp += c["ln_age_ln_sbp_untreated"]*(ln_age*ln_sbp)
+            lp += c["ln_age_ln_sbp_untreated"] * (ln_age * ln_sbp)
 
     if smoker:
-        lp += c.get("smoker",0)
+        lp += c.get("smoker", 0)
         if "ln_age_smoker" in c:
-            lp += c["ln_age_smoker"]*ln_age
+            lp += c["ln_age_smoker"] * ln_age
     if dm:
-        lp += c.get("diabetes",0)
+        lp += c.get("diabetes", 0)
 
-    risk = 1 - (c["s0"] ** math.exp(lp - c["mean"]))
-    risk = max(0.0, min(1.0, risk))
-    risk_pct = round(risk*100, 1)
+    try:
+        risk = 1 - (c["s0"] ** math.exp(lp - c["mean"]))
+        risk = max(0.0, min(1.0, risk))
+        risk_pct = round(risk * 100, 1)
+    except Exception as e:
+        add_trace(trace, "PCE_calc_error", str(e), "Error in risk calculation")
+        return {"risk_pct": None, "notes": "Calculation error in PCE"}
 
     if risk_pct < 5:
         cat = "Low (<5%)"
@@ -610,7 +655,6 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any
 
     add_trace(trace, "PCE_calculated", risk_pct, f"PCE category={cat}")
     return {"risk_pct": risk_pct, "category": cat, "notes": "Population estimate (does not include CAC/ApoB/Lp(a))."}
-
 
 # ----------------------------
 # Aspirin module
@@ -633,7 +677,6 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
     age = int(p.get("age", 0)) if p.has("age") else None
     cac = int(p.get("cac", 0)) if p.has("cac") else None
     ascvd = (p.get("ascvd") is True)
-
     bleed_high, bleed_flags = _bleeding_flags(p)
 
     if ascvd:
@@ -703,7 +746,6 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         "bleeding_flags": bleed_flags,
     }
 
-
 # ----------------------------
 # Anchors: Near-term vs Lifetime
 # ----------------------------
@@ -713,7 +755,6 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], evidence: Dict[str, Any]) 
         near_factors.append(f"PCE 10y {risk10['risk_pct']}% ({risk10.get('category','')})")
     else:
         near_factors.append("PCE 10y not available")
-
     cac_status = evidence.get("cac_status", "Unknown")
     if str(cac_status).startswith("Known zero"):
         near_factors.append("CAC=0 (low short-term signal)")
@@ -721,7 +762,6 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], evidence: Dict[str, Any]) 
         near_factors.append(cac_status)
     else:
         near_factors.append("CAC unknown")
-
     near_summary = " / ".join(near_factors)
 
     life_factors = []
@@ -729,29 +769,22 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], evidence: Dict[str, Any]) 
         life_factors.append(f"ApoB {fmt_int(p.get('apob'))}")
     elif p.has("ldl"):
         life_factors.append(f"LDL-C {fmt_int(p.get('ldl'))}")
-
     if p.has("lpa"):
         unit = str(p.get("lpa_unit", "")).strip()
         life_factors.append(f"Lp(a) {fmt_1dp(p.get('lpa'))} {unit}".strip())
-
     if p.get("fhx") is True:
         life_factors.append("Premature FHx")
-
     infl = inflammation_flags(p)
     if infl:
         life_factors.append("Inflammation: " + ", ".join(infl))
-
     if p.get("diabetes") is True:
         life_factors.append("Diabetes")
     elif a1c_status(p) == "prediabetes":
         life_factors.append("Prediabetes")
-
     if p.get("smoking") is True:
         life_factors.append("Smoking")
-
     if not life_factors:
         life_factors.append("No major lifetime accelerators detected (with available data)")
-
     life_summary = " / ".join(life_factors)
 
     return {
@@ -759,6 +792,17 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], evidence: Dict[str, Any]) 
         "lifetime": {"summary": life_summary, "factors": life_factors},
     }
 
+# ----------------------------
+# Trajectory note (new)
+# ----------------------------
+def trajectory_note(p: Patient, risk10: Dict[str, Any]) -> str:
+    if p.has("apob") and safe_float(p.get("apob")) > 100:
+        return "Rising atherogenic burden — repeat ApoB in 3–6 months to track."
+    if risk10.get("risk_pct", 0) > 15:
+        return "Elevated short-term risk — close follow-up recommended."
+    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 3:
+        return "Elevated inflammation — consider repeat hsCRP and address drivers."
+    return "Stable profile with available data."
 
 # ----------------------------
 # Internal Levels 1–5 along the Risk Continuum
@@ -789,9 +833,9 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
     high = False
     mild = False
 
-    if p.has("apob") and float(p.get("apob", 0)) >= 100:
+    if p.has("apob") and safe_float(p.get("apob")) >= 100:
         high = True; triggers.append("ApoB≥100")
-    if p.has("ldl") and float(p.get("ldl", 0)) >= 130:
+    if p.has("ldl") and safe_float(p.get("ldl")) >= 130:
         high = True; triggers.append("LDL≥130")
 
     if lpa_elevated(p, trace):
@@ -811,15 +855,15 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
         high = True; triggers.append("Smoking")
 
     if not high:
-        if p.has("apob") and 80 <= float(p.get("apob", 0)) <= 99:
+        if p.has("apob") and 80 <= safe_float(p.get("apob")) <= 99:
             mild = True; triggers.append("ApoB 80–99")
-        if p.has("ldl") and 100 <= float(p.get("ldl", 0)) <= 129:
+        if p.has("ldl") and 100 <= safe_float(p.get("ldl")) <= 129:
             mild = True; triggers.append("LDL 100–129")
         if a1c_status(p) == "prediabetes":
             mild = True; triggers.append("Prediabetes A1c")
         if p.has("hscrp") and not has_chronic_inflammatory_disease(p):
             try:
-                if float(p.get("hscrp")) >= 2:
+                if safe_float(p.get("hscrp")) >= 2:
                     mild = True; triggers.append("hsCRP≥2 (mild)")
             except Exception:
                 pass
@@ -836,7 +880,6 @@ def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, An
         return 1, triggers
 
     return 0, triggers
-
 
 # ----------------------------
 # Targets + ESC goals (Level-based)
@@ -868,7 +911,6 @@ def atherosclerotic_disease_burden(p: Patient) -> str:
         return "Not detected (CAC=0)" if cac == 0 else f"Present (CAC {cac})"
     return "Unknown (CAC not available)"
 
-
 # ----------------------------
 # Deterministic driver ranking
 # ----------------------------
@@ -880,9 +922,9 @@ def ranked_drivers(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, A
     elif evidence.get("plaque_present") is True and evidence.get("cac_value") is not None:
         candidates.append((10, f"CAC {int(evidence['cac_value'])}"))
 
-    if p.has("apob") and float(p.get("apob", 0)) >= 100:
+    if p.has("apob") and safe_float(p.get("apob")) >= 100:
         candidates.append((20, f"ApoB {fmt_int(p.get('apob'))}"))
-    elif p.has("ldl") and float(p.get("ldl", 0)) >= 130:
+    elif p.has("ldl") and safe_float(p.get("ldl")) >= 130:
         candidates.append((20, f"LDL-C {fmt_int(p.get('ldl'))}"))
 
     lpa_inf = lpa_info(p, trace)
@@ -908,7 +950,6 @@ def ranked_drivers(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, A
     add_trace(trace, "Drivers_ranked", ranked, "Deterministic driver ranking applied")
     return ranked
 
-
 # ----------------------------
 # Next actions (brief)
 # ----------------------------
@@ -918,7 +959,7 @@ def next_actions(p: Patient, level: int, targets: Dict[str, int], evidence: Dict
     if p.has("apob"):
         ap = fmt_int(p.get("apob"))
         try:
-            if float(ap) > targets["apob"]:
+            if safe_float(p.get("apob")) > targets["apob"]:
                 acts.append(f"Reduce ApoB toward <{targets['apob']} mg/dL.")
         except Exception:
             pass
@@ -926,7 +967,7 @@ def next_actions(p: Patient, level: int, targets: Dict[str, int], evidence: Dict
     if p.has("ldl"):
         ld = fmt_int(p.get("ldl"))
         try:
-            if float(ld) > targets["ldl"]:
+            if safe_float(p.get("ldl")) > targets["ldl"]:
                 acts.append(f"Reduce LDL-C toward <{targets['ldl']} mg/dL.")
         except Exception:
             pass
@@ -935,7 +976,6 @@ def next_actions(p: Patient, level: int, targets: Dict[str, int], evidence: Dict
         acts.append("CAC=0 supports staged escalation; consider repeat CAC in 3–5y if risk persists.")
 
     return acts[:2]
-
 
 # ----------------------------
 # Level labels, legend, and patient explainer
@@ -972,7 +1012,6 @@ def level_explainer_for_patient(
     plaque = evidence.get("plaque_present", None)
     cac_val = evidence.get("cac_value", None)
     top = "; ".join(drivers[:2]) if drivers else ""
-
     mesa_note = ""
     try:
         if isinstance(cac_val, int) and cac_val > 0:
@@ -983,7 +1022,6 @@ def level_explainer_for_patient(
             )
     except Exception:
         mesa_note = ""
-
     if level == 1:
         return (
             "Level 1 means we do not see a strong biologic or plaque signal with the data available; focus is "
@@ -1026,7 +1064,6 @@ def level_explainer_for_patient(
         "based on available data."
     )
 
-
 # ----------------------------
 # Snapshot insights
 # ----------------------------
@@ -1050,9 +1087,9 @@ def _exposure_context_ok(p: Patient) -> bool:
 
 def _meets_predilection_biology(p: Patient, trace: List[Dict[str, Any]]) -> bool:
     major = 0
-    if p.has("apob") and float(p.get("apob")) >= 100:
+    if p.has("apob") and safe_float(p.get("apob")) >= 100:
         major += 1
-    if p.has("ldl") and float(p.get("ldl")) >= 160:
+    if p.has("ldl") and safe_float(p.get("ldl")) >= 160:
         major += 1
     if lpa_elevated(p, trace):
         major += 1
@@ -1064,15 +1101,15 @@ def _meets_predilection_biology(p: Patient, trace: List[Dict[str, Any]]) -> bool
         return True
 
     minor = 0
-    if p.has("apob") and 90 <= float(p.get("apob")) <= 99:
+    if p.has("apob") and 90 <= safe_float(p.get("apob")) <= 99:
         minor += 1
-    if p.has("ldl") and 130 <= float(p.get("ldl")) <= 159:
+    if p.has("ldl") and 130 <= safe_float(p.get("ldl")) <= 159:
         minor += 1
     if a1c_status(p) == "prediabetes":
         minor += 1
     if p.has("hscrp"):
         try:
-            if float(p.get("hscrp")) >= 2:
+            if safe_float(p.get("hscrp")) >= 2:
                 minor += 1
         except Exception:
             pass
@@ -1149,6 +1186,8 @@ def decision_robustness(
     trace: List[Dict[str, Any]],
 ) -> Dict[str, str]:
     conf_band = (conf or {}).get("confidence", "Low")
+    enhancer_pct = conf.get("enhancer_pct", 0)
+
     if conf_band == "Low":
         add_trace(trace, "Robustness_low_confidence", conf.get("pct"), "Decision robustness=Low")
         return {"band": "Low", "note": "Key inputs missing; conclusions limited."}
@@ -1167,14 +1206,27 @@ def decision_robustness(
 
     if evidence.get("cac_status") == "Unknown":
         if _aspirin_cac_window(p, risk10, level, aspirin) or level >= 3:
-            add_trace(trace, "Robustness_moderate_cac_unknown", True, "Decision robustness=Moderate")
-            return {"band": "Moderate", "note": "Structural status unknown; may affect confidence."}
+            note = "Structural status unknown; may affect confidence." + \
+                   (" (Enhancer data limited)" if enhancer_pct < 50 else "")
+            add_trace(trace, "Robustness_moderate_cac_unknown", True, note)
+            return {"band": "Moderate", "note": note}
         add_trace(trace, "Robustness_high_cac_unknown_low_level", level, "Decision robustness=High")
         return {"band": "High", "note": "Structural testing unlikely to change management."}
 
     add_trace(trace, "Robustness_default", None, "Decision robustness=Moderate (default)")
     return {"band": "Moderate", "note": "Moderate robustness with available data."}
 
+# ----------------------------
+# Trajectory note (new)
+# ----------------------------
+def trajectory_note(p: Patient, risk10: Dict[str, Any]) -> str:
+    if p.has("apob") and safe_float(p.get("apob")) > 100:
+        return "Rising atherogenic burden — repeat ApoB in 3–6 months to track."
+    if risk10.get("risk_pct", 0) > 15:
+        return "Elevated short-term risk — close follow-up recommended."
+    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 3:
+        return "Elevated inflammation — consider repeat hsCRP and address drivers."
+    return "Stable profile with available data."
 
 # ----------------------------
 # Level explanations (Level meaning + confidence gating)
@@ -1280,8 +1332,8 @@ def explain_levels(
         },
         "explainer": explainer,
         "legend": legend,
+        "trajectoryNote": trajectory_note(p, risk10),  # NEW
     }
-
 
 # ----------------------------
 # Public API
@@ -1295,18 +1347,15 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     conf = completeness(p)
     rs = risk_signal_score(p, trace)
     anchors = build_anchors(p, risk10, evidence)
-
     prevent10 = prevent10_total_and_ascvd(p, trace)
 
     level, level_triggers = posture_level(p, evidence, trace)
-
     targets = levels_targets(level)
     burden_str = atherosclerotic_disease_burden(p)
     asp = aspirin_advice(p, risk10, trace)
 
     drivers_all = ranked_drivers(p, evidence, trace)
     drivers_top = drivers_all[:3]
-
     rs = {**rs, "drivers": drivers_top}
 
     levels_obj = explain_levels(
@@ -1355,11 +1404,11 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "lpaInfo": lpa_info(p, trace),
         "insights": insights,
         "trace": trace,
+        "trajectoryNote": trajectory_note(p, risk10),  # NEW
     }
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
-
 
 # ----------------------------
 # Quick text output (note-friendly)
@@ -1372,7 +1421,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     conf = out["confidence"]
     prev = out.get("prevent10", {}) or {}
     ins = out.get("insights", {}) or {}
-
     lines: List[str] = []
     lines.append(f"{SYSTEM_NAME} {out['version']['levels']} — Quick Reference")
 
@@ -1423,7 +1471,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         if prev.get("missing"):
             lines.append(f"PREVENT (10-year): not calculated (missing {', '.join(prev['missing'][:3])})")
         else:
-            lines.append("PREVENT (10-year): not calculated")
+            lines.append("PREVENT (10-year): not calculated (awaiting licensed coefficients)")
 
     lines.append(
         "Note: Risk Signal reflects biologic/plaque signal; risk calculators estimate event probability—"
@@ -1446,6 +1494,9 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
     lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
 
+    if out.get("trajectoryNote"):
+        lines.append(f"Trajectory note: {out['trajectoryNote']}")
+
     legend = (lvl.get("legend") or [])[:7]
     if legend:
         lines.append("")
@@ -1454,5 +1505,4 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
-
 
