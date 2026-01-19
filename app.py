@@ -221,7 +221,7 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
     return textwrap.dedent(html).strip()
 
 # ============================================================
-# Helpers (coerce, etc.) — kept as-is
+# Helpers
 # ============================================================
 FHX_OPTIONS = [
     "None / Unknown",
@@ -307,6 +307,23 @@ def parse_inflammatory_flags_from_text(txt: str) -> dict:
         if has_yes(term):
             flags[key] = True
     return flags
+
+def diabetes_negation_guard(txt: str):
+    if not txt:
+        return None
+    t = txt.lower()
+    if re.search(r"\bdiabetic\s*:\s*(no|false)\b", t):
+        return False
+    if re.search(r"\bdiabetic\s*:\s*(yes|true)\b", t):
+        return True
+    if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
+        return False
+    if re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
+        if not re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
+            if re.search(r"\bdiabetes\s*mellitus\s*:\s*\{yes/no:\d+\}\b", t):
+                return None
+            return True
+    return None
 
 def pick_dual_targets_ldl_first(out: dict, patient_data: dict) -> dict:
     targets = out.get("targets", {}) or {}
@@ -403,6 +420,78 @@ def emr_copy_box(title: str, text: str, height_px: int = 440):
     )
 
 # ============================================================
+# High-yield narrative
+# ============================================================
+def render_high_yield_report(out: dict) -> str:
+    lvl = out.get("levels", {}) or {}
+    rs = out.get("riskSignal", {}) or {}
+    risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
+    targets = out.get("targets", {}) or {}
+    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+    drivers = scrub_list(out.get("drivers", []) or [])
+    next_actions = scrub_list(out.get("nextActions", []) or [])
+    asp = out.get("aspirin", {}) or {}
+    ins = out.get("insights", {}) or {}
+    prevent10 = out.get("prevent10", {}) or {}
+    p_total = prevent10.get("total_cvd_10y_pct")
+    p_ascvd = prevent10.get("ascvd_10y_pct")
+    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
+    level = max(1, min(5, level))
+    sub = lvl.get("sublevel")
+    title = f"{SYSTEM_NAME} — Level {level}: {LEVEL_NAMES.get(level,'—')}" + (f" ({sub})" if sub else "")
+    risk_pct = risk10.get("risk_pct")
+    risk_line = f"{risk_pct}%" if risk_pct is not None else "—"
+    risk_cat = risk10.get("category") or ""
+    evidence_line = scrub_terms(ev.get("cac_status") or out.get("diseaseBurden") or "—")
+    burden_line = scrub_terms(ev.get("burden_band") or "—")
+    decision_conf = scrub_terms(lvl.get("decisionConfidence") or "—")
+    rec_tag = scrub_terms(lvl.get("recommendationStrength") or "—")
+    explainer = scrub_terms(lvl.get("explainer") or "")
+    meaning = scrub_terms(lvl.get("meaning") or "")
+    html = []
+    html.append('<div class="block">')
+    html.append(f'<div style="font-weight:900;font-size:1.05rem;margin-bottom:6px;">{title}</div>')
+    html.append('<div class="block-title">Summary</div>')
+    html.append(f"<div class='kvline'>{meaning or '—'}</div>")
+    if explainer:
+        html.append(f"<div class='kvline'><b>Level explainer:</b> {explainer}</div>")
+    html.append(f"<div class='kvline'><b>Decision confidence:</b> {decision_conf}</div>")
+    html.append(f"<div class='kvline'><b>Engine tag (debug):</b> {rec_tag}</div>")
+    html.append('<div class="hr"></div>')
+    html.append('<div class="block-title">Key metrics</div>')
+    html.append(f"<div class='kvline'><b>RSS:</b> {rs.get('score','—')}/100 ({rs.get('band','—')})</div>")
+    html.append(f"<div class='kvline'><b>PCE 10y:</b> {risk_line} {f'({risk_cat})' if risk_cat else ''}</div>")
+    html.append(f"<div class='kvline'><b>PREVENT 10y:</b> total CVD {p_total if p_total is not None else '—'} / ASCVD {p_ascvd if p_ascvd is not None else '—'}</div>")
+    html.append(f"<div class='kvline'><b>Evidence:</b> {evidence_line}</div>")
+    html.append(f"<div class='kvline'><b>Burden:</b> {burden_line}</div>")
+    html.append('<div class="hr"></div>')
+    html.append('<div class="block-title">Plan & actions</div>')
+    plan = scrub_terms(re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", str(lvl.get("defaultPosture",""))).strip())
+    html.append(f"<div class='kvline'><b>Plan:</b> {plan or '—'}</div>")
+    if next_actions:
+        html.append("<div class='kvline'><b>Next steps:</b></div>")
+        html.append("<div class='kvline'>" + "<br>".join([f"• {a}" for a in next_actions[:3]]) + "</div>")
+    html.append(f"<div class='kvline'><b>Aspirin:</b> {scrub_terms(asp.get('status','—'))}</div>")
+    if ins.get("structural_clarification"):
+        html.append(f"<div class='kvline'><span class='muted'>{scrub_terms(ins.get('structural_clarification'))}</span></div>")
+    html.append('<div class="hr"></div>')
+    html.append('<div class="block-title">Clinical context</div>')
+    if drivers:
+        html.append(f"<div class='kvline'><b>Risk driver:</b> {drivers[0]}</div>")
+    if ins.get("phenotype_label"):
+        html.append(f"<div class='kvline'><b>Phenotype:</b> {scrub_terms(ins.get('phenotype_label'))}</div>")
+    if ins.get("decision_robustness"):
+        html.append(
+            f"<div class='kvline'><b>Decision robustness:</b> {scrub_terms(ins.get('decision_robustness'))}"
+            + (f" — {scrub_terms(ins.get('decision_robustness_note',''))}" if ins.get("decision_robustness_note") else "")
+            + "</div>"
+        )
+    if ev.get("cac_status") == "Unknown":
+        html.append("<div class='kvline'><b>Structural status:</b> Unknown (CAC not performed)</div>")
+    html.append("</div>")
+    return "\n".join(html)
+
+# ============================================================
 # Parse & Apply Helpers
 # ============================================================
 TARGET_PARSE_FIELDS = [
@@ -422,41 +511,168 @@ TARGET_PARSE_FIELDS = [
     ("egfr", "eGFR (PREVENT)"),
 ]
 
+def apply_parsed_to_session(parsed: dict, raw_txt: str):
+    applied, missing = [], []
+    def apply_num(src_key, state_key, coerce_fn, label, fallback_val=None):
+        nonlocal applied, missing
+        v = parsed.get(src_key)
+        v2 = coerce_fn(v)
+        if v2 is None:
+            if fallback_val is not None:
+                st.session_state[state_key] = fallback_val
+            missing.append(label)
+            return
+        st.session_state[state_key] = v2
+        applied.append(label)
+
+    # Core numerics
+    apply_num("age", "age_val", coerce_int, "Age")
+    apply_num("sbp", "sbp_val", coerce_int, "Systolic BP")
+    apply_num("tc", "tc_val", coerce_int, "Total Cholesterol")
+    apply_num("hdl", "hdl_val", coerce_int, "HDL")
+    apply_num("ldl", "ldl_val", coerce_int, "LDL")
+    apply_num("apob", "apob_val", coerce_int, "ApoB")
+
+    # Lp(a)
+    lpa_v = coerce_float(parsed.get("lpa"))
+    if lpa_v is not None:
+        st.session_state["lpa_val"] = int(lpa_v)
+        applied.append("Lp(a)")
+    else:
+        missing.append("Lp(a)")
+
+    # Sex
+    sex = parsed.get("sex")
+    if sex in ("F", "M"):
+        st.session_state["sex_val"] = sex
+        applied.append("Gender")
+    else:
+        missing.append("Gender")
+
+    # Lp(a) unit
+    if parsed.get("lpa_unit") in ("nmol/L", "mg/dL"):
+        st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
+        applied.append("Lp(a) unit")
+    else:
+        missing.append("Lp(a) unit")
+
+    # A1c
+    a1c_v = coerce_float(parsed.get("a1c"))
+    if a1c_v is not None:
+        st.session_state["a1c_val"] = float(a1c_v)
+        applied.append("A1c")
+    else:
+        missing.append("A1c")
+
+    # Smoking
+    if parsed.get("smoker") is not None:
+        st.session_state["smoking_val"] = "Yes" if bool(parsed["smoker"]) else "No"
+        applied.append("Smoking")
+
+    # Diabetes (trust parser first, then fallback to negation guard)
+    diabetes_parsed = parsed.get("diabetes")
+    if diabetes_parsed is not None:
+        st.session_state["diabetes_choice_val"] = "Yes" if bool(diabetes_parsed) else "No"
+        applied.append("Diabetes")
+    else:
+        # Fallback to negation guard if parser didn't find explicit flag
+        diabetes_guard = diabetes_negation_guard(raw_txt)
+        if diabetes_guard is not None:
+            st.session_state["diabetes_choice_val"] = "Yes" if diabetes_guard else "No"
+            applied.append("Diabetes (from negation guard)")
+        else:
+            missing.append("Diabetes")
+
+    # BP treated
+    if parsed.get("bpTreated") is not None:
+        st.session_state["bp_treated_val"] = "Yes" if bool(parsed["bpTreated"]) else "No"
+        applied.append("BP meds")
+    else:
+        missing.append("BP meds")
+
+    # Race
+    if parsed.get("africanAmerican") is not None:
+        st.session_state["race_val"] = (
+            "African American" if bool(parsed["africanAmerican"]) else "Other (use non-African American coefficients)"
+        )
+        applied.append("Race")
+
+    # Family history
+    fhx_txt = parsed.get("fhx_text")
+    if fhx_txt:
+        st.session_state["fhx_choice_val"] = fhx_txt
+        applied.append("Premature family history")
+    else:
+        missing.append("Premature family history")
+
+    # CAC
+    if parsed.get("cac_not_done") is True:
+        st.session_state["cac_known_val"] = "No"
+        st.session_state["cac_val"] = 0
+        applied.append("Calcium score (not done)")
+    else:
+        cac_v = coerce_int(parsed.get("cac"))
+        if cac_v is not None:
+            st.session_state["cac_known_val"] = "Yes"
+            st.session_state["cac_val"] = int(cac_v)
+            applied.append("Calcium score")
+        else:
+            st.session_state["cac_known_val"] = "No"
+            st.session_state["cac_val"] = 0
+            missing.append("Calcium score")
+
+    # PREVENT fields
+    if parsed.get("bmi") is not None:
+        try:
+            st.session_state["bmi_val"] = float(parsed["bmi"])
+            applied.append("BMI")
+        except Exception:
+            pass
+    if parsed.get("egfr") is not None:
+        try:
+            st.session_state["egfr_val"] = float(parsed["egfr"])
+            applied.append("eGFR")
+        except Exception:
+            pass
+    if parsed.get("lipidLowering") is not None:
+        st.session_state["lipid_lowering_val"] = "Yes" if bool(parsed["lipidLowering"]) else "No"
+        applied.append("Lipid therapy")
+
+    # hsCRP + inflammatory flags
+    h = parse_hscrp_from_text(raw_txt)
+    if h is not None:
+        st.session_state["hscrp_val"] = float(h)
+        applied.append("hsCRP")
+    infl = parse_inflammatory_flags_from_text(raw_txt)
+    for k, v in infl.items():
+        st.session_state[f"infl_{k}_val"] = bool(v)
+        applied.append(k.upper())
+
+    # De-dupe missing
+    missing = list(dict.fromkeys(missing))
+    return applied, missing
+
 # ============================================================
-# Session Defaults
+# Session Defaults & Demo
 # ============================================================
 def reset_fields():
-    st.session_state["age_val"] = 0
-    st.session_state["sex_val"] = "F"
-    st.session_state["race_val"] = "Other (use non-African American coefficients)"
-    st.session_state["ascvd_val"] = "No"
-    st.session_state["fhx_choice_val"] = "None / Unknown"
-    st.session_state["sbp_val"] = 0
-    st.session_state["bp_treated_val"] = "No"
-    st.session_state["smoking_val"] = "No"
-    st.session_state["diabetes_choice_val"] = "No"
-    st.session_state["a1c_val"] = 0.0
-    st.session_state["tc_val"] = 0
-    st.session_state["ldl_val"] = 0
-    st.session_state["hdl_val"] = 0
-    st.session_state["apob_val"] = 0
-    st.session_state["lpa_val"] = 0
-    st.session_state["lpa_unit_val"] = "nmol/L"
-    st.session_state["hscrp_val"] = 0.0
-    st.session_state["cac_known_val"] = "No"
-    st.session_state["cac_val"] = 0
-    st.session_state["bmi_val"] = 0.0
-    st.session_state["egfr_val"] = 0.0
-    st.session_state["lipid_lowering_val"] = "No"
+    defaults = {
+        "age_val": 0, "sex_val": "F", "race_val": "Other (use non-African American coefficients)",
+        "ascvd_val": "No", "fhx_choice_val": "None / Unknown", "sbp_val": 0,
+        "bp_treated_val": "No", "smoking_val": "No", "diabetes_choice_val": "No",
+        "a1c_val": 0.0, "tc_val": 0, "ldl_val": 0, "hdl_val": 0,
+        "apob_val": 0, "lpa_val": 0, "lpa_unit_val": "nmol/L", "hscrp_val": 0.0,
+        "cac_known_val": "No", "cac_val": 0, "bmi_val": 0.0, "egfr_val": 0.0,
+        "lipid_lowering_val": "No", "demo_defaults_applied": False,
+        "last_applied_msg": "", "last_missing_msg": ""
+    }
+    for k, v in defaults.items():
+        st.session_state[k] = v
     for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{kk}_val"] = False
     for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
         st.session_state[bk] = False
-    st.session_state["demo_defaults_applied"] = False
-    st.session_state["last_applied_msg"] = ""
-    st.session_state["last_missing_msg"] = ""
 
-# Initialize session state
 for key, default in [
     ("age_val", 0), ("sex_val", "F"), ("race_val", "Other (use non-African American coefficients)"),
     ("ascvd_val", "No"), ("fhx_choice_val", "None / Unknown"), ("sbp_val", 0),
@@ -488,7 +704,7 @@ def apply_demo_defaults():
     for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
         st.session_state[bk] = False
 
-# Sidebar Demo
+# Sidebar Demo Controls
 with st.sidebar:
     st.markdown("### Demo")
     demo_on = st.checkbox("Use demo defaults (auto-fill)", value=st.session_state["demo_defaults_on"])
@@ -528,7 +744,6 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     if smart_txt and contains_phi(smart_txt):
         st.warning("Possible identifier/date detected in pasted text. Please remove PHI before using.")
 
-    # Columns for buttons + preview
     c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
 
     with c1:
@@ -568,7 +783,6 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         else:
             st.info("Nothing parsed yet.")
 
-    # Coverage summary
     st.markdown("### Parse coverage (explicit)")
     parsed_preview = st.session_state.get("parsed_preview_cache", {})
     for key, label in TARGET_PARSE_FIELDS:
@@ -977,8 +1191,4 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
-
-
-
-
 
