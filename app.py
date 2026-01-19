@@ -898,31 +898,33 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     if st.session_state.get("last_missing_msg"):
         st.warning(st.session_state["last_missing_msg"])
 
-    c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
+        c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
 
-   with c1:
-    if st.button("Parse & Apply", type="primary"):
-        raw_txt = st.session_state.get("smartphrase_raw", "") or ""
-        parsed = parse_smartphrase(raw_txt) if raw_txt.strip() else {}
-        st.session_state["parsed_preview_cache"] = parsed
+    with c1:
+        if st.button("Parse & Apply", type="primary"):
+            raw_txt = st.session_state.get("smartphrase_raw", "") or ""
+            parsed = parse_smartphrase(raw_txt) if raw_txt.strip() else {}
+            st.session_state["parsed_preview_cache"] = parsed
 
-        applied, missing = apply_parsed_to_session(parsed, raw_txt)
-        st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
-        st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "")
-        st.rerun()
-
-
+            applied, missing = apply_parsed_to_session(parsed, raw_txt)
+            st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
+            st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "")
+            st.rerun()
 
     with c2:
-        st.button(
-            "Clear pasted text",
-            on_click=lambda: st.session_state.update(
-                {"smartphrase_raw": "", "parsed_preview_cache": {}, "last_applied_msg": "", "last_missing_msg": ""}
-            ),
-        )
+        if st.button("Clear pasted text"):
+            st.session_state.update({
+                "smartphrase_raw": "",
+                "parsed_preview_cache": {},
+                "last_applied_msg": "",
+                "last_missing_msg": ""
+            })
+            st.rerun()
+
     with c3:
         st.caption("Parsed preview")
         st.json(parsed_preview)
+
 
     st.markdown("### Parse coverage (explicit)")
     for key, label in TARGET_PARSE_FIELDS:
@@ -1395,6 +1397,7 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
