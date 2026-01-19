@@ -575,7 +575,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["diabetes_choice_val"] = "Yes" if bool(diabetes_parsed) else "No"
         applied.append("Diabetes")
     else:
-        # Fallback to negation guard if parser didn't find explicit flag
+        # Fallback to negation guard
         diabetes_guard = diabetes_negation_guard(raw_txt)
         if diabetes_guard is not None:
             st.session_state["diabetes_choice_val"] = "Yes" if diabetes_guard else "No"
@@ -767,12 +767,10 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
 
     with c2:
         if st.button("Clear pasted text"):
-            st.session_state.update({
-                "smartphrase_raw": "",
-                "parsed_preview_cache": {},
-                "last_applied_msg": "",
-                "last_missing_msg": ""
-            })
+            st.session_state.smartphrase_raw = ""
+            st.session_state.parsed_preview_cache = {}
+            st.session_state.last_applied_msg = ""
+            st.session_state.last_missing_msg = ""
             st.rerun()
 
     with c3:
@@ -1191,4 +1189,3 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
-
