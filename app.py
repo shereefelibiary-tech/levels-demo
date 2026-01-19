@@ -899,9 +899,11 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.warning(st.session_state["last_missing_msg"])
 
     c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
+
     with c1:
         if st.button("Parse & Apply", type="primary"):
             cb_parse_and_apply()
+
 
     with c2:
         st.button(
@@ -1385,6 +1387,7 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
