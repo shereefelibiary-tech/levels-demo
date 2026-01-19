@@ -898,41 +898,53 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     if st.session_state.get("last_missing_msg"):
         st.warning(st.session_state["last_missing_msg"])
 
-        c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
+     c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
 
-    with c1:
-        if st.button("Parse & Apply", type="primary"):
-            raw_txt = st.session_state.get("smartphrase_raw", "") or ""
-            parsed = parse_smartphrase(raw_txt) if raw_txt.strip() else {}
+with c1:
+    if st.button("Parse & Apply", type="primary"):
+        raw_txt = st.session_state.get("smartphrase_raw", "") or ""
+        if not raw_txt.strip():
+            st.warning("No text to parse — please paste something first.")
+        else:
+            parsed = parse_smartphrase(raw_txt)
             st.session_state["parsed_preview_cache"] = parsed
-
+            
             applied, missing = apply_parsed_to_session(parsed, raw_txt)
-            st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
-            st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "")
-            st.rerun()
+            
+            st.session_state["last_applied_msg"] = (
+                "Applied: " + (", ".join(applied) if applied else "None")
+            )
+            st.session_state["last_missing_msg"] = (
+                "Missing/unparsed: " + (", ".join(missing) if missing else "All good!")
+            )
+            st.rerun()  # Refresh UI to show updated messages and preview
 
-    with c2:
-        if st.button("Clear pasted text"):
-            st.session_state.update({
-                "smartphrase_raw": "",
-                "parsed_preview_cache": {},
-                "last_applied_msg": "",
-                "last_missing_msg": ""
-            })
-            st.rerun()
+with c2:
+    if st.button("Clear pasted text"):
+        st.session_state.update({
+            "smartphrase_raw": "",
+            "parsed_preview_cache": {},
+            "last_applied_msg": "",
+            "last_missing_msg": ""
+        })
+        st.rerun()
 
-    with c3:
-        st.caption("Parsed preview")
+with c3:
+    st.caption("Parsed preview")
+    parsed_preview = st.session_state.get("parsed_preview_cache", {})
+    if parsed_preview:
         st.json(parsed_preview)
+    else:
+        st.info("Nothing parsed yet.")
 
-
-    st.markdown("### Parse coverage (explicit)")
-    for key, label in TARGET_PARSE_FIELDS:
-        ok = parsed_preview.get(key) is not None
-        badge = "<span class='badge ok'>parsed</span>" if ok else "<span class='badge miss'>not found</span>"
-        val = f": {parsed_preview.get(key)}" if ok else ""
-        st.markdown(f"- **{label}** {badge}{val}", unsafe_allow_html=True)
-
+# Coverage summary (moved outside columns for better flow)
+st.markdown("### Parse coverage (explicit)")
+for key, label in TARGET_PARSE_FIELDS:
+    parsed_preview = st.session_state.get("parsed_preview_cache", {})
+    ok = parsed_preview.get(key) is not None
+    badge = "<span class='badge ok'>parsed</span>" if ok else "<span class='badge miss'>not found</span>"
+    val = f": {parsed_preview.get(key)}" if ok else ""
+    st.markdown(f"- **{label}** {badge}{val}", unsafe_allow_html=True)
 # ============================================================
 # Main form
 # ============================================================
@@ -1397,6 +1409,7 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
