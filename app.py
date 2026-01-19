@@ -1000,14 +1000,11 @@ data = {
 }
 
 data = {k: v for k, v in data.items() if v is not None}
-
-# Cached engine call
-data_tuple = tuple(sorted(data.items()))  # Make hashable for caching
-out = run_engine(data_tuple)
+patient = Patient(data)  # <-- Make sure this line exists and is NOT indented under an if
+out = evaluate(patient)
 
 # Quick text for debug
-note_text = scrub_terms(render_quick_text(patient, out))
-
+note_text = scrub_terms(render_quick_text(patient, out))  # <-- Now patient is defined
 lvl = out.get("levels", {}) or {}
 ev = lvl.get("evidence", {}) if isinstance(lvl.get("evidence"), dict) else {}
 rs = out.get("riskSignal", {}) or {}
@@ -1232,3 +1229,4 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
