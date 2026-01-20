@@ -1285,6 +1285,120 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any
 
     add_trace(trace, "PCE_calculated", risk_pct, f"PCE category={cat}")
     return {"risk_pct": risk_pct, "category": cat, "notes": "Population estimate (does not include CAC/ApoB/Lp(a))."}
+# ----------------------------
+# Aspirin module (fallback guarantee)
+# ----------------------------
+def _bleeding_flags(p: Patient) -> Tuple[bool, List[str]]:
+    flags: List[str] = []
+    for k, label in [
+        ("bleed_gi", "Prior GI bleed/ulcer"),
+        ("bleed_ich", "Prior intracranial hemorrhage"),
+        ("bleed_anticoag", "Anticoagulant use"),
+        ("bleed_nsaid", "Chronic NSAID/steroid use"),
+        ("bleed_disorder", "Bleeding disorder/thrombocytopenia"),
+        ("bleed_ckd", "Advanced CKD / eGFR<45"),
+    ]:
+        if p.get(k) is True:
+            flags.append(label)
+    return (len(flags) > 0), flags
+
+def aspirin_explanation(status: str, rationale: List[str]) -> str:
+    reasons = [str(x).strip() for x in (rationale or []) if str(x).strip()]
+    if not reasons:
+        return ""
+    if len(reasons) <= 3:
+        return "Reasons: " + "; ".join(reasons) + "."
+    return "Reasons: " + "; ".join(reasons[:3]) + "."
+
+def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    age = int(p.get("age", 0)) if p.has("age") else None
+    cac = int(p.get("cac", 0)) if p.has("cac") else None
+    ascvd = (p.get("ascvd") is True)
+    bleed_high, bleed_flags = _bleeding_flags(p)
+
+    if ascvd:
+        add_trace(trace, "Aspirin_ASCVD", True, "Secondary prevention aspirin consideration")
+        status = "Secondary prevention: typically indicated if no contraindication"
+        rationale = ["ASCVD present"]
+        if bleed_flags:
+            status = "Secondary prevention: typically indicated, but bleeding risk flags present"
+            rationale = bleed_flags
+        return {
+            "status": status,
+            "rationale": rationale,
+            "explanation": aspirin_explanation(status, rationale),
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
+
+    if age is None:
+        add_trace(trace, "Aspirin_age_missing", None, "Not assessed")
+        status = "Not assessed"
+        rationale = ["Age missing"]
+        return {
+            "status": status,
+            "rationale": rationale,
+            "explanation": aspirin_explanation(status, rationale),
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
+
+    if age < 40 or age >= 70:
+        add_trace(trace, "Aspirin_age_out_of_range", age, "Avoid primary prevention aspirin by age rule")
+        status = "Avoid (primary prevention)"
+        rationale = [f"Age {age} (bleeding risk likely outweighs benefit)"]
+        return {
+            "status": status,
+            "rationale": rationale,
+            "explanation": aspirin_explanation(status, rationale),
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
+
+    if bleed_flags:
+        add_trace(trace, "Aspirin_bleed_flags", bleed_flags, "Avoid due to bleed risk")
+        status = "Avoid (primary prevention)"
+        rationale = ["High bleeding risk: " + "; ".join(bleed_flags)]
+        return {
+            "status": status,
+            "rationale": rationale,
+            "explanation": aspirin_explanation(status, rationale),
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
+
+    risk_pct = risk10.get("risk_pct")
+    risk_ok = (risk_pct is not None and risk_pct >= 10.0)
+    cac_ok = (cac is not None and cac >= 100)
+
+    if cac_ok or risk_ok:
+        reasons = []
+        if cac_ok:
+            reasons.append("CAC ≥100")
+        if risk_ok:
+            reasons.append(f"Pooled Cohort Equations 10-year risk ≥10% ({risk_pct}%)")
+        reasons.append("Bleeding risk low by available flags")
+        add_trace(trace, "Aspirin_consider", reasons, "Consider aspirin shared decision")
+        status = "Consider (shared decision)"
+        rationale = reasons
+        return {
+            "status": status,
+            "rationale": rationale,
+            "explanation": aspirin_explanation(status, rationale),
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
+
+    add_trace(trace, "Aspirin_avoid_low_benefit", risk_pct, "Avoid/individualize (low benefit)")
+    status = "Avoid / individualize"
+    rationale = ["Primary prevention benefit likely small at current risk level"]
+    return {
+        "status": status,
+        "rationale": rationale,
+        "explanation": aspirin_explanation(status, rationale),
+        "bleeding_risk_high": bleed_high,
+        "bleeding_flags": bleed_flags,
+    }
 
 # ----------------------------
 # Public API
@@ -1456,6 +1570,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
 
 
 
