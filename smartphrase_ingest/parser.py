@@ -363,24 +363,41 @@ def extract_lipid_lowering(raw: str) -> Optional[bool]:
 
 
 def extract_labs(raw: str) -> Dict[str, Optional[float]]:
-    t = raw
-
+    t = raw.lower()  # Normalize case early
+    # Broader TC detection: chol, cholesterol, total chol/tc, etc.
+    tc = _first_float(
+        r"\b(?:total\s*(?:chol(?:esterol)?|tc)|chol(?:esterol)?|tc)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b",
+        t
+    )
+    ldl = _first_float(r"\bldl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+    hdl = _first_float(r"\bhdl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+    tg = _first_float(r"\b(?:triglycerides|trigs|tgs|tg)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+    apob = _first_float(r"\b(?:apo\s*b|apob)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+    lpa = _first_float(r"\b(?:lp\(a\)|lpa|lipoprotein\s*\(a\))\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t)
+    
+    # A1c: table format or inline
     a1c_table = _first_float(
         r"hemoglobin\s*a1c[\s\S]{0,300}?\b\d{1,2}/\d{1,2}/\d{2,4}\s+(\d{1,2}(?:\.\d+)?)\b",
         t,
     )
     a1c_inline = _first_float(r"\b(?:a1c|hba1c|hb\s*a1c)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t)
+    
+    # ASCVD 10y risk
+    ascvd = _first_float(r"\bascvd\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t)
+    
+    # CAC score
+    cac = _first_float(r"\b(?:cac|coronary\s*artery\s*calcium|calcium\s*score)\s*(?:score)?\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t)
 
     return {
-        "tc": _first_float(r"\b(?:total\s*cholesterol|total\s*chol|tc)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
-        "ldl": _first_float(r"\bldl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
-        "hdl": _first_float(r"\bhdl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
-        "tg": _first_float(r"\b(?:triglycerides|trigs|tgs|tg)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
-        "apob": _first_float(r"\b(?:apo\s*b|apob)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t),
-        "lpa": _first_float(r"\b(?:lp\(a\)|lpa|lipoprotein\s*\(a\))\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t),
+        "tc": tc,
+        "ldl": ldl,
+        "hdl": hdl,
+        "tg": tg,
+        "apob": apob,
+        "lpa": lpa,
         "a1c": a1c_table if a1c_table is not None else a1c_inline,
-        "ascvd": _first_float(r"\bascvd\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t),
-        "cac": _first_float(r"\b(?:cac|coronary\s*artery\s*calcium|calcium\s*score)\s*(?:score)?\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t),
+        "ascvd": ascvd,
+        "cac": cac,
     }
 
 
