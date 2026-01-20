@@ -678,19 +678,16 @@ def _bleeding_flags(p: Patient) -> Tuple[bool, List[str]]:
     return (len(flags) > 0), flags
 def aspirin_explanation(status: str, rationale: List[str]) -> str:
     """
-    Short, note-friendly explanation for aspirin output.
-    Kept intentionally brief to avoid clutter.
+    Returns reasons only (no status prefix) to avoid duplicate output like:
+      'Avoid — Avoid. Reasons...'
     """
-    status_clean = (status or "").strip()
     reasons = [str(x).strip() for x in (rationale or []) if str(x).strip()]
-
     if not reasons:
-        return status_clean
-
-    # Keep it tight for EMR
+        return ""
     if len(reasons) <= 3:
-        return f"{status_clean}. Reasons: " + "; ".join(reasons) + "."
-    return f"{status_clean}. Reasons: " + "; ".join(reasons[:3]) + "."
+        return "Reasons: " + "; ".join(reasons) + "."
+    return "Reasons: " + "; ".join(reasons[:3]) + "."
+
 
 def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     age = int(p.get("age", 0)) if p.has("age") else None
@@ -1549,6 +1546,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
 
 
 
