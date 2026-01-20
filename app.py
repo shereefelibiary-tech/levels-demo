@@ -868,9 +868,10 @@ with st.form("risk_continuum_form"):
             max_value=5000,
             step=1,
             key="cac_val",
-            disabled=(st.session_state["cac_known_val"] == "No"),
-            help="If CAC is not available, set 'Calcium score available?' to No. The engine will ignore this value.",
-        )
+            disabled=(st.session_state.get("cac_known_val", "No") == "No"),
+            help="Enable by setting 'Calcium score available?' to Yes. If No, the engine ignores the value.",
+    )
+
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Inflammatory states (optional)")
@@ -1236,4 +1237,5 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
