@@ -793,6 +793,33 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.warning(st.session_state["last_missing_msg"])
 
 # ============================================================
+# Imaging (MOVE THIS OUTSIDE THE FORM so enable/disable is live)
+# Place this BLOCK immediately ABOVE:  with st.form("risk_continuum_form"):
+# ============================================================
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+st.subheader("Imaging")
+
+d1, d2 = st.columns([1, 2])
+with d1:
+    st.radio(
+        "Calcium score available?",
+        ["Yes", "No"],
+        horizontal=True,
+        key="cac_known_val",
+    )
+
+with d2:
+    st.number_input(
+        "Calcium score (Agatston)",
+        min_value=0,
+        max_value=5000,
+        step=1,
+        key="cac_val",
+        disabled=(st.session_state.get("cac_known_val", "No") == "No"),
+        help="Enable by setting 'Calcium score available?' to Yes. If No, the engine ignores the value.",
+    )
+
+# ============================================================
 # Main form
 # ============================================================
 with st.form("risk_continuum_form"):
@@ -852,26 +879,6 @@ with st.form("risk_continuum_form"):
     with c3:
         st.number_input("hsCRP (mg/L) (optional)", 0.0, 50.0, step=0.1, format="%.1f", key="hscrp_val")
         st.number_input("eGFR (mL/min/1.73m²) (for PREVENT)", 0.0, 200.0, step=1.0, format="%.0f", key="egfr_val")
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Imaging")
-
-    d1, d2 = st.columns([1, 2])
-    with d1:
-        st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
-        if st.session_state["cac_known_val"] == "No":
-            st.session_state["cac_val"] = 0
-    with d2:
-        st.number_input(
-            "Calcium score (Agatston)",
-            min_value=0,
-            max_value=5000,
-            step=1,
-            key="cac_val",
-            disabled=(st.session_state.get("cac_known_val", "No") == "No"),
-            help="Enable by setting 'Calcium score available?' to Yes. If No, the engine ignores the value.",
-    )
-
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Inflammatory states (optional)")
@@ -1237,5 +1244,6 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
