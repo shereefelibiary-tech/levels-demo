@@ -659,6 +659,23 @@ def pooled_cohort_equations_10y_ascvd_risk(p: Patient, trace: List[Dict[str, Any
 # ----------------------------
 # Aspirin module
 # ----------------------------
+def _bleeding_flags(p: Patient) -> Tuple[bool, List[str]]:
+    """
+    Returns (bleeding_risk_high, bleeding_flag_labels)
+    Used by aspirin_advice().
+    """
+    flags: List[str] = []
+    for k, label in [
+        ("bleed_gi", "Prior GI bleed/ulcer"),
+        ("bleed_ich", "Prior intracranial hemorrhage"),
+        ("bleed_anticoag", "Anticoagulant use"),
+        ("bleed_nsaid", "Chronic NSAID/steroid use"),
+        ("bleed_disorder", "Bleeding disorder/thrombocytopenia"),
+        ("bleed_ckd", "Advanced CKD / eGFR<45"),
+    ]:
+        if p.get(k) is True:
+            flags.append(label)
+    return (len(flags) > 0), flags
 def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     age = int(p.get("age", 0)) if p.has("age") else None
     cac = int(p.get("cac", 0)) if p.has("cac") else None
@@ -1516,5 +1533,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
 
 
