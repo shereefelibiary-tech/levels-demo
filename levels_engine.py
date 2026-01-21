@@ -269,6 +269,202 @@ def prevent_apply_logistic(beta: Dict[str, float], terms: Dict[str, float], dp: 
         log_odds += float(b) * float(terms.get(k, 0.0))
     r = math.exp(log_odds) / (1.0 + math.exp(log_odds))
     return _round_half_up(r * 100.0, dp=dp)
+# ============================================================
+# PREVENT (AHA) — Base model (from AHAprevent R package v1.0.0)
+# 10-year Total CVD + 10-year ASCVD
+# Logistic form: 100 * exp(logor)/(1+exp(logor))
+# Inputs: sex, age, tc, hdl, sbp, dm, smoking, egfr, bptreat, statin
+# ============================================================
+
+def mmol_conversion(x_mgdl: float) -> float:
+    # Matches AHAprevent R function: mmol_conversion(chol_mgdl) = chol_mgdl/38.67
+    return float(x_mgdl) / 38.67
+
+def _prevent_logistic_pct(logor: float) -> float:
+    r = math.exp(logor) / (1.0 + math.exp(logor))
+    return round(r * 100.0, 2)
+
+# Exact expressions copied from AHAprevent::pred_risk_base (sex==1 female, else male)
+_PREVENT_BASE_LOGOR_10Y = {
+    # sex=1 (female)
+    ("female", "total_cvd"):
+        "-3.307728 + "
+        "0.7939329*(age - 55)/10 + "
+        "0.0305239*(mmol_conversion(tc - hdl) - 3.5) - "
+        "0.1606857*(mmol_conversion(hdl) - 1.3)/(0.3) - "
+        "0.2394003*(min(sbp, 110) - 110)/20 + "
+        "0.360078*(max(sbp, 110) - 130)/20 + "
+        "0.8667604*(dm) + "
+        "0.5360739*(smoking) + "
+        "0.6045917*(min(egfr, 60) - 60)/(-15) + "
+        "0.0433769*(max(egfr, 60) - 90)/(-15) + "
+        "0.3151672*(bptreat) - "
+        "0.1477655*(statin) - "
+        "0.0663612*(bptreat)*(max(sbp, 110) - 130)/20 + "
+        "0.1197879*(statin)*(mmol_conversion(tc - hdl) - 3.5) - "
+        "0.0819715*(age - 55)/10*(mmol_conversion(tc - hdl) - 3.5) + "
+        "0.0306769*(age - 55)/10*(mmol_conversion(hdl) - 1.3)/(0.3) - "
+        "0.0946348*(age - 55)/10*(max(sbp, 110) - 130)/20 - "
+        "0.27057*(age - 55)/10*(dm) - "
+        "0.078715*(age - 55)/10*(smoking) - "
+        "0.1637806*(age - 55)/10*(min(egfr, 60) - 60)/(-15)",
+
+    ("female", "ascvd"):
+        "-3.819975 + "
+        "0.719883*(age - 55)/10 + "
+        "0.1176967*((mmol_conversion(tc) - mmol_conversion(hdl)) - 3.5) - "
+        "0.151185*(mmol_conversion(hdl) - 1.3)/0.3 - "
+        "0.0835358*(min(sbp, 110) - 110)/20 + "
+        "0.3592852*(max(sbp, 110) - 130)/20 + "
+        "0.8348585*(dm) + "
+        "0.4831078*(smoking) + "
+        "0.4864619*(min(egfr, 60) - 60)/(-15) + "
+        "0.0397779*(max(egfr, 60)  - 90)/(-15) + "
+        "0.2265309*(bptreat) - "
+        "0.0592374*(statin) - "
+        "0.0395762*(bptreat)*(max(sbp, 110) - 130)/20 + "
+        "0.0844423*(statin)*((mmol_conversion(tc) - mmol_conversion(hdl)) - 3.5) - "
+        "0.0567839*(age - 55)/10*((mmol_conversion(tc) - mmol_conversion(hdl)) - 3.5) + "
+        "0.0325692*(age - 55)/10*(mmol_conversion(hdl) - 1.3)/0.3 - "
+        "0.1035985*(age - 55)/10*(max(sbp, 110) - 130)/20 - "
+        "0.2417542*(age - 55)/10*(dm) - "
+        "0.0791142*(age - 55)/10*(smoking) - "
+        "0.1671492*(age - 55)/10*(min(egfr, 60) - 60)/(-15)",
+
+    # sex=0 (male)
+    ("male", "total_cvd"):
+        "-3.031168 + "
+        "0.7688528*(age - 55)/10 + "
+        "0.0736174*(mmol_conversion(tc - hdl) - 3.5) - "
+        "0.0954431*(mmol_conversion(hdl) - 1.3)/(0.3) - "
+        "0.4347345*(min(sbp, 110) - 110)/20 + "
+        "0.3362658*(max(sbp, 110) - 130)/20 + "
+        "0.7692857*(dm) + "
+        "0.4386871*(smoking) + "
+        "0.5378979*(min(egfr, 60) - 60)/(-15) + "
+        "0.0164827*(max(egfr, 60) - 90)/(-15) + "
+        "0.288879*(bptreat) - "
+        "0.1337349*(statin) - "
+        "0.0475924*(bptreat)*(max(sbp, 110) - 130)/20 + "
+        "0.150273*(statin)*(mmol_conversion(tc - hdl) - 3.5) - "
+        "0.0517874*(age - 55)/10*(mmol_conversion(tc - hdl) - 3.5) + "
+        "0.0191169*(age - 55)/10*(mmol_conversion(hdl) - 1.3)/(0.3) - "
+        "0.1049477*(age - 55)/10*(max(sbp, 110) - 130)/20 - "
+        "0.2251948*(age - 55)/10*(dm) - "
+        "0.0895067*(age - 55)/10*(smoking) - "
+        "0.1543702*(age - 55)/10*(min(egfr, 60) - 60)/(-15)",
+
+    ("male", "ascvd"):
+        "-3.500655 + "
+        "0.7099847*(age - 55)/10 + "
+        "0.1658814*((mmol_conversion(tc) - mmol_conversion(hdl)) - 3.5) - "
+        "0.0909475*(mmol_conversion(hdl) - 1.3)/0.3 - "
+        "0.2837212*(min(sbp, 110) - 110)/20 + "
+        "0.3539906*(max(sbp, 110) - 130)/20 + "
+        "0.7198505*(dm) + "
+        "0.4324407*(smoking) + "
+        "0.4228163*(min(egfr, 60) - 60)/(-15) + "
+        "0.0245651*(max(egfr, 60) - 90)/(-15) + "
+        "0.2000216*(bptreat) - "
+        "0.035514*(statin) - "
+        "0.0257406*(bptreat)*(max(sbp, 110) - 130)/20 + "
+        "0.1242521*(statin)*((mmol_conversion(tc) - mmol_conversion(hdl)) - 3.5) - "
+        "0.046074*(age - 55)/10*((mmol_conversion(tc) - mmol_conversion(hdl)) - 3.5) + "
+        "0.0203217*(age - 55)/10*(mmol_conversion(hdl) - 1.3)/0.3 - "
+        "0.1072672*(age - 55)/10*(max(sbp, 110) - 130)/20 - "
+        "0.2508122*(age - 55)/10*(dm) - "
+        "0.102254*(age - 55)/10*(smoking) - "
+        "0.1457277*(age - 55)/10*(min(egfr, 60) - 60)/(-15)",
+}
+
+def _prevent_eval_logor(expr: str, *, age, tc, hdl, sbp, dm, smoking, egfr, bptreat, statin) -> float:
+    # Safe eval: no builtins, only our allowed functions
+    scope = {
+        "math": math,
+        "min": min,
+        "max": max,
+        "mmol_conversion": mmol_conversion,
+        "age": float(age),
+        "tc": float(tc),
+        "hdl": float(hdl),
+        "sbp": float(sbp),
+        "dm": 1.0 if bool(dm) else 0.0,
+        "smoking": 1.0 if bool(smoking) else 0.0,
+        "egfr": float(egfr),
+        "bptreat": 1.0 if bool(bptreat) else 0.0,
+        "statin": 1.0 if bool(statin) else 0.0,
+    }
+    return float(eval(expr, {"__builtins__": {}}, scope))
+
+def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    PREVENT base model (AHAprevent R pkg v1.0.0): 10y total CVD + 10y ASCVD.
+    Requires core PREVENT inputs used by base model.
+    """
+    req = ["age","sex","tc","hdl","sbp","bp_treated","smoking","diabetes","egfr","lipid_lowering"]
+    missing = [k for k in req if not p.has(k)]
+    if missing:
+        add_trace(trace, "PREVENT_missing_inputs", missing, "PREVENT not calculated")
+        return {
+            "total_cvd_10y_pct": None,
+            "ascvd_10y_pct": None,
+            "missing": missing,
+            "notes": "PREVENT (population model) not calculated (missing required inputs).",
+        }
+
+    age = int(p.get("age"))
+    if age < 30 or age > 79:
+        add_trace(trace, "PREVENT_age_out_of_range", age, "Validated for ages 30–79")
+        return {
+            "total_cvd_10y_pct": None,
+            "ascvd_10y_pct": None,
+            "missing": [],
+            "notes": "PREVENT (population model) validated for ages 30–79.",
+        }
+
+    # Sex mapping: engine stores "M"/"F"
+    sex_raw = str(p.get("sex","")).lower()
+    sex_key = "female" if sex_raw in ("f","female") else "male"
+
+    # Basic input validity (mirrors the R package behavior for base model)
+    tc = safe_float(p.get("tc"), 0)
+    hdl = safe_float(p.get("hdl"), 0)
+    sbp = safe_float(p.get("sbp"), 0)
+    egfr = safe_float(p.get("egfr"), 0)
+
+    if tc < 130 or tc > 320 or hdl < 20 or hdl > 100 or sbp < 90 or sbp > 200 or egfr <= 0:
+        add_trace(trace, "PREVENT_inputs_out_of_range", {"tc":tc,"hdl":hdl,"sbp":sbp,"egfr":egfr}, "PREVENT not calculated")
+        return {
+            "total_cvd_10y_pct": None,
+            "ascvd_10y_pct": None,
+            "missing": [],
+            "notes": "PREVENT (population model) not calculated (inputs out of validated ranges).",
+        }
+
+    dm = bool(p.get("diabetes"))
+    smoking = bool(p.get("smoking"))
+    bptreat = bool(p.get("bp_treated"))
+    statin = bool(p.get("lipid_lowering"))
+
+    logor_cvd = _prevent_eval_logor(
+        _PREVENT_BASE_LOGOR_10Y[(sex_key, "total_cvd")],
+        age=age, tc=tc, hdl=hdl, sbp=sbp, dm=dm, smoking=smoking, egfr=egfr, bptreat=bptreat, statin=statin,
+    )
+    logor_ascvd = _prevent_eval_logor(
+        _PREVENT_BASE_LOGOR_10Y[(sex_key, "ascvd")],
+        age=age, tc=tc, hdl=hdl, sbp=sbp, dm=dm, smoking=smoking, egfr=egfr, bptreat=bptreat, statin=statin,
+    )
+
+    total_pct = _prevent_logistic_pct(logor_cvd)
+    ascvd_pct = _prevent_logistic_pct(logor_ascvd)
+
+    add_trace(trace, "PREVENT_calculated", {"sex": sex_key, "total": total_pct, "ascvd": ascvd_pct}, "PREVENT 10y calculated (base model)")
+    return {
+        "total_cvd_10y_pct": total_pct,
+        "ascvd_10y_pct": ascvd_pct,
+        "missing": [],
+        "notes": "PREVENT (population model) base equations (AHAprevent v1.0.0): 10y total CVD + 10y ASCVD.",
+    }
 
 def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     req = ["age","sex","tc","hdl","sbp","bp_treated","smoking","diabetes","bmi","egfr","lipid_lowering"]
@@ -1570,6 +1766,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
 
 
 
