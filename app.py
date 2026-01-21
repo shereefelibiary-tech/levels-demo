@@ -7,12 +7,13 @@
 #     • Resets CAC when not done/missing (prevents carryover)
 #     • Uses parser outputs: sbp, diabetes, fhx_text, cac_not_done
 #     • Avoids diabetes false-positives (no negation-guard fallback)
-# - CAC input disabled when "No" selected AND value forced to 0
+# - Imaging block moved OUTSIDE the form so CAC enable/disable is live
 # - Engine caching (5 min TTL) via data_json key (safe + deterministic)
 # - Last calculation timestamp
-# - Aspirin shows "status — explanation" (expects engine now provides asp["explanation"])
+# - Aspirin shows "status — explanation" (engine provides asp["explanation"])
 # - Polished Clinical Report Box with a real COPY button (no downloads)
-# - PREVENT always visible; shows engine note when not calculated
+# - PREVENT always visible, labeled explicitly as "population model"
+# - Adds a short PREVENT explainer: values are 10-year risk percentages from a population model
 #
 # Requirements:
 # - smartphrase_ingest.parser.parse_smartphrase returns keys like:
@@ -59,6 +60,11 @@ FALLBACK_LEVEL_LEGEND = [
     "Level 4: subclinical plaque present → treat like early disease; target-driven therapy",
     "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
 ]
+
+PREVENT_EXPLAINER = (
+    "PREVENT values are 10-year risk percentages from the AHA PREVENT population model "
+    "(event-probability estimate; may diverge from biologic/plaque signal)."
+)
 
 # ============================================================
 # Page + styling
@@ -474,7 +480,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state[state_key] = v2
         applied.append(label)
 
-    # Core numerics
     apply_num("age", "age_val", coerce_int, "Age")
     apply_num("sbp", "sbp_val", coerce_int, "Systolic BP")
     apply_num("tc", "tc_val", coerce_int, "Total Cholesterol")
@@ -482,7 +487,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     apply_num("ldl", "ldl_val", coerce_int, "LDL")
     apply_num("apob", "apob_val", coerce_int, "ApoB")
 
-    # Lp(a)
     lpa_v = coerce_float(parsed.get("lpa"))
     if lpa_v is not None:
         st.session_state["lpa_val"] = int(lpa_v)
@@ -490,7 +494,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("Lp(a)")
 
-    # Sex
     sex = parsed.get("sex")
     if sex in ("F", "M"):
         st.session_state["sex_val"] = sex
@@ -498,14 +501,12 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("Gender")
 
-    # Lp(a) unit
     if parsed.get("lpa_unit") in ("nmol/L", "mg/dL"):
         st.session_state["lpa_unit_val"] = parsed["lpa_unit"]
         applied.append("Lp(a) unit")
     else:
         missing.append("Lp(a) unit")
 
-    # A1c
     a1c_v = coerce_float(parsed.get("a1c"))
     if a1c_v is not None:
         st.session_state["a1c_val"] = float(a1c_v)
@@ -513,33 +514,28 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("A1c")
 
-    # Smoking
     if parsed.get("smoker") is not None:
         st.session_state["smoking_val"] = "Yes" if bool(parsed["smoker"]) else "No"
         applied.append("Smoking")
 
-    # Diabetes: trust parser only (prevents false positives)
     if parsed.get("diabetes") is not None:
         st.session_state["diabetes_choice_val"] = "Yes" if bool(parsed["diabetes"]) else "No"
         applied.append("Diabetes")
     else:
         missing.append("Diabetes")
 
-    # BP treated
     if parsed.get("bpTreated") is not None:
         st.session_state["bp_treated_val"] = "Yes" if bool(parsed["bpTreated"]) else "No"
         applied.append("BP meds")
     else:
         missing.append("BP meds")
 
-    # Race (AA vs other)
     if parsed.get("africanAmerican") is not None:
         st.session_state["race_val"] = (
             "African American" if bool(parsed["africanAmerican"]) else "Other (use non-African American coefficients)"
         )
         applied.append("Race")
 
-    # Family history text mapping (parser returns exact dropdown strings)
     fhx_txt = parsed.get("fhx_text")
     if fhx_txt:
         st.session_state["fhx_choice_val"] = fhx_txt
@@ -547,7 +543,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("Premature family history")
 
-    # CAC: always reset on "not done" or missing to prevent carryover
     if parsed.get("cac_not_done") is True:
         st.session_state["cac_known_val"] = "No"
         st.session_state["cac_val"] = 0
@@ -563,7 +558,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
             st.session_state["cac_val"] = 0
             missing.append("Calcium score")
 
-    # PREVENT fields
     if parsed.get("bmi") is not None:
         try:
             st.session_state["bmi_val"] = float(parsed["bmi"])
@@ -582,7 +576,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["lipid_lowering_val"] = "Yes" if bool(parsed["lipidLowering"]) else "No"
         applied.append("Lipid therapy")
 
-    # hsCRP + inflammatory flags from text (optional)
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
@@ -593,7 +586,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state[f"infl_{k}_val"] = bool(v)
         applied.append(k.upper())
 
-    # De-dupe missing
     missing = list(dict.fromkeys(missing))
     return applied, missing
 
@@ -793,8 +785,7 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.warning(st.session_state["last_missing_msg"])
 
 # ============================================================
-# Imaging (MOVE THIS OUTSIDE THE FORM so enable/disable is live)
-# Place this BLOCK immediately ABOVE:  with st.form("risk_continuum_form"):
+# Imaging (OUTSIDE the form so enable/disable is live)
 # ============================================================
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 st.subheader("Imaging")
@@ -862,7 +853,7 @@ with st.form("risk_continuum_form"):
     with b5:
         st.radio("On lipid-lowering therapy? (for PREVENT)", ["No", "Yes"], horizontal=True, key="lipid_lowering_val")
     with b6:
-        st.caption("PREVENT requires BMI, eGFR, and lipid-therapy status.")
+        st.caption("PREVENT requires eGFR and lipid-therapy status. (Population model output is a %.)")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Labs")
@@ -939,6 +930,10 @@ if st.session_state["hdl_val"] <= 0:
 if req_errors:
     st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
     st.stop()
+
+# Gentle hint for PREVENT (population model) calculation
+if st.session_state.get("egfr_val", 0) <= 0:
+    st.warning("PREVENT (population model) needs eGFR > 0 to calculate. Enter eGFR to enable PREVENT output.")
 
 age = st.session_state["age_val"]
 sex = st.session_state["sex_val"]
@@ -1076,9 +1071,13 @@ def build_emr_note() -> str:
     lines.append("KEY METRICS")
     lines.append(f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})")
     lines.append(f"- PCE 10y ASCVD: {pce_line} {pce_cat}".strip())
-    lines.append(f"- PREVENT 10y: total CVD {p_total if p_total is not None else '—'}; ASCVD {p_ascvd if p_ascvd is not None else '—'}")
+    lines.append(
+        f"- PREVENT (population model) 10y: total CVD {p_total if p_total is not None else '—'}; "
+        f"ASCVD {p_ascvd if p_ascvd is not None else '—'}"
+    )
     if (p_total is None and p_ascvd is None) and p_note:
         lines.append(f"  PREVENT note: {p_note}")
+    lines.append(f"  {PREVENT_EXPLAINER}")
 
     lines.append("")
     lines.append("TARGETS")
@@ -1139,13 +1138,14 @@ with tab_report:
   <div class="kvline"><b>Evidence:</b> {scrub_terms(ev.get('cac_status','—'))} / <b>Burden:</b> {scrub_terms(ev.get('burden_band','—'))}</div>
   <div class="kvline"><b>Decision confidence:</b> {decision_conf}</div>
   <div class="kvline"><b>Key metrics:</b> RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • PCE 10y {pce_line} {pce_cat}</div>
-  <div class="kvline"><b>PREVENT 10y:</b> total CVD {p_total if p_total is not None else '—'} • ASCVD {p_ascvd if p_ascvd is not None else '—'}</div>
+  <div class="kvline"><b>PREVENT (population model) 10y:</b> total CVD {p_total if p_total is not None else '—'} • ASCVD {p_ascvd if p_ascvd is not None else '—'}</div>
 </div>
 """,
         unsafe_allow_html=True,
     )
+    st.caption(PREVENT_EXPLAINER)
     if (p_total is None and p_ascvd is None) and p_note:
-        st.caption(p_note)
+        st.caption(f"PREVENT (population model): {p_note}")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1218,7 +1218,8 @@ with tab_details:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    st.subheader("PREVENT (details)")
+    st.subheader("PREVENT (population model) (details)")
+    st.caption(PREVENT_EXPLAINER)
     if p_total is not None or p_ascvd is not None:
         st.markdown(f"**10-year total CVD:** {p_total}%")
         st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
@@ -1244,6 +1245,5 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
