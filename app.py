@@ -1058,9 +1058,8 @@ st.caption(f"Last calculation: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 # ============================================================
 # EMR Note text (for copy box)
 # ============================================================
-PREVENT_EXPLAINER = (
-    "(PREVENT estimates 10-year population event risk (%); total CVD includes ASCVD + heart failure and complements plaque/biology-based risk assessment.)"
-)
+PREVENT_EXPLAINER = "(PREVENT estimates 10-year population event risk (%); total CVD includes ASCVD + heart failure and complements plaque/biology-based risk assessment.)"
+
 
 
 def build_emr_note() -> str:
@@ -1290,6 +1289,7 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
