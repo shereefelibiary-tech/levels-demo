@@ -62,8 +62,11 @@ FALLBACK_LEVEL_LEGEND = [
 ]
 
 PREVENT_EXPLAINER = (
-    "PREVENT values are 10-year risk percentages from the AHA PREVENT population model "
-    "(event-probability estimate; may diverge from biologic/plaque signal)."
+    "**PREVENT is a population event-risk estimate (10-year probability, in %).** "
+    "“Total CVD” includes ASCVD **plus** other major cardiovascular outcomes (e.g., heart failure). "
+    "It does **not** measure plaque; use CAC/ApoB/Lp(a) to refine biologic/structural risk."
+)
+
 )
 
 # ============================================================
@@ -1055,32 +1058,68 @@ st.caption(f"Last calculation: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 # ============================================================
 # EMR Note text (for copy box)
 # ============================================================
+PREVENT_EXPLAINER = (
+    "PREVENT estimates 10-year event probability in a population. "
+    "Total CVD includes ASCVD plus other major cardiovascular events "
+    "(especially heart failure). These estimates reflect average "
+    "population risk, not plaque burden; discordance with CAC/ApoB/Lp(a)-"
+    "based risk posture is expected."
+)
+
 def build_emr_note() -> str:
     lines = []
+
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
     lines.append("-" * 64)
-    lines.append(f"Level: {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
-    lines.append(f"Evidence: {scrub_terms(ev.get('cac_status','—'))} / Burden: {scrub_terms(ev.get('burden_band','—'))}")
+
+    lines.append(
+        f"Level: {level}"
+        + (f" ({sub})" if sub else "")
+        + f" — {LEVEL_NAMES.get(level,'—')}"
+    )
+
+    lines.append(
+        f"Evidence: {scrub_terms(ev.get('cac_status','—'))} / "
+        f"Burden: {scrub_terms(ev.get('burden_band','—'))}"
+    )
+
     lines.append(f"Decision confidence: {decision_conf}")
+
     if ins.get("decision_robustness"):
         rob = scrub_terms(ins.get("decision_robustness"))
         rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
-        lines.append(f"Decision robustness: {rob}" + (f" — {rob_note}" if rob_note else ""))
+        if rob_note:
+            lines.append(f"Decision robustness: {rob} — {rob_note}")
+        else:
+            lines.append(f"Decision robustness: {rob}")
 
+    # --------------------------------------------------------
     lines.append("")
     lines.append("KEY METRICS")
-    lines.append(f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})")
-    lines.append(f"- PCE 10y ASCVD: {pce_line} {pce_cat}".strip())
+
     lines.append(
-        f"- PREVENT (population model) 10y: total CVD {p_total if p_total is not None else '—'}; "
-        f"ASCVD {p_ascvd if p_ascvd is not None else '—'}"
+        f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})"
     )
+
+    lines.append(
+        f"- PCE 10y ASCVD: {pce_line} {pce_cat}".strip()
+    )
+
+    lines.append(
+        f"- PREVENT (population model) 10y: "
+        f"total CVD {p_total if p_total is not None else '—'}%; "
+        f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
+    )
+
     if (p_total is None and p_ascvd is None) and p_note:
         lines.append(f"  PREVENT note: {p_note}")
+
     lines.append(f"  {PREVENT_EXPLAINER}")
 
+    # --------------------------------------------------------
     lines.append("")
     lines.append("TARGETS")
+
     if primary:
         tgt = f"- {primary[0]} {primary[1]}"
         if apob_line:
@@ -1089,9 +1128,12 @@ def build_emr_note() -> str:
     else:
         lines.append("- —")
 
+    # --------------------------------------------------------
     lines.append("")
     lines.append("PLAN & ACTIONS")
+
     lines.append(f"- Plan: {plan_clean or '—'}")
+
     if next_actions:
         lines.append("- Next steps:")
         for a in next_actions[:3]:
@@ -1107,20 +1149,26 @@ def build_emr_note() -> str:
     if ins.get("structural_clarification"):
         lines.append(f"- {scrub_terms(ins.get('structural_clarification'))}")
 
+    # --------------------------------------------------------
     lines.append("")
     lines.append("CLINICAL CONTEXT")
+
     if drivers:
         lines.append(f"- Risk driver: {drivers[0]}")
+
     if ins.get("phenotype_label"):
         lines.append(f"- Phenotype: {scrub_terms(ins.get('phenotype_label'))}")
+
     if ev.get("cac_status") == "Unknown":
         lines.append("- Structural status: Unknown (CAC not performed)")
-    lines.append(f"- Anchors: Near-term: {near_anchor} | Lifetime: {life_anchor}")
+
+    lines.append(
+        f"- Anchors: Near-term: {near_anchor} | Lifetime: {life_anchor}"
+    )
 
     lines.append("")
     return "\n".join(lines)
 
-emr_note = build_emr_note()
 
 # ============================================================
 # Tabs
@@ -1245,5 +1293,6 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
