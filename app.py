@@ -873,6 +873,30 @@ with st.form("risk_continuum_form"):
         st.number_input("eGFR (mL/min/1.73m²) (for PREVENT)", 0.0, 200.0, step=1.0, format="%.0f", key="egfr_val")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("PREVENT extras (optional)")
+
+    p1, p2 = st.columns(2)
+    with p1:
+        st.number_input(
+            "Urine albumin-to-creatinine ratio (UACR, mg/g)",
+            min_value=0.0,
+            max_value=10000.0,
+            step=1.0,
+            format="%.0f",
+            key="uacr_val",
+            help="Optional PREVENT input. Leave 0 if not available.",
+        )
+    with p2:
+        st.number_input(
+            "Social Deprivation Index (SDI) decile (1–10)",
+            min_value=0,
+            max_value=10,
+            step=1,
+            key="sdi_decile_val",
+            help="Optional PREVENT input. Use decile 1–10; leave 0 if not available.",
+        )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Inflammatory states (optional)")
 
     e1, e2, e3 = st.columns(3)
@@ -901,6 +925,7 @@ with st.form("risk_continuum_form"):
 
     show_json = st.checkbox("Show JSON (debug)", value=False)
     submitted = st.form_submit_button("Run", type="primary")
+
 
 # ============================================================
 # Cached engine call
@@ -1289,6 +1314,7 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
