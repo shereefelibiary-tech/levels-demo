@@ -67,8 +67,6 @@ PREVENT_EXPLAINER = (
     "It does **not** measure plaque; use CAC/ApoB/Lp(a) to refine biologic/structural risk."
 )
 
-)
-
 # ============================================================
 # Page + styling
 # ============================================================
@@ -1289,6 +1287,7 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
