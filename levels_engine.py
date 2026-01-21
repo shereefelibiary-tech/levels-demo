@@ -189,91 +189,10 @@ def lpa_elevated_no_trace(p: Patient) -> bool:
     return raw_val >= 125.0
 
 # ============================================================
-# PREVENT (AHA) — optional comparator (10y total CVD + 10y ASCVD)
-# ============================================================
-PREVENT_COEFS: Dict[str, Dict[str, Dict[str, Dict[str, float]]]] = {
-    "10yr": {
-        "female": {"total_cvd": {}, "ascvd": {}},
-        "male": {"total_cvd": {}, "ascvd": {}},
-    }
-}
-
-def _chol_mgdl_to_mmol(x: float) -> float:
-    return float(x) / 38.67
-
-def _as01(x: Any) -> float:
-    return 1.0 if bool(x) else 0.0
-
-def _round_half_up(x: float, dp: int = 2) -> float:
-    m = 10 ** int(dp)
-    return float(math.floor(x * m + 0.5) / m)
-
-def prevent_prep_terms_base(
-    *,
-    age: float,
-    total_c_mgdl: float,
-    hdl_c_mgdl: float,
-    sbp: float,
-    dm: bool,
-    smoking: bool,
-    bmi: float,
-    egfr: float,
-    bp_tx: bool,
-    statin: bool,
-) -> Dict[str, float]:
-    age_term = (age - 55.0) / 10.0
-    age_sq = age_term ** 2
-    non_hdl_mmol = _chol_mgdl_to_mmol(total_c_mgdl - hdl_c_mgdl) - 3.5
-    hdl_term = (_chol_mgdl_to_mmol(hdl_c_mgdl) - 1.3) / 0.3
-    sbp_lt_110 = (min(sbp, 110.0) - 110.0) / 20.0
-    sbp_gte_110 = (max(sbp, 110.0) - 130.0) / 20.0
-    bmi_lt_30 = (min(bmi, 30.0) - 25.0) / 5.0
-    bmi_gte_30 = (max(bmi, 30.0) - 30.0) / 5.0
-    egfr_lt_60 = (min(egfr, 60.0) - 60.0) / -15.0
-    egfr_gte_60 = (max(egfr, 60.0) - 90.0) / -15.0
-    dm01 = _as01(dm)
-    smk01 = _as01(smoking)
-    bp01 = _as01(bp_tx)
-    st01 = _as01(statin)
-    terms = {
-        "constant": 1.0,
-        "age": age_term,
-        "age_squared": age_sq,
-        "non_hdl_c": non_hdl_mmol,
-        "hdl_c": hdl_term,
-        "sbp_lt_110": sbp_lt_110,
-        "sbp_gte_110": sbp_gte_110,
-        "dm": dm01,
-        "smoking": smk01,
-        "bmi_lt_30": bmi_lt_30,
-        "bmi_gte_30": bmi_gte_30,
-        "egfr_lt_60": egfr_lt_60,
-        "egfr_gte_60": egfr_gte_60,
-        "bp_tx": bp01,
-        "statin": st01,
-        "bp_tx_sbp_gte_110": bp01 * sbp_gte_110,
-        "statin_non_hdl_c": st01 * non_hdl_mmol,
-        "age_non_hdl_c": age_term * non_hdl_mmol,
-        "age_hdl_c": age_term * hdl_term,
-        "age_sbp_gte_110": age_term * sbp_gte_110,
-        "age_dm": age_term * dm01,
-        "age_smoking": age_term * smk01,
-        "age_bmi_gte_30": age_term * bmi_gte_30,
-        "age_egfr_lt_60": age_term * egfr_lt_60,
-    }
-    return terms
-
-def prevent_apply_logistic(beta: Dict[str, float], terms: Dict[str, float], dp: int = 2) -> float:
-    log_odds = 0.0
-    for k, b in beta.items():
-        log_odds += float(b) * float(terms.get(k, 0.0))
-    r = math.exp(log_odds) / (1.0 + math.exp(log_odds))
-    return _round_half_up(r * 100.0, dp=dp)
-# ============================================================
-# PREVENT (AHA) — Base model (from AHAprevent R package v1.0.0)
+# PREVENT (AHA) — Population model comparator (AHAprevent R pkg v1.0.0)
 # 10-year Total CVD + 10-year ASCVD
 # Logistic form: 100 * exp(logor)/(1+exp(logor))
-# Inputs: sex, age, tc, hdl, sbp, dm, smoking, egfr, bptreat, statin
+# Inputs used by base model: sex, age, tc, hdl, sbp, dm, smoking, egfr, bptreat, statin
 # ============================================================
 
 def mmol_conversion(x_mgdl: float) -> float:
@@ -286,7 +205,6 @@ def _prevent_logistic_pct(logor: float) -> float:
 
 # Exact expressions copied from AHAprevent::pred_risk_base (sex==1 female, else male)
 _PREVENT_BASE_LOGOR_10Y = {
-    # sex=1 (female)
     ("female", "total_cvd"):
         "-3.307728 + "
         "0.7939329*(age - 55)/10 + "
@@ -331,7 +249,6 @@ _PREVENT_BASE_LOGOR_10Y = {
         "0.0791142*(age - 55)/10*(smoking) - "
         "0.1671492*(age - 55)/10*(min(egfr, 60) - 60)/(-15)",
 
-    # sex=0 (male)
     ("male", "total_cvd"):
         "-3.031168 + "
         "0.7688528*(age - 55)/10 + "
@@ -378,7 +295,7 @@ _PREVENT_BASE_LOGOR_10Y = {
 }
 
 def _prevent_eval_logor(expr: str, *, age, tc, hdl, sbp, dm, smoking, egfr, bptreat, statin) -> float:
-    # Safe eval: no builtins, only our allowed functions
+    # Safe eval: no builtins, only allowed functions
     scope = {
         "math": math,
         "min": min,
@@ -398,8 +315,8 @@ def _prevent_eval_logor(expr: str, *, age, tc, hdl, sbp, dm, smoking, egfr, bptr
 
 def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    PREVENT base model (AHAprevent R pkg v1.0.0): 10y total CVD + 10y ASCVD.
-    Requires core PREVENT inputs used by base model.
+    PREVENT (population model) base equations (AHAprevent v1.0.0):
+    10-year total CVD and 10-year ASCVD.
     """
     req = ["age","sex","tc","hdl","sbp","bp_treated","smoking","diabetes","egfr","lipid_lowering"]
     missing = [k for k in req if not p.has(k)]
@@ -422,23 +339,22 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
             "notes": "PREVENT (population model) validated for ages 30–79.",
         }
 
-    # Sex mapping: engine stores "M"/"F"
     sex_raw = str(p.get("sex","")).lower()
     sex_key = "female" if sex_raw in ("f","female") else "male"
 
-    # Basic input validity (mirrors the R package behavior for base model)
     tc = safe_float(p.get("tc"), 0)
     hdl = safe_float(p.get("hdl"), 0)
     sbp = safe_float(p.get("sbp"), 0)
     egfr = safe_float(p.get("egfr"), 0)
 
-    if tc < 130 or tc > 320 or hdl < 20 or hdl > 100 or sbp < 90 or sbp > 200 or egfr <= 0:
-        add_trace(trace, "PREVENT_inputs_out_of_range", {"tc":tc,"hdl":hdl,"sbp":sbp,"egfr":egfr}, "PREVENT not calculated")
+    # Conservative range gate (optional; you can relax later)
+    if tc <= 0 or hdl <= 0 or sbp <= 0 or egfr <= 0:
+        add_trace(trace, "PREVENT_invalid_inputs", {"tc":tc,"hdl":hdl,"sbp":sbp,"egfr":egfr}, "PREVENT not calculated")
         return {
             "total_cvd_10y_pct": None,
             "ascvd_10y_pct": None,
             "missing": [],
-            "notes": "PREVENT (population model) not calculated (inputs out of validated ranges).",
+            "notes": "PREVENT (population model) not calculated (invalid inputs).",
         }
 
     dm = bool(p.get("diabetes"))
@@ -446,7 +362,7 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
     bptreat = bool(p.get("bp_treated"))
     statin = bool(p.get("lipid_lowering"))
 
-    logor_cvd = _prevent_eval_logor(
+    logor_total = _prevent_eval_logor(
         _PREVENT_BASE_LOGOR_10Y[(sex_key, "total_cvd")],
         age=age, tc=tc, hdl=hdl, sbp=sbp, dm=dm, smoking=smoking, egfr=egfr, bptreat=bptreat, statin=statin,
     )
@@ -455,89 +371,15 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
         age=age, tc=tc, hdl=hdl, sbp=sbp, dm=dm, smoking=smoking, egfr=egfr, bptreat=bptreat, statin=statin,
     )
 
-    total_pct = _prevent_logistic_pct(logor_cvd)
+    total_pct = _prevent_logistic_pct(logor_total)
     ascvd_pct = _prevent_logistic_pct(logor_ascvd)
 
-    add_trace(trace, "PREVENT_calculated", {"sex": sex_key, "total": total_pct, "ascvd": ascvd_pct}, "PREVENT 10y calculated (base model)")
+    add_trace(trace, "PREVENT_calculated", {"sex": sex_key, "total": total_pct, "ascvd": ascvd_pct}, "PREVENT 10y calculated (population model)")
     return {
         "total_cvd_10y_pct": total_pct,
         "ascvd_10y_pct": ascvd_pct,
         "missing": [],
         "notes": "PREVENT (population model) base equations (AHAprevent v1.0.0): 10y total CVD + 10y ASCVD.",
-    }
-
-def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-    req = ["age","sex","tc","hdl","sbp","bp_treated","smoking","diabetes","bmi","egfr","lipid_lowering"]
-    missing = [k for k in req if not p.has(k)]
-    if missing:
-        add_trace(trace, "PREVENT_missing_inputs", missing, "PREVENT not calculated")
-        return {
-            "total_cvd_10y_pct": None,
-            "ascvd_10y_pct": None,
-            "missing": missing,
-            "notes": "PREVENT not calculated (missing required inputs).",
-        }
-
-    age = int(p.get("age"))
-    if age < 30 or age > 79:
-        add_trace(trace, "PREVENT_age_out_of_range", age, "Validated for ages 30–79")
-        return {
-            "total_cvd_10y_pct": None,
-            "ascvd_10y_pct": None,
-            "missing": [],
-            "notes": "PREVENT validated for ages 30–79.",
-        }
-
-    sex = str(p.get("sex", "")).lower()
-    sex_key = "male" if sex in ("m","male") else "female"
-
-    terms = prevent_prep_terms_base(
-        age=float(age),
-        total_c_mgdl=float(p.get("tc")),
-        hdl_c_mgdl=float(p.get("hdl")),
-        sbp=float(p.get("sbp")),
-        dm=bool(p.get("diabetes")),
-        smoking=bool(p.get("smoking")),
-        bmi=float(p.get("bmi")),
-        egfr=float(p.get("egfr")),
-        bp_tx=bool(p.get("bp_treated")),
-        statin=bool(p.get("lipid_lowering")),
-    )
-    terms.pop("age_squared", None)
-
-    coef_bank = PREVENT_COEFS.get("10yr", {}).get(sex_key, {})
-    b_total = (coef_bank.get("total_cvd") or {})
-    b_ascvd = (coef_bank.get("ascvd") or {})
-
-    if not b_total or not b_ascvd:
-        add_trace(trace, "PREVENT_coefficients_missing", sex_key, "Coefficients not loaded into PREVENT_COEFS")
-        if USE_PREVENT_SIMULATION:
-            # Rough simulation: PREVENT often 20-30% lower than PCE
-            pce_risk = p.get("pooledCohortEquations10yAscvdRisk", {}).get("risk_pct", 10.0)
-            sim_total = pce_risk * 0.75
-            sim_ascvd = pce_risk * 0.7
-            return {
-                "total_cvd_10y_pct": round(sim_total, 1),
-                "ascvd_10y_pct": round(sim_ascvd, 1),
-                "missing": [],
-                "notes": "SIMULATED PREVENT values (debug mode; awaiting real coefficients)",
-            }
-        return {
-            "total_cvd_10y_pct": None,
-            "ascvd_10y_pct": None,
-            "missing": [],
-            "notes": "PREVENT calculation not available yet (awaiting licensed AHA coefficients). Using PCE only for now.",
-        }
-
-    total_pct = prevent_apply_logistic(b_total, terms, dp=2)
-    ascvd_pct = prevent_apply_logistic(b_ascvd, terms, dp=2)
-
-    add_trace(trace, "PREVENT_calculated", {"sex": sex_key, "total": total_pct, "ascvd": ascvd_pct}, "PREVENT 10y calculated")
-    return {
-        "total_cvd_10y_pct": total_pct,
-        "ascvd_10y_pct": ascvd_pct,
-        "missing": [],
-        "notes": "PREVENT base model (10-year): total CVD and ASCVD.",
     }
 
 # ----------------------------
@@ -1766,6 +1608,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"• {item}")
 
     return "\n".join(lines)
+
 
 
 
