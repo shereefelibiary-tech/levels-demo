@@ -1000,6 +1000,8 @@ data = {
     "bmi": float(bmi) if bmi and bmi > 0 else None,
     "egfr": float(egfr) if egfr and egfr > 0 else None,
     "lipid_lowering": (lipid_lowering == "Yes"),
+    "uacr": float(st.session_state.get("uacr_val", 0)) if st.session_state.get("uacr_val", 0) > 0 else None,
+    "sdi_decile": int(st.session_state.get("sdi_decile_val", 0)) if 1 <= int(st.session_state.get("sdi_decile_val", 0) or 0) <= 10 else None,
 }
 data = {k: v for k, v in data.items() if v is not None}
 
@@ -1287,6 +1289,7 @@ st.caption(
     f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
     f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
