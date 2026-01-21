@@ -1196,6 +1196,9 @@ def build_emr_note() -> str:
 # ============================================================
 tab_report, tab_details, tab_debug = st.tabs(["Report", "Details", "Debug"])
 
+# ----------------------------
+# REPORT TAB
+# ----------------------------
 with tab_report:
     st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
@@ -1212,18 +1215,23 @@ with tab_report:
 """,
         unsafe_allow_html=True,
     )
+
     st.caption(PREVENT_EXPLAINER)
     if (p_total is None and p_ascvd is None) and p_note:
         st.caption(f"PREVENT (population model): {p_note}")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    # Targets
     st.markdown('<div class="block"><div class="block-title">Targets</div>', unsafe_allow_html=True)
     if primary:
         lipid_targets_line = f"{primary[0]} {primary[1]}"
         if apob_line:
             lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
-        st.markdown(f"<div class='kvline'><b>Lipid targets:</b> {lipid_targets_line}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='kvline'><b>Lipid targets:</b> {lipid_targets_line}</div>",
+            unsafe_allow_html=True,
+        )
         st.caption(guideline_anchor_note(level, clinical_ascvd))
         if apob_line and not apob_measured:
             st.caption("ApoB not measured here — optional add-on to check for discordance.")
@@ -1233,6 +1241,7 @@ with tab_report:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    # Plan & actions
     st.markdown('<div class="block"><div class="block-title">Plan & actions</div></div>', unsafe_allow_html=True)
     st.markdown(f"**Plan:** {plan_clean or '—'}")
 
@@ -1253,6 +1262,7 @@ with tab_report:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    # Clinical context
     st.markdown('<div class="block"><div class="block-title">Clinical context</div></div>', unsafe_allow_html=True)
     if drivers:
         st.markdown(f"**Risk driver:** {drivers[0]}")
@@ -1267,10 +1277,16 @@ with tab_report:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    # ----------------------------
+    # EMR COPY BOX (MUST BE INSIDE tab_report)
+    # ----------------------------
     st.markdown("### Clinical Report (copy/paste into EMR)")
     st.caption("Click **Copy**, then paste into the EMR note.")
-    emr_copy_box("Clinical Report (EMR paste)", emr_note, height_px=560)
+    emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
 
+# ----------------------------
+# DETAILS TAB
+# ----------------------------
 with tab_details:
     st.subheader("Anchors (near-term vs lifetime)")
     st.markdown(f"**Near-term anchor:** {near_anchor}")
@@ -1287,7 +1303,7 @@ with tab_details:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    st.subheader("PREVENT (population model) (details)")
+    st.subheader("PREVENT (population model) — details")
     st.caption(PREVENT_EXPLAINER)
     if p_total is not None or p_ascvd is not None:
         st.markdown(f"**10-year total CVD:** {p_total}%")
@@ -1299,6 +1315,9 @@ with tab_details:
         for item in legend:
             st.write(f"• {scrub_terms(item)}")
 
+# ----------------------------
+# DEBUG TAB
+# ----------------------------
 with tab_debug:
     st.subheader("Engine quick output (raw text)")
     st.code(note_text, language="text")
@@ -1311,9 +1330,11 @@ with tab_debug:
         st.json(out)
 
 st.caption(
-    f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | {VERSION.get('riskCalc','')} | "
-    f"{VERSION.get('aspirin','')} | {VERSION.get('prevent','')}. No storage intended."
+    f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | "
+    f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
+    f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
