@@ -1,28 +1,12 @@
 # app.py (Risk Continuum — v2.8 clinician-clean layout)
-#
 # FULL, UPDATED VERSION (no "Overview" tab)
-# - Tabs: Report | Details | Debug
-# - SmartPhrase ingest: Parse & Apply (inline, no callbacks/ordering bugs)
-# - Parse & Apply is robust:
-#     • Resets CAC when not done/missing (prevents carryover)
-#     • Uses parser outputs: sbp, diabetes, fhx_text, cac_not_done
-#     • Avoids diabetes false-positives (no negation-guard fallback)
-# - Imaging block moved OUTSIDE the form so CAC enable/disable is live
-# - Engine caching (5 min TTL) via data_json key (safe + deterministic)
-# - Last calculation timestamp
-# - Aspirin shows "status — explanation" (engine provides asp["explanation"])
-# - Polished Clinical Report Box with a real COPY button (no downloads)
-# - PREVENT always visible, labeled explicitly as "population model"
-# - Adds a short PREVENT explainer: values are 10-year risk percentages from a population model
 #
-# Requirements:
-# - smartphrase_ingest.parser.parse_smartphrase returns keys like:
-#     age, sex, sbp, tc, hdl, ldl, apob, lpa, lpa_unit, a1c,
-#     smoker, diabetes, bpTreated, africanAmerican,
-#     bmi, egfr, lipidLowering,
-#     fhx_text, cac_not_done, (optional) cac
-#
-# NOTE: Use spaces (4) for indentation. Avoid tabs.
+# Tabs: Report | Details | Debug
+# SmartPhrase ingest: Parse & Apply (inline)
+# Imaging moved OUTSIDE form so CAC enable/disable is live
+# Polished EMR copy box with COPY button (no downloads)
+# PREVENT always visible, labeled explicitly as population model, shown with % everywhere
+# PREVENT extras: UACR + SDI decile (optional)
 
 import json
 import re
@@ -61,10 +45,10 @@ FALLBACK_LEVEL_LEGEND = [
     "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
 ]
 
+# ✅ One definition only
 PREVENT_EXPLAINER = (
-    "**PREVENT is a population event-risk estimate (10-year probability, in %).** "
-    "“Total CVD” includes ASCVD **plus** other major cardiovascular outcomes (e.g., heart failure). "
-    "It does **not** measure plaque; use CAC/ApoB/Lp(a) to refine biologic/structural risk."
+    "PREVENT estimates 10-year population event risk (%); total CVD includes ASCVD plus heart failure "
+    "and complements plaque/biology-based risk assessment."
 )
 
 # ============================================================
@@ -153,10 +137,7 @@ PHI_PATTERNS = [
 def contains_phi(s: str) -> bool:
     if not s:
         return False
-    for pat in PHI_PATTERNS:
-        if re.search(pat, s, re.IGNORECASE):
-            return True
-    return False
+    return any(re.search(pat, s, re.IGNORECASE) for pat in PHI_PATTERNS)
 
 def scrub_terms(s: str) -> str:
     if not s:
@@ -490,7 +471,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
 
     lpa_v = coerce_float(parsed.get("lpa"))
     if lpa_v is not None:
-        st.session_state["lpa_val"] = int(lpa_v)
+        st.session_state["lpa_val"] = float(lpa_v)
         applied.append("Lp(a)")
     else:
         missing.append("Lp(a)")
@@ -519,6 +500,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["smoking_val"] = "Yes" if bool(parsed["smoker"]) else "No"
         applied.append("Smoking")
 
+    # Diabetes: trust parser only
     if parsed.get("diabetes") is not None:
         st.session_state["diabetes_choice_val"] = "Yes" if bool(parsed["diabetes"]) else "No"
         applied.append("Diabetes")
@@ -544,6 +526,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("Premature family history")
 
+    # CAC reset logic
     if parsed.get("cac_not_done") is True:
         st.session_state["cac_known_val"] = "No"
         st.session_state["cac_val"] = 0
@@ -559,6 +542,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
             st.session_state["cac_val"] = 0
             missing.append("Calcium score")
 
+    # PREVENT fields
     if parsed.get("bmi") is not None:
         try:
             st.session_state["bmi_val"] = float(parsed["bmi"])
@@ -577,6 +561,7 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["lipid_lowering_val"] = "Yes" if bool(parsed["lipidLowering"]) else "No"
         applied.append("Lipid therapy")
 
+    # Optional: hsCRP + inflammatory flags
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
@@ -593,42 +578,53 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
 # ============================================================
 # Session defaults + demo controls
 # ============================================================
-def reset_fields():
-    defaults = {
-        "age_val": 0,
-        "sex_val": "F",
-        "race_val": "Other (use non-African American coefficients)",
-        "ascvd_val": "No",
-        "fhx_choice_val": "None / Unknown",
-        "sbp_val": 0,
-        "bp_treated_val": "No",
-        "smoking_val": "No",
-        "diabetes_choice_val": "No",
-        "a1c_val": 0.0,
-        "tc_val": 0,
-        "ldl_val": 0,
-        "hdl_val": 0,
-        "apob_val": 0,
-        "lpa_val": 0,
-        "lpa_unit_val": "nmol/L",
-        "hscrp_val": 0.0,
-        "cac_known_val": "No",
-        "cac_val": 0,
-        "bmi_val": 0.0,
-        "egfr_val": 0.0,
-        "lipid_lowering_val": "No",
-        "demo_defaults_applied": False,
-        "last_applied_msg": "",
-        "last_missing_msg": "",
-        "parsed_preview_cache": {},
-        "smartphrase_raw": "",
-    }
-    for k, v in defaults.items():
-        st.session_state[k] = v
+DEFAULTS = {
+    "age_val": 0,
+    "sex_val": "F",
+    "race_val": "Other (use non-African American coefficients)",
+    "ascvd_val": "No",
+    "fhx_choice_val": "None / Unknown",
+    "sbp_val": 0,
+    "bp_treated_val": "No",
+    "smoking_val": "No",
+    "diabetes_choice_val": "No",
+    "a1c_val": 0.0,
+    "tc_val": 0,
+    "ldl_val": 0,
+    "hdl_val": 0,
+    "apob_val": 0,
+    "lpa_val": 0.0,
+    "lpa_unit_val": "nmol/L",
+    "hscrp_val": 0.0,
+    "cac_known_val": "No",
+    "cac_val": 0,
+    "bmi_val": 0.0,
+    "egfr_val": 0.0,
+    "lipid_lowering_val": "No",
+    "uacr_val": 0.0,
+    "sdi_decile_val": 0,
+    "smartphrase_raw": "",
+    "parsed_preview_cache": {},
+    "last_applied_msg": "",
+    "last_missing_msg": "",
+    "demo_defaults_on": True,
+    "demo_defaults_applied": False,
+}
 
+for k, v in DEFAULTS.items():
+    st.session_state.setdefault(k, v)
+
+for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
+    st.session_state.setdefault(f"infl_{k}_val", False)
+
+for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
+    st.session_state.setdefault(bk, False)
+
+def reset_fields():
+    for k, v in DEFAULTS.items():
+        st.session_state[k] = v
     for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{kk}_val"] = False
-
     for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
         st.session_state[bk] = False
 
@@ -647,7 +643,7 @@ def apply_demo_defaults():
         "hdl_val": 50,
         "ldl_val": 115,
         "apob_val": 92,
-        "lpa_val": 90,
+        "lpa_val": 90.0,
         "lpa_unit_val": "nmol/L",
         "a1c_val": 5.8,
         "hscrp_val": 1.2,
@@ -656,55 +652,16 @@ def apply_demo_defaults():
         "bmi_val": 28.0,
         "egfr_val": 85.0,
         "lipid_lowering_val": "No",
+        "uacr_val": 0.0,
+        "sdi_decile_val": 0,
         "demo_defaults_applied": True,
     })
     for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{kk}_val"] = False
 
-for key, default in [
-    ("age_val", 0),
-    ("sex_val", "F"),
-    ("race_val", "Other (use non-African American coefficients)"),
-    ("ascvd_val", "No"),
-    ("fhx_choice_val", "None / Unknown"),
-    ("sbp_val", 0),
-    ("bp_treated_val", "No"),
-    ("smoking_val", "No"),
-    ("diabetes_choice_val", "No"),
-    ("a1c_val", 0.0),
-    ("tc_val", 0),
-    ("ldl_val", 0),
-    ("hdl_val", 0),
-    ("apob_val", 0),
-    ("lpa_val", 0),
-    ("lpa_unit_val", "nmol/L"),
-    ("hscrp_val", 0.0),
-    ("cac_known_val", "No"),
-    ("cac_val", 0),
-    ("bmi_val", 0.0),
-    ("egfr_val", 0.0),
-    ("lipid_lowering_val", "No"),
-    ("smartphrase_raw", ""),
-    ("parsed_preview_cache", {}),
-    ("last_applied_msg", ""),
-    ("last_missing_msg", ""),
-    ("demo_defaults_on", True),
-    ("demo_defaults_applied", False),
-]:
-    st.session_state.setdefault(key, default)
-
-for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
-    st.session_state.setdefault(f"infl_{k}_val", False)
-for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
-    st.session_state.setdefault(bk, False)
-
 with st.sidebar:
     st.markdown("### Demo")
-    st.session_state["demo_defaults_on"] = st.checkbox(
-        "Use demo defaults (auto-fill)",
-        value=st.session_state["demo_defaults_on"],
-    )
-
+    st.session_state["demo_defaults_on"] = st.checkbox("Use demo defaults (auto-fill)", value=st.session_state["demo_defaults_on"])
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Apply demo"):
@@ -750,7 +707,6 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
             else:
                 parsed = parse_smartphrase(raw_txt)
                 st.session_state["parsed_preview_cache"] = parsed
-
                 applied, missing = apply_parsed_to_session(parsed, raw_txt)
                 st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
                 st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "All good!")
@@ -793,13 +749,7 @@ st.subheader("Imaging")
 
 d1, d2 = st.columns([1, 2])
 with d1:
-    st.radio(
-        "Calcium score available?",
-        ["Yes", "No"],
-        horizontal=True,
-        key="cac_known_val",
-    )
-
+    st.radio("Calcium score available?", ["Yes", "No"], horizontal=True, key="cac_known_val")
 with d2:
     st.number_input(
         "Calcium score (Agatston)",
@@ -926,7 +876,6 @@ with st.form("risk_continuum_form"):
     show_json = st.checkbox("Show JSON (debug)", value=False)
     submitted = st.form_submit_button("Run", type="primary")
 
-
 # ============================================================
 # Cached engine call
 # ============================================================
@@ -957,10 +906,10 @@ if req_errors:
     st.error("Please complete required fields:\n- " + "\n- ".join(req_errors))
     st.stop()
 
-# Gentle hint for PREVENT (population model) calculation
 if st.session_state.get("egfr_val", 0) <= 0:
     st.warning("PREVENT (population model) needs eGFR > 0 to calculate. Enter eGFR to enable PREVENT output.")
 
+# Pull session values
 age = st.session_state["age_val"]
 sex = st.session_state["sex_val"]
 race = st.session_state["race_val"]
@@ -1083,64 +1032,34 @@ st.caption(f"Last calculation: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 # ============================================================
 # EMR Note text (for copy box)
 # ============================================================
-PREVENT_EXPLAINER = "(PREVENT estimates 10-year population event risk (%); total CVD includes ASCVD + heart failure and complements plaque/biology-based risk assessment.)"
-
-
-
 def build_emr_note() -> str:
     lines = []
-
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
     lines.append("-" * 64)
-
-    lines.append(
-        f"Level: {level}"
-        + (f" ({sub})" if sub else "")
-        + f" — {LEVEL_NAMES.get(level,'—')}"
-    )
-
-    lines.append(
-        f"Evidence: {scrub_terms(ev.get('cac_status','—'))} / "
-        f"Burden: {scrub_terms(ev.get('burden_band','—'))}"
-    )
-
+    lines.append(f"Level: {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
+    lines.append(f"Evidence: {scrub_terms(ev.get('cac_status','—'))} / Burden: {scrub_terms(ev.get('burden_band','—'))}")
     lines.append(f"Decision confidence: {decision_conf}")
 
     if ins.get("decision_robustness"):
         rob = scrub_terms(ins.get("decision_robustness"))
         rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
-        if rob_note:
-            lines.append(f"Decision robustness: {rob} — {rob_note}")
-        else:
-            lines.append(f"Decision robustness: {rob}")
+        lines.append(f"Decision robustness: {rob}" + (f" — {rob_note}" if rob_note else ""))
 
-    # --------------------------------------------------------
     lines.append("")
     lines.append("KEY METRICS")
-
-    lines.append(
-        f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})"
-    )
-
-    lines.append(
-        f"- PCE 10y ASCVD: {pce_line} {pce_cat}".strip()
-    )
-
+    lines.append(f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})")
+    lines.append(f"- PCE 10y ASCVD: {pce_line} {pce_cat}".strip())
     lines.append(
         f"- PREVENT (population model) 10y: "
         f"total CVD {p_total if p_total is not None else '—'}%; "
         f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
     )
-
     if (p_total is None and p_ascvd is None) and p_note:
         lines.append(f"  PREVENT note: {p_note}")
+    lines.append(f"  ({PREVENT_EXPLAINER})")
 
-    lines.append(f"  {PREVENT_EXPLAINER}")
-
-    # --------------------------------------------------------
     lines.append("")
     lines.append("TARGETS")
-
     if primary:
         tgt = f"- {primary[0]} {primary[1]}"
         if apob_line:
@@ -1149,12 +1068,9 @@ def build_emr_note() -> str:
     else:
         lines.append("- —")
 
-    # --------------------------------------------------------
     lines.append("")
     lines.append("PLAN & ACTIONS")
-
     lines.append(f"- Plan: {plan_clean or '—'}")
-
     if next_actions:
         lines.append("- Next steps:")
         for a in next_actions[:3]:
@@ -1170,35 +1086,23 @@ def build_emr_note() -> str:
     if ins.get("structural_clarification"):
         lines.append(f"- {scrub_terms(ins.get('structural_clarification'))}")
 
-    # --------------------------------------------------------
     lines.append("")
     lines.append("CLINICAL CONTEXT")
-
     if drivers:
         lines.append(f"- Risk driver: {drivers[0]}")
-
     if ins.get("phenotype_label"):
         lines.append(f"- Phenotype: {scrub_terms(ins.get('phenotype_label'))}")
-
     if ev.get("cac_status") == "Unknown":
         lines.append("- Structural status: Unknown (CAC not performed)")
-
-    lines.append(
-        f"- Anchors: Near-term: {near_anchor} | Lifetime: {life_anchor}"
-    )
-
+    lines.append(f"- Anchors: Near-term: {near_anchor} | Lifetime: {life_anchor}")
     lines.append("")
     return "\n".join(lines)
-
 
 # ============================================================
 # Tabs
 # ============================================================
 tab_report, tab_details, tab_debug = st.tabs(["Report", "Details", "Debug"])
 
-# ----------------------------
-# REPORT TAB
-# ----------------------------
 with tab_report:
     st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
@@ -1210,7 +1114,10 @@ with tab_report:
   <div class="kvline"><b>Evidence:</b> {scrub_terms(ev.get('cac_status','—'))} / <b>Burden:</b> {scrub_terms(ev.get('burden_band','—'))}</div>
   <div class="kvline"><b>Decision confidence:</b> {decision_conf}</div>
   <div class="kvline"><b>Key metrics:</b> RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • PCE 10y {pce_line} {pce_cat}</div>
-  <div class="kvline"><b>PREVENT (population model) 10y:</b> total CVD {p_total if p_total is not None else '—'} • ASCVD {p_ascvd if p_ascvd is not None else '—'}</div>
+  <div class="kvline"><b>PREVENT (population model) 10y:</b>
+      total CVD {f"{p_total}%" if p_total is not None else '—'} •
+      ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
+  </div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -1222,16 +1129,12 @@ with tab_report:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    # Targets
     st.markdown('<div class="block"><div class="block-title">Targets</div>', unsafe_allow_html=True)
     if primary:
         lipid_targets_line = f"{primary[0]} {primary[1]}"
         if apob_line:
             lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
-        st.markdown(
-            f"<div class='kvline'><b>Lipid targets:</b> {lipid_targets_line}</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"<div class='kvline'><b>Lipid targets:</b> {lipid_targets_line}</div>", unsafe_allow_html=True)
         st.caption(guideline_anchor_note(level, clinical_ascvd))
         if apob_line and not apob_measured:
             st.caption("ApoB not measured here — optional add-on to check for discordance.")
@@ -1241,7 +1144,6 @@ with tab_report:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    # Plan & actions
     st.markdown('<div class="block"><div class="block-title">Plan & actions</div></div>', unsafe_allow_html=True)
     st.markdown(f"**Plan:** {plan_clean or '—'}")
 
@@ -1262,7 +1164,6 @@ with tab_report:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    # Clinical context
     st.markdown('<div class="block"><div class="block-title">Clinical context</div></div>', unsafe_allow_html=True)
     if drivers:
         st.markdown(f"**Risk driver:** {drivers[0]}")
@@ -1277,16 +1178,10 @@ with tab_report:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    # ----------------------------
-    # EMR COPY BOX (MUST BE INSIDE tab_report)
-    # ----------------------------
     st.markdown("### Clinical Report (copy/paste into EMR)")
     st.caption("Click **Copy**, then paste into the EMR note.")
     emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
 
-# ----------------------------
-# DETAILS TAB
-# ----------------------------
 with tab_details:
     st.subheader("Anchors (near-term vs lifetime)")
     st.markdown(f"**Near-term anchor:** {near_anchor}")
@@ -1315,9 +1210,6 @@ with tab_details:
         for item in legend:
             st.write(f"• {scrub_terms(item)}")
 
-# ----------------------------
-# DEBUG TAB
-# ----------------------------
 with tab_debug:
     st.subheader("Engine quick output (raw text)")
     st.code(note_text, language="text")
@@ -1334,7 +1226,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
 
