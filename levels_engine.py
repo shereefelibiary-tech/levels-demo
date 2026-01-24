@@ -1560,5 +1560,118 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
     return "\n".join(lines)
 
+# ============================================================
+# COMPATIBILITY PATCH (drop-in; paste at END of file)
+# Restores legacy exports expected by app.py v2.8
+# ============================================================
+
+# Debug sentinel used by app.py (safe to expose)
+try:
+    PCE_DEBUG_SENTINEL
+except NameError:
+    PCE_DEBUG_SENTINEL = "PCE_EPIC_2019_ALIGNED_v2_9"
+
+# short_why helper expected by app.py import
+def short_why(items: List[str], max_items: int = 2) -> str:
+    if not items:
+        return ""
+    cleaned = [str(x).strip() for x in items if str(x).strip()]
+    return "; ".join(cleaned[:max_items])
+
+# Legend helper (optional but keeps lvl.get("legend") populated)
+def levels_legend_compact() -> List[str]:
+    return [
+        "Level 1: minimal signal → reinforce basics, periodic reassess",
+        "Level 2A: mild/isolated signal → education, complete data, lifestyle sprint",
+        "Level 2B: converging signals → lifestyle sprint + shorter reassess",
+        "Level 3A: actionable biologic risk → shared decision; consider therapy based on trajectory",
+        "Level 3B: biologic risk + enhancers → therapy often favored; refine with CAC if unknown",
+        "Level 4: subclinical plaque present → treat like early disease; target-driven therapy",
+        "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
+    ]
+
+def _level3_sublevel_compat(p: Patient, risk10: Dict[str, Any]) -> str:
+    """
+    Matches your prior semantics loosely:
+    - 3B if enhancers present (Lp(a) elevated OR FHx OR inflammation)
+    - 3C if intermediate risk (>=7.5) without enhancers
+    - 3A otherwise
+    """
+    enh = 0
+    try:
+        # Lp(a) elevated without trace
+        if lpa_elevated_no_trace(p):
+            enh += 1
+    except Exception:
+        pass
+    if p.get("fhx") is True:
+        enh += 1
+    try:
+        if inflammation_flags(p) or has_chronic_inflammatory_disease(p):
+            enh += 1
+    except Exception:
+        pass
+
+    rp = risk10.get("risk_pct")
+    intermediate = (rp is not None and float(rp) >= 7.5)
+
+    if enh >= 1:
+        return "3B"
+    if intermediate:
+        return "3C"
+    return "3A"
+
+# Wrap evaluate() to add legacy keys without editing earlier code
+try:
+    _evaluate_impl = evaluate  # keep original
+except NameError:
+    _evaluate_impl = None
+
+def evaluate(p: Patient) -> Dict[str, Any]:
+    """
+    Backward-compatible wrapper:
+    - keeps engine output intact
+    - adds legacy fields required by app.py v2.8
+    """
+    if _evaluate_impl is None:
+        raise RuntimeError("Internal error: base evaluate() not found")
+
+    out = _evaluate_impl(p)
+
+    # Ensure levels has sublevel + legend
+    lvl = out.get("levels") or {}
+    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+    risk10 = out.get("pooledCohortEquations10yAscvdRisk") or out.get("ascvdPce10yRisk") or {}
+    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 1)
+
+    if level == 3 and not lvl.get("sublevel"):
+        try:
+            lvl["sublevel"] = _level3_sublevel_compat(p, risk10)
+        except Exception:
+            lvl["sublevel"] = "3A"
+
+    if not lvl.get("legend"):
+        lvl["legend"] = levels_legend_compact()
+
+    out["levels"] = lvl
+
+    # Ensure insights has legacy structural_clarification + phenotype placeholders
+    ins = out.get("insights") or {}
+    cac_support = ins.get("cac_decision_support") if isinstance(ins, dict) else None
+
+    # Provide legacy key used by app.py
+    if "structural_clarification" not in ins:
+        msg = None
+        if isinstance(cac_support, dict):
+            msg = cac_support.get("message")
+        ins["structural_clarification"] = msg
+
+    # App references these optionally
+    ins.setdefault("phenotype_label", None)
+    ins.setdefault("phenotype_definition", None)
+
+    out["insights"] = ins
+    return out
+
 
 
