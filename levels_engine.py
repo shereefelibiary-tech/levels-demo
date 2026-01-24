@@ -1,43 +1,42 @@
 # levels_engine.py
-# Risk Continuum™ Engine — v2.9
+# Risk Continuum™ Engine — v3.0 (locked language; Epic-aligned PCE; CAC gating; modality-aware plan)
 #
-# Core philosophy:
-# - Produce ease and confidence in CV risk decisions
-# - Separate biologic risk, plaque evidence, and decision confidence
-# - CAC is a late-stage optional clarifier, never a reflex trigger
-#
-# v2.9 changes:
-# - Removed legacy 2013 PCE entirely
-# - ASCVD risk aligned to Epic-style 2019 ACC/AHA interpretation
-# - CAC ordering logic decoupled from Levels (suppressed / deferred / optional)
-# - Explicit confidence language to reduce decision anxiety
+# Goals:
+# - Outputs "ease and confidence" in CV risk management decisions
+# - Senior clinical tone (no second person; no marketing language)
+# - CAC is optional/deferred/suppressed (never "recommended")
+# - Plaque concepts are explicit: Plaque Evidence vs Plaque Burden
+# - Decision Confidence vs Decision Stability are distinct, consistent, and calm
 #
 # Preserves:
 # - RSS scoring (biologic + plaque signal)
-# - PREVENT comparator
-# - Level framework
-# - Anchors, drivers, traceability
-# - EMR-safe quick text output
+# - PREVENT (population comparator)
+# - Aspirin module + bleed flags
+# - Anchors (near-term vs lifetime)
+# - Trace (auditable)
+# - EMR-friendly render_quick_text()
+# - Backward-compatible keys expected by current app.py
 
 import math
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 
 SYSTEM_NAME = "Risk Continuum™"
+PCE_DEBUG_SENTINEL = "PCE_EPIC_2019_ALIGNED_v3_0"
 
 VERSION = {
     "system": SYSTEM_NAME,
-    "levels": "v2.9-risk-continuum-confidence",
+    "levels": "v3.0-risk-continuum-locked",
     "riskSignal": "RSS v1.0",
-    "riskCalc": "ASCVD PCE (ACC/AHA 2019 interpretation; Epic-aligned)",
-    "aspirin": "Aspirin v1.0 (CAC≥100 OR ASCVD risk≥10%, age 40–69, low bleed risk)",
+    "riskCalc": "ASCVD PCE (ACC/AHA 2019 interpretation; Epic-aligned implementation)",
+    "aspirin": "Aspirin v1.0 (CAC≥100 OR ASCVD PCE≥10%, age 40–69, low bleed risk)",
     "prevent": "PREVENT (AHA) population model 10y: total CVD + ASCVD",
-    "insights": "Confidence-calibrated decision support",
+    "insights": "Locked clinical language v1.0",
 }
 
-# ----------------------------
+# -------------------------------------------------------------------
 # Patient wrapper
-# ----------------------------
+# -------------------------------------------------------------------
 @dataclass
 class Patient:
     data: Dict[str, Any]
@@ -45,12 +44,24 @@ class Patient:
     def get(self, k, d=None):
         return self.data.get(k, d)
 
-    def has(self, k):
-        return k in self.data and self.data[k] is not None
+    def has(self, k) -> bool:
+        return (k in self.data) and (self.data[k] is not None)
 
-# ----------------------------
+# -------------------------------------------------------------------
+# Trace helper
+# -------------------------------------------------------------------
+def add_trace(trace: List[Dict[str, Any]], rule: str, value: Any = None, effect: str = "") -> None:
+    trace.append({"rule": rule, "value": value, "effect": effect})
+
+# -------------------------------------------------------------------
 # Formatting helpers
-# ----------------------------
+# -------------------------------------------------------------------
+def safe_float(val, default=0.0) -> float:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return float(default)
+
 def fmt_int(x):
     try:
         return int(round(float(x)))
@@ -63,30 +74,31 @@ def fmt_1dp(x):
     except Exception:
         return x
 
-# ----------------------------
-# Trace helper (auditable rules)
-# ----------------------------
-def add_trace(trace: List[Dict[str, Any]], rule: str, value: Any = None, effect: str = "") -> None:
-    trace.append({"rule": rule, "value": value, "effect": effect})
+def short_why(items: List[str], max_items: int = 2) -> str:
+    """Used by app.py for compact rationale displays."""
+    if not items:
+        return ""
+    cleaned = [str(x).strip() for x in items if str(x).strip()]
+    return "; ".join(cleaned[:max_items])
 
-# ----------------------------
-# Safe float
-# ----------------------------
-def safe_float(val, default=0.0):
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return default
+def levels_legend_compact() -> List[str]:
+    return [
+        "Level 1: minimal signal → reinforce basics; periodic reassess",
+        "Level 2: emerging signals → complete data; lifestyle sprint; reassess",
+        "Level 3A: actionable biology → lifestyle-first; pharmacologic reasonable if targets unmet",
+        "Level 3B: actionable biology + enhancers → pharmacologic therapy often favored; CAC optional if it would alter intensity/timing",
+        "Level 4: plaque present → treat like early disease; target-driven therapy",
+        "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
+    ]
 
-# ----------------------------
+# -------------------------------------------------------------------
 # A1c + inflammation helpers
-# ----------------------------
+# -------------------------------------------------------------------
 def a1c_status(p: Patient) -> Optional[str]:
     if not p.has("a1c"):
         return None
-    try:
-        a1c = float(p.get("a1c"))
-    except Exception:
+    a1c = safe_float(p.get("a1c"), default=float("nan"))
+    if math.isnan(a1c):
         return None
     if a1c < 5.7:
         return "normal"
@@ -98,7 +110,7 @@ def has_chronic_inflammatory_disease(p: Patient) -> bool:
     return any(p.get(k) is True for k in ["ra", "psoriasis", "sle", "ibd", "hiv"])
 
 def inflammation_flags(p: Patient) -> List[str]:
-    flags = []
+    flags: List[str] = []
     if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2:
         flags.append("hsCRP≥2")
     for k, label in [
@@ -114,17 +126,16 @@ def inflammation_flags(p: Patient) -> List[str]:
             flags.append(label)
     return flags
 
-# ----------------------------
-# Lp(a) normalization + threshold transparency
-# ----------------------------
+# -------------------------------------------------------------------
+# Lp(a) normalization
+# -------------------------------------------------------------------
 _LPA_MGDL_TO_NMOLL = 2.5
 
 def lpa_info(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not p.has("lpa"):
         return {"present": False}
-
     try:
-        raw_val = float(p.get("lpa"))
+        raw = float(p.get("lpa"))
     except Exception:
         return {"present": False}
 
@@ -133,34 +144,34 @@ def lpa_info(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     if "mg" in unit:
         threshold = 50.0
-        elevated = raw_val >= threshold
-        nmol_est = raw_val * _LPA_MGDL_TO_NMOLL
-        mg_est = raw_val
-        used = "mg/dL"
+        elevated = raw >= threshold
+        used_unit = "mg/dL"
+        est_nmol = raw * _LPA_MGDL_TO_NMOLL
+        est_mg = raw
     else:
         threshold = 125.0
-        elevated = raw_val >= threshold
-        nmol_est = raw_val
-        mg_est = raw_val / _LPA_MGDL_TO_NMOLL
-        used = "nmol/L"
+        elevated = raw >= threshold
+        used_unit = "nmol/L"
+        est_nmol = raw
+        est_mg = raw / _LPA_MGDL_TO_NMOLL
 
     add_trace(
         trace,
         "Lp(a)_threshold",
-        value=f"{raw_val} {unit_raw}".strip(),
-        effect=f"Used threshold {threshold} {used}; elevated={elevated} (conversion est 1 mg/dL≈2.5 nmol/L)",
+        value=f"{raw} {unit_raw}".strip(),
+        effect=f"Threshold {threshold} {used_unit}; elevated={elevated}",
     )
 
     return {
         "present": True,
-        "raw_value": raw_val,
-        "raw_unit": unit_raw or ("nmol/L" if used == "nmol/L" else "mg/dL"),
+        "raw_value": raw,
+        "raw_unit": unit_raw or used_unit,
         "used_threshold": threshold,
-        "used_unit": used,
+        "used_unit": used_unit,
         "elevated": elevated,
-        "estimated_nmolL": round(nmol_est, 1),
-        "estimated_mgdl": round(mg_est, 1),
-        "conversion_note": "Estimated conversion only; true conversion depends on isoform size.",
+        "estimated_nmolL": round(est_nmol, 1),
+        "estimated_mgdl": round(est_mg, 1),
+        "conversion_note": "Estimated conversion only; isoform-size dependent.",
     }
 
 def lpa_elevated(p: Patient, trace: List[Dict[str, Any]]) -> bool:
@@ -168,27 +179,221 @@ def lpa_elevated(p: Patient, trace: List[Dict[str, Any]]) -> bool:
     return bool(info.get("present") and info.get("elevated"))
 
 def lpa_elevated_no_trace(p: Patient) -> bool:
-    """
-    Same thresholds as lpa_info(), but without trace.
-    nmol/L elevated >=125; mg/dL elevated >=50.
-    """
     if not p.has("lpa"):
         return False
     try:
-        raw_val = float(p.get("lpa"))
+        raw = float(p.get("lpa"))
     except Exception:
         return False
-    unit_raw = str(p.get("lpa_unit", "")).strip().lower()
-    if "mg" in unit_raw:
-        return raw_val >= 50.0
-    return raw_val >= 125.0
+    unit = str(p.get("lpa_unit", "")).strip().lower()
+    if "mg" in unit:
+        return raw >= 50.0
+    return raw >= 125.0
 
+# -------------------------------------------------------------------
+# Plaque Evidence / Plaque Burden (structural only)
+# -------------------------------------------------------------------
+def plaque_state(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Plaque Evidence: whether structural plaque is established.
+    Plaque Burden: extent of plaque if assessed.
+    """
+    if p.get("ascvd") is True:
+        add_trace(trace, "PlaqueEvidence_ASCVD", True, "Clinical ASCVD")
+        return {
+            "plaque_evidence": "Clinical ASCVD",
+            "plaque_burden": "Established disease",
+            "cac_value": None,
+            "plaque_present": True,
+            "certainty": "High",
+        }
 
-# ============================================================
-# PREVENT (AHA) — Population model comparator (AHAprevent R pkg v1.0.0)
-# FULL model: 10-year Total CVD + 10-year ASCVD (%), logistic form
-# ============================================================
+    if not p.has("cac"):
+        add_trace(trace, "PlaqueEvidence_unmeasured", None, "No structural imaging")
+        return {
+            "plaque_evidence": "Unknown — no structural imaging",
+            "plaque_burden": "Not quantified",
+            "cac_value": None,
+            "plaque_present": None,
+            "certainty": "Low",
+        }
 
+    try:
+        cac = int(p.get("cac"))
+    except Exception:
+        add_trace(trace, "CAC_invalid", p.get("cac"), "CAC invalid → treated as unmeasured")
+        return {
+            "plaque_evidence": "Unknown — no structural imaging",
+            "plaque_burden": "Not quantified",
+            "cac_value": None,
+            "plaque_present": None,
+            "certainty": "Low",
+        }
+
+    if cac == 0:
+        add_trace(trace, "CAC_zero", 0, "CAC=0")
+        return {
+            "plaque_evidence": "CAC = 0",
+            "plaque_burden": "None detected",
+            "cac_value": 0,
+            "plaque_present": False,
+            "certainty": "Moderate",
+        }
+
+    if cac <= 9:
+        band = "Minimal"
+    elif cac <= 99:
+        band = "Low"
+    elif cac <= 399:
+        band = "Moderate"
+    else:
+        band = "High"
+
+    add_trace(trace, "CAC_positive", cac, f"CAC positive; burden={band}")
+    return {
+        "plaque_evidence": "CAC positive",
+        "plaque_burden": f"{band} (Agatston {cac})",
+        "cac_value": cac,
+        "plaque_present": True,
+        "certainty": "High",
+    }
+
+# -------------------------------------------------------------------
+# ASCVD PCE (Epic-aligned 2019 interpretation)
+# -------------------------------------------------------------------
+def _clip(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+def _pce_category(risk_pct: float) -> str:
+    if risk_pct < 5:
+        return "Low (<5%)"
+    if risk_pct < 7.5:
+        return "Borderline (5–7.4%)"
+    if risk_pct < 20:
+        return "Intermediate (7.5–19.9%)"
+    return "High (≥20%)"
+
+def ascvd_pce_10y_risk(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Epic-aligned implementation:
+    - Standard PCE coefficients
+    - Race: 'black' uses Black coefficients; all other races use non-Black coefficients
+    - Clips typical input ranges before ln() to reduce cross-tool mismatch
+    """
+    PCE = {
+        ("white", "female"): {"s0": 0.9665, "mean": -29.18,
+            "ln_age": -29.799, "ln_age_sq": 4.884, "ln_tc": 13.540, "ln_age_ln_tc": -3.114,
+            "ln_hdl": -13.578, "ln_age_ln_hdl": 3.149,
+            "ln_sbp_treated": 2.019, "ln_sbp_untreated": 1.957,
+            "smoker": 7.574, "ln_age_smoker": -1.665,
+            "diabetes": 0.661
+        },
+        ("black", "female"): {"s0": 0.9533, "mean": 86.61,
+            "ln_age": 17.114, "ln_tc": 0.940,
+            "ln_hdl": -18.920, "ln_age_ln_hdl": 4.475,
+            "ln_sbp_treated": 29.291, "ln_age_ln_sbp_treated": -6.432,
+            "ln_sbp_untreated": 27.820, "ln_age_ln_sbp_untreated": -6.087,
+            "smoker": 0.691, "diabetes": 0.874
+        },
+        ("white", "male"): {"s0": 0.9144, "mean": 61.18,
+            "ln_age": 12.344, "ln_tc": 11.853, "ln_age_ln_tc": -2.664,
+            "ln_hdl": -7.990, "ln_age_ln_hdl": 1.769,
+            "ln_sbp_treated": 1.797, "ln_sbp_untreated": 1.764,
+            "smoker": 7.837, "ln_age_smoker": -1.795,
+            "diabetes": 0.658
+        },
+        ("black", "male"): {"s0": 0.8954, "mean": 19.54,
+            "ln_age": 2.469, "ln_tc": 0.302, "ln_hdl": -0.307,
+            "ln_sbp_treated": 1.916, "ln_sbp_untreated": 1.809,
+            "smoker": 0.549, "diabetes": 0.645
+        },
+    }
+
+    req = ["age","sex","race","tc","hdl","sbp","bp_treated","smoking","diabetes"]
+    missing = [k for k in req if not p.has(k)]
+    if missing:
+        add_trace(trace, "PCE_missing_inputs", missing, "ASCVD PCE not calculated")
+        return {"risk_pct": None, "missing": missing, "notes": "Missing required inputs."}
+
+    try:
+        age = int(p.get("age"))
+    except Exception:
+        add_trace(trace, "PCE_age_invalid", p.get("age"), "Invalid age")
+        return {"risk_pct": None, "missing": [], "notes": "Invalid age."}
+
+    if age < 40 or age > 79:
+        add_trace(trace, "PCE_age_out_of_range", age, "Validated 40–79")
+        return {"risk_pct": None, "missing": [], "notes": "Validated for ages 40–79."}
+
+    sex_raw = str(p.get("sex", "")).strip().lower()
+    sex = "male" if sex_raw in ("m","male") else "female"
+
+    race_raw = str(p.get("race", "")).strip().lower()
+    race = "black" if race_raw in ("black","african american","african-american") else "white"
+
+    c = PCE.get((race, sex))
+    if not c:
+        add_trace(trace, "PCE_coeff_missing", (race, sex), "No coefficients")
+        return {"risk_pct": None, "missing": [], "notes": "Coefficient set not available."}
+
+    tc = _clip(safe_float(p.get("tc")), 130.0, 320.0)
+    hdl = _clip(safe_float(p.get("hdl")), 20.0, 100.0)
+    sbp = _clip(safe_float(p.get("sbp")), 90.0, 200.0)
+    treated = bool(p.get("bp_treated"))
+    smoker = bool(p.get("smoking"))
+    dm = bool(p.get("diabetes"))
+
+    ln_age = math.log(_clip(float(age), 40.0, 79.0))
+    ln_tc = math.log(tc)
+    ln_hdl = math.log(hdl)
+    ln_sbp = math.log(sbp)
+
+    lp = 0.0
+    lp += c.get("ln_age", 0) * ln_age
+    if "ln_age_sq" in c:
+        lp += c["ln_age_sq"] * (ln_age ** 2)
+
+    lp += c.get("ln_tc", 0) * ln_tc
+    if "ln_age_ln_tc" in c:
+        lp += c["ln_age_ln_tc"] * (ln_age * ln_tc)
+
+    lp += c.get("ln_hdl", 0) * ln_hdl
+    if "ln_age_ln_hdl" in c:
+        lp += c["ln_age_ln_hdl"] * (ln_age * ln_hdl)
+
+    if treated:
+        lp += c.get("ln_sbp_treated", 0) * ln_sbp
+        if "ln_age_ln_sbp_treated" in c:
+            lp += c["ln_age_ln_sbp_treated"] * (ln_age * ln_sbp)
+    else:
+        lp += c.get("ln_sbp_untreated", 0) * ln_sbp
+        if "ln_age_ln_sbp_untreated" in c:
+            lp += c["ln_age_ln_sbp_untreated"] * (ln_age * ln_sbp)
+
+    if smoker:
+        lp += c.get("smoker", 0)
+        if "ln_age_smoker" in c:
+            lp += c["ln_age_smoker"] * ln_age
+
+    if dm:
+        lp += c.get("diabetes", 0)
+
+    risk = 1 - (c["s0"] ** math.exp(lp - c["mean"]))
+    risk = max(0.0, min(1.0, float(risk)))
+    risk_pct = round(risk * 100.0, 1)
+    cat = _pce_category(risk_pct)
+
+    add_trace(trace, "PCE_calculated", {"risk_pct": risk_pct, "category": cat}, "ASCVD PCE calculated")
+    return {
+        "risk_pct": risk_pct,
+        "category": cat,
+        "missing": [],
+        "notes": "ASCVD PCE (Epic-aligned).",
+    }
+
+# -------------------------------------------------------------------
+# PREVENT (AHA) — population comparator (RESTORED: v2.8 full equations + safe evaluator)
+# -------------------------------------------------------------------
 def mmol_conversion(x_mgdl: float) -> float:
     return float(x_mgdl) / 38.67
 
@@ -219,7 +424,6 @@ def sdi_to_decile(x) -> Optional[int]:
     if 1 <= v <= 100:
         return int((v - 1) / 10) + 1
     return None
-
 
 _PREVENT_FULL_LOGOR_10Y = {
     ("female", "total_cvd"):
@@ -389,342 +593,24 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
         trace,
         "PREVENT_calculated",
         {"sex": sex_key, "total": total_pct, "ascvd": ascvd_pct, "uacr": (uacr is not None), "hba1c": (hba1c is not None), "sdi": (sdi is not None)},
-        "PREVENT 10y calculated (population model, full equations)",
+        "PREVENT 10y calculated",
     )
 
     return {
         "total_cvd_10y_pct": total_pct,
         "ascvd_10y_pct": ascvd_pct,
         "missing": [],
-        "notes": "PREVENT full equations (AHAprevent v1.0.0): 10y total CVD + 10y ASCVD.",
+        "notes": "PREVENT (population model).",
     }
-
-
-# ============================================================
-# ASCVD PCE — 2019 interpretation; Epic-aligned behavior
-# ============================================================
-
-def _clip(v: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, v))
-
-def _pce_category(risk_pct: float) -> str:
-    if risk_pct < 5:
-        return "Low (<5%)"
-    if risk_pct < 7.5:
-        return "Borderline (5–7.4%)"
-    if risk_pct < 20:
-        return "Intermediate (7.5–19.9%)"
-    return "High (≥20%)"
-
-def ascvd_pce_10y_risk_epic_2019(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Epic-aligned 10-year ASCVD risk estimate under 2019 ACC/AHA guideline use of PCE.
-
-    Key alignment choices (to reduce mismatch anxiety):
-    - Uses standard PCE coefficients (race/sex specific) and 40–79 validation window
-    - Non-Black / "other" races default to non-Black ("white") coefficients (Epic/ACC tool behavior)
-    - Clips physiologic inputs to typical tool ranges before ln() to prevent extreme artifacts
-    - Rounds to 1 decimal and returns standard risk categories
-    """
-    # Standard PCE coefficients (the underlying equation remains the same; 2019 refers to guideline interpretation & workflow use)
-    PCE = {
-        ("white", "female"): {"s0": 0.9665, "mean": -29.18,
-            "ln_age": -29.799, "ln_age_sq": 4.884, "ln_tc": 13.540, "ln_age_ln_tc": -3.114,
-            "ln_hdl": -13.578, "ln_age_ln_hdl": 3.149,
-            "ln_sbp_treated": 2.019, "ln_sbp_untreated": 1.957,
-            "smoker": 7.574, "ln_age_smoker": -1.665,
-            "diabetes": 0.661
-        },
-        ("black", "female"): {"s0": 0.9533, "mean": 86.61,
-            "ln_age": 17.114, "ln_tc": 0.940,
-            "ln_hdl": -18.920, "ln_age_ln_hdl": 4.475,
-            "ln_sbp_treated": 29.291, "ln_age_ln_sbp_treated": -6.432,
-            "ln_sbp_untreated": 27.820, "ln_age_ln_sbp_untreated": -6.087,
-            "smoker": 0.691, "diabetes": 0.874
-        },
-        ("white", "male"): {"s0": 0.9144, "mean": 61.18,
-            "ln_age": 12.344, "ln_tc": 11.853, "ln_age_ln_tc": -2.664,
-            "ln_hdl": -7.990, "ln_age_ln_hdl": 1.769,
-            "ln_sbp_treated": 1.797, "ln_sbp_untreated": 1.764,
-            "smoker": 7.837, "ln_age_smoker": -1.795,
-            "diabetes": 0.658
-        },
-        ("black", "male"): {"s0": 0.8954, "mean": 19.54,
-            "ln_age": 2.469, "ln_tc": 0.302, "ln_hdl": -0.307,
-            "ln_sbp_treated": 1.916, "ln_sbp_untreated": 1.809,
-            "smoker": 0.549, "diabetes": 0.645
-        },
-    }
-
-    req = ["age","sex","race","tc","hdl","sbp","bp_treated","smoking","diabetes"]
-    missing = [k for k in req if not p.has(k)]
-    if missing:
-        add_trace(trace, "PCE_missing_inputs", missing, "ASCVD PCE not calculated")
-        return {"risk_pct": None, "missing": missing, "notes": "Missing required inputs for ASCVD PCE."}
-
-    try:
-        age = int(p.get("age"))
-    except Exception:
-        add_trace(trace, "PCE_age_invalid", p.get("age"), "Invalid age — skipping ASCVD PCE")
-        return {"risk_pct": None, "missing": [], "notes": "Invalid age input."}
-
-    if age < 40 or age > 79:
-        add_trace(trace, "PCE_age_out_of_range", age, "Validated for ages 40–79")
-        return {"risk_pct": None, "missing": [], "notes": "ASCVD PCE validated for ages 40–79."}
-
-    sex = str(p.get("sex", "")).strip().lower()
-    sex_key = "male" if sex in ("m","male") else "female"
-
-    race = str(p.get("race", "")).strip().lower()
-    race_key = "black" if race in ("black","african american","african-american") else "white"
-
-    c = PCE.get((race_key, sex_key))
-    if not c:
-        add_trace(trace, "PCE_race_sex_invalid", (race_key, sex_key), "Invalid race/sex for coefficients")
-        return {"risk_pct": None, "missing": [], "notes": "Invalid race/sex for ASCVD PCE."}
-
-    # Tool-aligned clipping to avoid extreme ln() artifacts & reduce cross-tool mismatch.
-    # These are pragmatic bounds used by many implementations (ACC-style).
-    tc = _clip(safe_float(p.get("tc")), 130.0, 320.0)
-    hdl = _clip(safe_float(p.get("hdl")), 20.0, 100.0)
-    sbp = _clip(safe_float(p.get("sbp")), 90.0, 200.0)
-
-    treated = bool(p.get("bp_treated"))
-    smoker = bool(p.get("smoking"))
-    dm = bool(p.get("diabetes"))
-
-    try:
-        ln_age = math.log(_clip(float(age), 40.0, 79.0))
-        ln_tc = math.log(tc)
-        ln_hdl = math.log(hdl)
-        ln_sbp = math.log(sbp)
-    except Exception as e:
-        add_trace(trace, "PCE_log_error", str(e), "Log error in ASCVD PCE")
-        return {"risk_pct": None, "missing": [], "notes": "Log error in ASCVD PCE (invalid input)."}
-
-    lp = 0.0
-    lp += c.get("ln_age", 0) * ln_age
-    if "ln_age_sq" in c:
-        lp += c["ln_age_sq"] * (ln_age ** 2)
-
-    lp += c.get("ln_tc", 0) * ln_tc
-    if "ln_age_ln_tc" in c:
-        lp += c["ln_age_ln_tc"] * (ln_age * ln_tc)
-
-    lp += c.get("ln_hdl", 0) * ln_hdl
-    if "ln_age_ln_hdl" in c:
-        lp += c["ln_age_ln_hdl"] * (ln_age * ln_hdl)
-
-    if treated:
-        lp += c.get("ln_sbp_treated", 0) * ln_sbp
-        if "ln_age_ln_sbp_treated" in c:
-            lp += c["ln_age_ln_sbp_treated"] * (ln_age * ln_sbp)
-    else:
-        lp += c.get("ln_sbp_untreated", 0) * ln_sbp
-        if "ln_age_ln_sbp_untreated" in c:
-            lp += c["ln_age_ln_sbp_untreated"] * (ln_age * ln_sbp)
-
-    if smoker:
-        lp += c.get("smoker", 0)
-        if "ln_age_smoker" in c:
-            lp += c["ln_age_smoker"] * ln_age
-
-    if dm:
-        lp += c.get("diabetes", 0)
-
-    try:
-        risk = 1 - (c["s0"] ** math.exp(lp - c["mean"]))
-        risk = max(0.0, min(1.0, risk))
-        risk_pct = round(risk * 100.0, 1)
-    except Exception as e:
-        add_trace(trace, "PCE_calc_error", str(e), "Error in ASCVD PCE calculation")
-        return {"risk_pct": None, "missing": [], "notes": "Calculation error in ASCVD PCE."}
-
-    cat = _pce_category(risk_pct)
-    add_trace(trace, "PCE_calculated_epic2019", {"risk_pct": risk_pct, "category": cat}, "ASCVD PCE calculated (Epic-aligned)")
-
-    return {
-        "risk_pct": risk_pct,
-        "category": cat,
-        "missing": [],
-        "notes": "ASCVD PCE (2019 guideline interpretation; Epic-aligned implementation).",
-        "inputs_used": {
-            "age": age,
-            "sex": sex_key,
-            "race_key": race_key,
-            "tc_used": tc,
-            "hdl_used": hdl,
-            "sbp_used": sbp,
-            "bp_treated": treated,
-            "smoking": smoker,
-            "diabetes": dm,
-        },
-    }
-
-# ----------------------------
-# CAC evidence model (plaque state only — no ordering logic)
-# ----------------------------
-def evidence_model(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if p.get("ascvd") is True:
-        add_trace(trace, "Evidence_clinical_ASCVD", True, "Clinical ASCVD present")
-        return {
-            "clinical_ascvd": True,
-            "cac_status": "Clinical ASCVD",
-            "cac_value": None,
-            "plaque_present": True,
-            "burden_band": "Clinical ASCVD",
-            "certainty": "High",
-        }
-
-    if not p.has("cac"):
-        add_trace(trace, "Evidence_CAC_unknown", None, "CAC not available")
-        return {
-            "clinical_ascvd": False,
-            "cac_status": "Unknown",
-            "cac_value": None,
-            "plaque_present": None,
-            "burden_band": "Unknown",
-            "certainty": "Low",
-        }
-
-    try:
-        cac = int(p.get("cac"))
-    except Exception:
-        add_trace(trace, "CAC_invalid", p.get("cac"), "Invalid CAC value")
-        return {
-            "clinical_ascvd": False,
-            "cac_status": "Unknown",
-            "cac_value": None,
-            "plaque_present": None,
-            "burden_band": "Unknown",
-            "certainty": "Low",
-        }
-
-    if cac == 0:
-        add_trace(trace, "CAC_zero", 0, "No calcified plaque detected")
-        return {
-            "clinical_ascvd": False,
-            "cac_status": "Known zero (CAC=0)",
-            "cac_value": 0,
-            "plaque_present": False,
-            "burden_band": "None detected",
-            "certainty": "Moderate",
-        }
-
-    if cac <= 9:
-        band = "Minimal plaque"
-    elif cac <= 99:
-        band = "Low plaque burden"
-    elif cac <= 399:
-        band = "Moderate plaque burden"
-    else:
-        band = "High plaque burden"
-
-    add_trace(trace, "CAC_positive", cac, f"Plaque present: {band}")
-    return {
-        "clinical_ascvd": False,
-        "cac_status": f"Positive (CAC {cac})",
-        "cac_value": cac,
-        "plaque_present": True,
-        "burden_band": band,
-        "certainty": "High",
-    }
-
-
-# ----------------------------
-# Risk Signal Score (RSS)
-# ----------------------------
-def clamp(x: int, lo: int = 0, hi: int = 100) -> int:
-    return max(lo, min(hi, x))
-
-def rss_band(score: int) -> str:
-    if score <= 19: return "Low"
-    if score <= 39: return "Mild"
-    if score <= 59: return "Moderate"
-    if score <= 79: return "High"
-    return "Very high"
-
-def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-    burden = 0
-    if p.get("ascvd") is True:
-        burden = 55
-        add_trace(trace, "RSS_burden_ASCVD", 55, "Clinical ASCVD burden")
-    elif p.has("cac"):
-        cac = safe_float(p.get("cac"), 0)
-        if cac == 0: burden = 0
-        elif cac <= 9: burden = 20
-        elif cac <= 99: burden = 30
-        elif cac <= 399: burden = 45
-        else: burden = 55
-        add_trace(trace, "RSS_burden_CAC", cac, f"Burden points={burden}")
-
-    athero = 0
-    if p.has("apob"):
-        ap = safe_float(p.get("apob"))
-        if ap < 80: athero = 0
-        elif ap <= 99: athero = 8
-        elif ap <= 119: athero = 15
-        elif ap <= 149: athero = 20
-        else: athero = 25
-        add_trace(trace, "RSS_ApoB", ap, f"Atherogenic points={athero}")
-    elif p.has("ldl"):
-        ld = safe_float(p.get("ldl"))
-        if ld < 100: athero = 0
-        elif ld <= 129: athero = 5
-        elif ld <= 159: athero = 10
-        elif ld <= 189: athero = 15
-        else: athero = 20
-        add_trace(trace, "RSS_LDL", ld, f"Atherogenic points={athero}")
-
-    genetics = 0
-    if lpa_elevated(p, trace):
-        genetics += 10
-    if p.get("fhx") is True:
-        genetics += 5
-    genetics = min(genetics, 15)
-    if genetics:
-        add_trace(trace, "RSS_genetics", genetics, "Genetic contribution")
-
-    infl = 0
-    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2:
-        infl += 5
-    if has_chronic_inflammatory_disease(p):
-        infl += 5
-    infl = min(infl, 10)
-    if infl:
-        add_trace(trace, "RSS_inflammation", infl, "Inflammatory contribution")
-
-    metab = 0
-    if p.get("diabetes") is True:
-        metab += 6
-    if p.get("smoking") is True:
-        metab += 4
-    if a1c_status(p) == "prediabetes":
-        metab += 2
-    metab = min(metab, 10)
-    if metab:
-        add_trace(trace, "RSS_metabolic", metab, "Metabolic contribution")
-
-    total = clamp(int(round(burden + athero + genetics + infl + metab)))
-    add_trace(trace, "RSS_total", total, "Total RSS")
-
-    return {
-        "score": total,
-        "band": rss_band(total),
-        "note": "Biologic + plaque signal (not event probability).",
-    }
-
-
-# ----------------------------
-# Data completeness / confidence
-# ----------------------------
+# -------------------------------------------------------------------
+# Data completeness (diagnostic only)
+# -------------------------------------------------------------------
 def completeness(p: Patient) -> Dict[str, Any]:
     core = ["age","sex","race","sbp","bp_treated","smoking","diabetes","tc","hdl"]
     enh = ["apob","lpa","cac","hscrp","a1c","ldl"]
 
     core_pct = int(sum(p.has(k) for k in core) / len(core) * 100)
     enh_pct = int(sum(p.has(k) for k in enh) / len(enh) * 100)
-
     overall = int(round(core_pct * 0.6 + enh_pct * 0.4))
 
     conf = "High" if overall >= 85 and enh_pct >= 50 else \
@@ -741,157 +627,75 @@ def completeness(p: Patient) -> Dict[str, Any]:
         "missing": missing,
     }
 
+# -------------------------------------------------------------------
+# Risk Signal Score (RSS)
+# -------------------------------------------------------------------
+def clamp(x: int, lo: int = 0, hi: int = 100) -> int:
+    return max(lo, min(hi, x))
 
-# ----------------------------
-# Anchors: near-term vs lifetime
-# ----------------------------
-def build_anchors(p: Patient, risk10: Dict[str, Any], evidence: Dict[str, Any]) -> Dict[str, Any]:
-    near = []
-    if risk10.get("risk_pct") is not None:
-        near.append(f"ASCVD PCE {risk10['risk_pct']}% ({risk10['category']})")
-    else:
-        near.append("ASCVD PCE not available")
+def rss_band(score: int) -> str:
+    if score <= 19: return "Low"
+    if score <= 39: return "Mild"
+    if score <= 59: return "Moderate"
+    if score <= 79: return "High"
+    return "Very high"
 
-    cs = evidence.get("cac_status", "Unknown")
-    if cs.startswith("Known zero"):
-        near.append("CAC=0 (low short-term plaque signal)")
-    elif cs.startswith("Positive"):
-        near.append(cs)
-    else:
-        near.append("CAC unknown")
+def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    burden = 0
+    if p.get("ascvd") is True:
+        burden = 55
+    elif p.has("cac"):
+        cac = safe_float(p.get("cac"), 0)
+        if cac == 0: burden = 0
+        elif cac <= 9: burden = 20
+        elif cac <= 99: burden = 30
+        elif cac <= 399: burden = 45
+        else: burden = 55
 
-    life = []
-    if p.has("apob") and safe_float(p.get("apob")) >= 100:
-        life.append(f"ApoB {fmt_int(p.get('apob'))}")
-    elif not p.has("apob") and p.has("ldl") and safe_float(p.get("ldl")) >= 130:
-        life.append(f"LDL-C {fmt_int(p.get('ldl'))}")
+    athero = 0
+    if p.has("apob"):
+        ap = safe_float(p.get("apob"))
+        if ap < 80: athero = 0
+        elif ap <= 99: athero = 8
+        elif ap <= 119: athero = 15
+        elif ap <= 149: athero = 20
+        else: athero = 25
+    elif p.has("ldl"):
+        ld = safe_float(p.get("ldl"))
+        if ld < 100: athero = 0
+        elif ld <= 129: athero = 5
+        elif ld <= 159: athero = 10
+        elif ld <= 189: athero = 15
+        else: athero = 20
 
-    if lpa_elevated_no_trace(p):
-        life.append("Lp(a) elevated")
+    genetics = 0
+    if lpa_elevated(p, trace): genetics += 10
+    if p.get("fhx") is True: genetics += 5
+    genetics = min(genetics, 15)
 
-    if p.get("fhx") is True:
-        life.append("Premature FHx")
+    infl = 0
+    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2: infl += 5
+    if has_chronic_inflammatory_disease(p): infl += 5
+    infl = min(infl, 10)
 
-    if inflammation_flags(p):
-        life.append("Inflammation present")
+    metab = 0
+    if p.get("diabetes") is True: metab += 6
+    if p.get("smoking") is True: metab += 4
+    if a1c_status(p) == "prediabetes": metab += 2
+    metab = min(metab, 10)
 
-    if p.get("diabetes") is True:
-        life.append("Diabetes")
-    elif a1c_status(p) == "prediabetes":
-        life.append("Prediabetes")
-
-    if p.get("smoking") is True:
-        life.append("Smoking")
-
-    if not life:
-        life.append("No major lifetime accelerators detected")
+    total = clamp(int(round(burden + athero + genetics + infl + metab)))
+    add_trace(trace, "RSS_total", total, "RSS computed")
 
     return {
-        "nearTerm": {"summary": " / ".join(near), "factors": near},
-        "lifetime": {"summary": " / ".join(life), "factors": life},
+        "score": total,
+        "band": rss_band(total),
+        "note": "Biologic + plaque signal (not event probability).",
     }
 
-
-# ----------------------------
-# Trajectory note
-# ----------------------------
-def trajectory_note(p: Patient, risk10: Dict[str, Any]) -> str:
-    if p.has("apob") and safe_float(p.get("apob")) >= 100:
-        return "Rising atherogenic burden — track ApoB over time."
-    if risk10.get("risk_pct", 0) >= 15:
-        return "Elevated near-term risk — closer follow-up advised."
-    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 3:
-        return "Inflammatory signal — address drivers and recheck."
-    return "Stable profile with available data."
-
-# ----------------------------
-# Internal Levels 1–5 along the Risk Continuum
-# ----------------------------
-def _has_any_data(p: Patient) -> bool:
-    return bool(p.data)
-
-def posture_labels(level: int) -> str:
-    labels = {
-        0: "Level 0 — Not assessed (insufficient data)",
-        1: "Level 1 — Minimal risk signal (no evidence of plaque with available data)",
-        2: "Level 2 — Emerging risk signals (mild–moderate biology; plaque not proven)",
-        3: "Level 3 — Actionable biologic risk (plaque possible; refine thoughtfully)",
-        4: "Level 4 — Subclinical atherosclerosis present (early disease)",
-        5: "Level 5 — Very high risk / ASCVD intensity (advanced plaque or clinical ASCVD)",
-    }
-    return labels.get(level, f"Level {level}")
-
-def posture_level(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[int, List[str]]:
-    triggers: List[str] = []
-
-    if evidence.get("clinical_ascvd"):
-        triggers.append("Clinical ASCVD")
-        add_trace(trace, "Level_override_ASCVD", True, "Level=5")
-        return 5, triggers
-
-    if evidence.get("plaque_present") is True:
-        cac = evidence.get("cac_value")
-        if isinstance(cac, int):
-            if 1 <= cac <= 99:
-                triggers.append(f"CAC {cac} (plaque present)")
-                add_trace(trace, "Level_CAC_1_99", cac, "Level=4")
-                return 4, triggers
-            if cac >= 100:
-                triggers.append(f"CAC {cac} (high plaque burden)")
-                add_trace(trace, "Level_CAC_100_plus", cac, "Level=5")
-                return 5, triggers
-
-    high = False
-    mild = False
-
-    if p.has("apob") and safe_float(p.get("apob")) >= 100:
-        high = True; triggers.append("ApoB≥100")
-    elif p.has("ldl") and safe_float(p.get("ldl")) >= 130:
-        high = True; triggers.append("LDL≥130")
-
-    if lpa_elevated(p, trace):
-        high = True; triggers.append("Lp(a) elevated")
-
-    if p.get("fhx") is True:
-        high = True; triggers.append("Premature FHx")
-
-    if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
-        if has_chronic_inflammatory_disease(p):
-            high = True
-        triggers.append("Inflammation present")
-
-    if p.get("diabetes") is True:
-        high = True; triggers.append("Diabetes")
-    if p.get("smoking") is True:
-        high = True; triggers.append("Smoking")
-
-    if not high:
-        if p.has("apob") and 80 <= safe_float(p.get("apob")) <= 99:
-            mild = True; triggers.append("ApoB 80–99")
-        if p.has("ldl") and 100 <= safe_float(p.get("ldl")) <= 129:
-            mild = True; triggers.append("LDL 100–129")
-        if a1c_status(p) == "prediabetes":
-            mild = True; triggers.append("Prediabetes")
-        if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2 and not has_chronic_inflammatory_disease(p):
-            mild = True; triggers.append("hsCRP≥2")
-
-    if high:
-        add_trace(trace, "Level_high_biology", triggers[:4], "Level=3")
-        return 3, triggers
-    if mild:
-        add_trace(trace, "Level_emerging_risk", triggers[:4], "Level=2")
-        return 2, triggers
-
-    if _has_any_data(p):
-        add_trace(trace, "Level_low_biology", None, "Level=1")
-        return 1, triggers
-
-    return 0, triggers
-
-
-# ----------------------------
-# Targets + ESC goals (Level-based)
-# ----------------------------
+# -------------------------------------------------------------------
+# Targets + ESC/EAS framing
+# -------------------------------------------------------------------
 def levels_targets(level: int) -> Dict[str, int]:
     if level <= 2: return {"apob": 80, "ldl": 100}
     if level == 3: return {"apob": 80, "ldl": 100}
@@ -908,274 +712,411 @@ def esc_numeric_goals(level: int, clinical_ascvd: bool) -> str:
     if level == 3:
         return "ESC/EAS goals (high biologic risk): LDL-C <100 mg/dL; ApoB <100 mg/dL."
     if level == 2:
-        return "ESC/EAS goals: individualized; consider LDL-C <100 mg/dL if sustained risk."
-    return "ESC/EAS goals: individualized by risk tier."
+        return "ESC/EAS goals: individualized; consider LDL-C <100 mg/dL if risk persists."
+    return "ESC/EAS goals: individualized."
 
-def atherosclerotic_disease_burden(p: Patient) -> str:
-    if p.get("ascvd") is True:
-        return "Present (clinical ASCVD)"
-    if p.has("cac"):
-        try:
-            cac = int(p.get("cac"))
-        except Exception:
-            return "Unknown (CAC invalid)"
-        return "Not detected (CAC=0)" if cac == 0 else f"Present (CAC {cac})"
-    return "Unknown (CAC not available)"
-
-
-# ----------------------------
+# -------------------------------------------------------------------
 # Deterministic driver ranking
-# ----------------------------
-def ranked_drivers(p: Patient, evidence: Dict[str, Any], trace: List[Dict[str, Any]]) -> List[str]:
-    candidates: List[Tuple[int, str]] = []
+# -------------------------------------------------------------------
+def ranked_drivers(p: Patient, plaque: Dict[str, Any], trace: List[Dict[str, Any]]) -> List[str]:
+    drivers: List[Tuple[int, str]] = []
 
     if p.get("ascvd") is True:
-        candidates.append((10, "Clinical ASCVD"))
-    elif evidence.get("plaque_present") is True and evidence.get("cac_value") is not None:
-        candidates.append((10, f"CAC {int(evidence['cac_value'])}"))
+        drivers.append((10, "Clinical ASCVD"))
+    elif plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
+        drivers.append((10, f"CAC {int(plaque['cac_value'])}"))
 
     if p.has("apob") and safe_float(p.get("apob")) >= 100:
-        candidates.append((20, f"ApoB {fmt_int(p.get('apob'))}"))
+        drivers.append((20, f"ApoB {fmt_int(p.get('apob'))}"))
     elif p.has("ldl") and safe_float(p.get("ldl")) >= 130:
-        candidates.append((20, f"LDL-C {fmt_int(p.get('ldl'))}"))
+        drivers.append((20, f"LDL-C {fmt_int(p.get('ldl'))}"))
 
     if lpa_elevated(p, trace):
-        candidates.append((30, "Lp(a) elevated"))
+        drivers.append((30, "Lp(a) elevated"))
 
     if p.get("diabetes") is True:
-        candidates.append((40, "Diabetes"))
+        drivers.append((40, "Diabetes"))
+
     if p.get("smoking") is True:
-        candidates.append((41, "Smoking"))
+        drivers.append((41, "Smoking"))
 
     if inflammation_flags(p) or has_chronic_inflammatory_disease(p):
-        candidates.append((50, "Inflammatory signal"))
+        drivers.append((50, "Inflammatory signal"))
 
     if p.get("fhx") is True:
-        candidates.append((60, "Premature family history"))
+        drivers.append((60, "Premature family history"))
 
-    if a1c_status(p) == "prediabetes":
-        candidates.append((70, "Prediabetes"))
-
-    candidates.sort(key=lambda x: (x[0], x[1]))
-    ranked = [txt for _, txt in candidates]
-    add_trace(trace, "Drivers_ranked", ranked, "Driver ranking applied")
+    drivers.sort(key=lambda x: (x[0], x[1]))
+    ranked = [d for _, d in drivers]
+    add_trace(trace, "Drivers_ranked", ranked, "Drivers ranked")
     return ranked
 
+# -------------------------------------------------------------------
+# Anchors (near-term vs lifetime)
+# -------------------------------------------------------------------
+def build_anchors(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any]) -> Dict[str, Any]:
+    near: List[str] = []
+    if risk10.get("risk_pct") is not None:
+        near.append(f"ASCVD PCE {risk10['risk_pct']}% ({risk10['category']})")
+    else:
+        near.append("ASCVD PCE not available")
 
-# ----------------------------
-# Level explainer for patient
-# ----------------------------
-def level_explainer_for_patient(level: int, evidence: Dict[str, Any], drivers: List[str]) -> str:
-    cs = evidence.get("cac_status", "Unknown")
-    top = "; ".join(drivers[:2]) if drivers else ""
+    pe = plaque.get("plaque_evidence", "")
+    if pe.startswith("CAC = 0"):
+        near.append("CAC=0 (low short-term plaque signal)")
+    elif pe.startswith("CAC positive"):
+        near.append(pe)
+    else:
+        near.append("Plaque unmeasured")
 
+    life: List[str] = []
+    if p.has("apob") and safe_float(p.get("apob")) >= 100:
+        life.append(f"ApoB {fmt_int(p.get('apob'))}")
+    elif not p.has("apob") and p.has("ldl") and safe_float(p.get("ldl")) >= 130:
+        life.append(f"LDL-C {fmt_int(p.get('ldl'))}")
+
+    if lpa_elevated_no_trace(p):
+        life.append("Lp(a) elevated")
+
+    if p.get("fhx") is True:
+        life.append("Premature family history")
+
+    if a1c_status(p) == "prediabetes":
+        life.append("Prediabetes")
+
+    if p.get("diabetes") is True:
+        life.append("Diabetes")
+
+    if not life:
+        life.append("No major lifetime accelerators detected")
+
+    return {
+        "nearTerm": {"summary": " / ".join(near), "factors": near},
+        "lifetime": {"summary": " / ".join(life), "factors": life},
+    }
+
+# -------------------------------------------------------------------
+# Level labels (taxonomy preserved)
+# -------------------------------------------------------------------
+LEVEL_LABELS = {
+    0: "Level 0 — Not assessed",
+    1: "Level 1 — Minimal risk signal",
+    2: "Level 2 — Emerging risk signals",  # (internal only; UI uses 2A/2B)
+    3: "Level 3 — Actionable biologic risk",
+    4: "Level 4 — Subclinical atherosclerosis present",
+    5: "Level 5 — Very high risk / ASCVD intensity",
+}
+
+def posture_label(level: int, sublevel: Optional[str] = None) -> str:
+    base = LEVEL_LABELS.get(level, f"Level {level}")
+    if sublevel:
+        # Replace "Level 2" with "Level 2A/2B" etc in display label
+        if level in (2, 3):
+            parts = base.split("—", 1)
+            if len(parts) == 2:
+                return f"Level {sublevel} — {parts[1].strip()}"
+    return base
+
+# -------------------------------------------------------------------
+# Level assignment (2A/2B + 3A/3B only)
+# -------------------------------------------------------------------
+def _mild_signals(p: Patient) -> List[str]:
+    sig: List[str] = []
+    if p.has("apob") and 80 <= safe_float(p.get("apob")) <= 99:
+        sig.append("ApoB 80–99")
+    if p.has("ldl") and 100 <= safe_float(p.get("ldl")) <= 129:
+        sig.append("LDL 100–129")
+    if a1c_status(p) == "prediabetes":
+        sig.append("Prediabetes")
+    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2 and not has_chronic_inflammatory_disease(p):
+        sig.append("hsCRP≥2")
+    return sig
+
+def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
+    sig: List[str] = []
+    if p.has("apob") and safe_float(p.get("apob")) >= 100:
+        sig.append("ApoB≥100")
+    elif p.has("ldl") and safe_float(p.get("ldl")) >= 130:
+        sig.append("LDL≥130")
+
+    if lpa_elevated(p, trace):
+        sig.append("Lp(a) elevated")
+
+    if p.get("fhx") is True:
+        sig.append("Premature family history")
+
+    if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
+        sig.append("Inflammation present")
+
+    if p.get("diabetes") is True:
+        sig.append("Diabetes")
+
+    if p.get("smoking") is True:
+        sig.append("Smoking")
+
+    return sig
+
+def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[int, Optional[str], List[str]]:
+    """
+    Returns: (level, sublevel, triggers)
+      - Sublevels used only for Level 2 (2A/2B) and Level 3 (3A/3B).
+      - No 3C.
+    """
+    triggers: List[str] = []
+
+    # Secondary prevention / disease-equivalent
+    if p.get("ascvd") is True:
+        triggers.append("Clinical ASCVD")
+        add_trace(trace, "Level_override_ASCVD", True, "Level=5")
+        return 5, None, triggers
+
+    # Plaque present drives Level 4/5
+    if plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
+        cac = int(plaque["cac_value"])
+        triggers.append(f"CAC {cac}")
+        if cac >= 100:
+            add_trace(trace, "Level_CAC_100_plus", cac, "Level=5")
+            return 5, None, triggers
+        add_trace(trace, "Level_CAC_1_99", cac, "Level=4")
+        return 4, None, triggers
+
+    # High biology -> Level 3
+    hs = _high_signals(p, trace)
+    if hs:
+        triggers.extend(hs)
+        # 3B = enhancers present (Lp(a) elevated OR FHx OR inflammation)
+        enh = 0
+        if lpa_elevated_no_trace(p): enh += 1
+        if p.get("fhx") is True: enh += 1
+        if has_chronic_inflammatory_disease(p) or inflammation_flags(p): enh += 1
+
+        sub = "3B" if enh >= 1 else "3A"
+        add_trace(trace, "Level3_sublevel", sub, "Assigned 3A/3B")
+        add_trace(trace, "Level_high_biology", hs[:4], "Level=3")
+        return 3, sub, triggers
+
+    # Mild biology -> Level 2A/2B
+    ms = _mild_signals(p)
+    if ms:
+        triggers.extend(ms)
+        rp = risk10.get("risk_pct")
+        intermediate = (rp is not None and float(rp) >= 7.5)
+        converging = (len(ms) >= 2) or intermediate
+        sub = "2B" if converging else "2A"
+        add_trace(trace, "Level2_sublevel", sub, "Assigned 2A/2B")
+        add_trace(trace, "Level_emerging_risk", ms[:4], "Level=2")
+        return 2, sub, triggers
+
+    # Otherwise Level 1 if any data
+    if p.data:
+        add_trace(trace, "Level_low_biology", None, "Level=1")
+        return 1, None, triggers
+
+    return 0, None, triggers
+
+# -------------------------------------------------------------------
+# Decision Confidence (label only: High/Moderate/Low)
+# -------------------------------------------------------------------
+def decision_confidence(p: Patient, level: int, conf: Dict[str, Any], plaque: Dict[str, Any]) -> str:
+    """
+    Confidence is the appropriateness of a plan today (not a data completeness %).
+    Conservative mapping:
+      - High if plaque known (CAC or ASCVD) OR level>=4 OR completeness high
+      - Moderate if completeness moderate
+      - Low otherwise
+    """
+    if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
+        return "High"
+    if level >= 4:
+        return "High"
+    c = (conf or {}).get("confidence", "Low")
+    if c == "High":
+        return "High"
+    if c == "Moderate":
+        return "Moderate"
+    return "Low"
+
+# -------------------------------------------------------------------
+# Decision Stability (how likely plan changes with additional data)
+# -------------------------------------------------------------------
+def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dict[str, Any]) -> Tuple[str, str]:
+    """
+    Stability is the likelihood that management would change with commonly considered next information.
+    Returns: (band, short_parenthetical_note)
+    """
+    # If plaque is measured (CAC known or ASCVD), stability is high.
+    if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
+        return "High", "plaque assessed"
+
+    # If dominant drivers already justify intensity, stability is high even if plaque unmeasured.
+    dominant = False
+    if p.get("diabetes") is True:
+        dominant = True
+    if p.has("apob") and safe_float(p.get("apob")) >= 130:
+        dominant = True
+    if (not p.has("apob")) and p.has("ldl") and safe_float(p.get("ldl")) >= 190:
+        dominant = True
+    if p.get("smoking") is True and p.has("sbp") and safe_float(p.get("sbp")) >= 150:
+        dominant = True
+    if dominant:
+        return "High", "dominant risk drivers"
+
+    # Low stability if key clarifiers are missing and plaque unmeasured
+    missing_clarifiers = []
+    if not p.has("apob"):
+        missing_clarifiers.append("ApoB")
+    if not p.has("lpa"):
+        missing_clarifiers.append("Lp(a)")
+    if missing_clarifiers and level in (2, 3):
+        return "Low", "key clarifiers incomplete"
+
+    # Otherwise moderate: plan is reasonable, but could change intensity/timing
+    return "Moderate", "plaque status unmeasured"
+
+# -------------------------------------------------------------------
+# CAC decision support (suppressed / deferred / optional; never recommended)
+# -------------------------------------------------------------------
+def cac_decision_support(
+    p: Patient,
+    plaque: Dict[str, Any],
+    risk10: Dict[str, Any],
+    level: int,
+    trace: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    CAC guidance lives outside Levels. States:
+      - suppressed: low-yield or already assessed
+      - deferred: labs-first (ApoB/Lp(a) missing)
+      - optional: may refine intensity/timing in gray-zone decisions
+    """
+    # If plaque assessed already (CAC known or ASCVD), suppress ordering.
+    if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
+        add_trace(trace, "CAC_support_suppressed_known", plaque.get("plaque_evidence"), "Plaque already assessed")
+        return {
+            "status": "suppressed",
+            "message": None,
+            "reasons": ["Plaque already assessed"],
+        }
+
+    rp = risk10.get("risk_pct")
+    in_gray = (rp is not None and 5.0 <= float(rp) <= 20.0)
+
+    # Outside gray-zone → suppress
+    if not in_gray:
+        add_trace(trace, "CAC_support_suppressed_not_gray", rp, "Not in 5–20% zone")
+        return {
+            "status": "suppressed",
+            "message": "CAC is not routinely indicated outside gray-zone risk decisions.",
+            "reasons": ["Not in gray-zone risk range"],
+        }
+
+    # Labs-first gate
+    labs_needed: List[str] = []
+    if not p.has("apob"):
+        labs_needed.append("ApoB")
+    if not p.has("lpa"):
+        labs_needed.append("Lp(a)")
+
+    if labs_needed:
+        add_trace(trace, "CAC_support_deferred_labs_first", labs_needed, "Defer CAC until key labs available")
+        return {
+            "status": "deferred",
+            "message": f"CAC is optional but is generally deferred until {', '.join(labs_needed)} are available.",
+            "reasons": [f"Missing {', '.join(labs_needed)}"],
+            "labs_first": labs_needed,
+        }
+
+    # Optional when Level 3 or converging Level 2B and results could alter intensity/timing
+    if level in (3, 2):
+        add_trace(trace, "CAC_support_optional", {"risk": rp, "level": level}, "CAC optional for refinement")
+        return {
+            "status": "optional",
+            "message": (
+                "CAC is optional. Imaging is not required for appropriate management. "
+                "CAC may be considered only if results would alter treatment intensity or timing."
+            ),
+            "reasons": ["Gray-zone risk; key labs available; plaque unmeasured"],
+        }
+
+    return {
+        "status": "suppressed",
+        "message": "CAC is not routinely indicated at this risk posture.",
+        "reasons": ["Low-yield in current posture"],
+    }
+
+# -------------------------------------------------------------------
+# Therapy status + modality-aware plan sentence
+# -------------------------------------------------------------------
+def on_lipid_therapy(p: Patient) -> bool:
+    """
+    Uses existing field used by your app ('lipid_lowering') when available.
+    Safe fallback keys supported.
+    """
+    for k in ("lipid_lowering", "on_statin", "statin", "lipidTherapy"):
+        if p.has(k) and bool(p.get(k)) is True:
+            return True
+    return False
+
+def at_target(p: Patient, targets: Dict[str, int]) -> bool:
+    """
+    True if available measured markers meet targets.
+    If neither ApoB nor LDL is available, returns False (cannot confirm at target).
+    """
+    have = False
+    ok = True
+    if p.has("apob"):
+        have = True
+        ok = ok and (safe_float(p.get("apob")) <= float(targets.get("apob", 10**9)))
+    if p.has("ldl"):
+        have = True
+        ok = ok and (safe_float(p.get("ldl")) <= float(targets.get("ldl", 10**9)))
+    return bool(have and ok)
+
+def plan_sentence(level: int, sublevel: Optional[str], therapy_on: bool, at_tgt: bool) -> str:
+    """
+    Locked, senior tone; no second person; no drug names.
+    """
+    # Level 1–2: lifestyle-first
     if level == 1:
-        return (
-            "Level 1 means we do not see a strong biologic or plaque signal with the data available; "
-            "focus is maintaining healthy baseline habits and periodic reassessment."
-        )
+        return "Lifestyle-focused prevention with periodic reassessment."
     if level == 2:
-        return (
-            f"Level 2 means early risk signals are emerging without proven plaque; best next step is completing "
-            f"key missing data and a structured lifestyle sprint. Key signals: {top}."
-        )
+        return "Lifestyle-focused risk reduction with data completion and reassessment."
+
+    # Level 3: modality-aware
     if level == 3:
-        suffix = ""
-        if cs.startswith("Known zero"):
-            suffix = " CAC=0 lowers short-term plaque signal, but biology may still justify action based on lifetime trajectory."
-        elif cs == "Unknown":
-            suffix = " Plaque status is unknown; clarification is optional and should be used only if it would change decisions."
-        return (
-            f"Level 3 means biologic risk is high enough to justify deliberate action and shared decision-making."
-            f"{suffix} Key signals: {top}."
-        )
+        if therapy_on and at_tgt:
+            return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
+        if therapy_on and not at_tgt:
+            return "Current pharmacologic therapy appears appropriate; intensification or adjustment may be considered if targets are not achieved."
+        # untreated
+        if sublevel == "3B":
+            return "Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved or if risk modifiers favor earlier initiation."
+        return "Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved."
+
+    # Level 4–5: pharmacologic recommended
     if level == 4:
-        return (
-            f"Level 4 means subclinical plaque is present (early disease); prevention should be more decisive and target-driven. "
-            f"Key signals: {top}."
-        )
-    if level == 5:
-        if evidence.get("clinical_ascvd"):
-            return (
-                f"Level 5 means clinical ASCVD is present; focus is secondary prevention intensity and aggressive risk reduction. "
-                f"Key signals: {top}."
-            )
-        return (
-            f"Level 5 means very high plaque burden or disease-equivalent intensity; management should be aggressive and target-driven. "
-            f"Key signals: {top}."
-        )
-    return "This Level reflects the system’s best estimate of risk posture based on available data."
+        if therapy_on and at_tgt:
+            return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
+        return "Pharmacologic lipid lowering is recommended to achieve targets; lifestyle optimization remains adjunctive."
+    # Level 5
+    if therapy_on and at_tgt:
+        return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
+    return "Secondary-prevention intensity lipid lowering is indicated to achieve targets; consider add-ons as needed."
 
-
-# ----------------------------
-# Next actions (brief)
-# ----------------------------
-def next_actions(p: Patient, level: int, targets: Dict[str, int], evidence: Dict[str, Any]) -> List[str]:
+# -------------------------------------------------------------------
+# Next actions (brief; unit-safe)
+# -------------------------------------------------------------------
+def next_actions(p: Patient, targets: Dict[str, int]) -> List[str]:
     acts: List[str] = []
-
     if p.has("apob") and safe_float(p.get("apob")) > targets["apob"]:
         acts.append(f"Reduce ApoB toward <{targets['apob']} mg/dL.")
     if p.has("ldl") and safe_float(p.get("ldl")) > targets["ldl"]:
         acts.append(f"Reduce LDL-C toward <{targets['ldl']} mg/dL.")
+    return acts[:3]
 
-    if str(evidence.get("cac_status", "")).startswith("Known zero") and level in (2, 3):
-        acts.append("CAC=0 supports staged escalation; consider repeat CAC in 3–5y if risk persists.")
-
-    return acts[:2]
-
-# ----------------------------
-# Recommendation strength + clinician confidence label
-# ----------------------------
-def recommendation_strength(confidence: Dict[str, Any]) -> str:
-    conf = (confidence or {}).get("confidence", "Low")
-    if conf == "High":
-        return "Recommended"
-    if conf == "Moderate":
-        return "Consider"
-    return "Pending more data"
-
-def decision_confidence_label(strength: str) -> str:
-    return {
-        "Recommended": "High confidence",
-        "Consider": "Moderate confidence",
-        "Pending more data": "Low confidence",
-    }.get(strength, "—")
-
-
-# ----------------------------
-# CAC decision support (ordering logic)
-# ----------------------------
-def _decision_uncertainty_proxy(p: Patient, risk10: Dict[str, Any], level: int) -> bool:
-    """
-    Proxy for 'I’m not sure what to do' using available signals.
-    Conservative by design.
-    """
-    if p.get("ascvd") is True or p.get("diabetes") is True:
-        return False
-
-    rp = risk10.get("risk_pct")
-    if rp is None:
-        # If we can't compute PCE, we usually shouldn't jump to imaging.
-        return False
-
-    # Gray zone where CAC *might* change confidence: 5–20%
-    in_gray = (5.0 <= float(rp) <= 20.0)
-
-    # Level 3 can also represent uncertainty, but CAC should not be reflexive.
-    return bool(in_gray and level in (2, 3))
-
-def _dominant_high_risk_driver_present(p: Patient, evidence: Dict[str, Any]) -> bool:
-    """
-    If a dominant driver already justifies intensity, CAC rarely changes management.
-    """
-    if evidence.get("clinical_ascvd") is True:
-        return True
-    if evidence.get("plaque_present") is True:
-        return True
-    if p.get("diabetes") is True:
-        return True
-    if p.has("apob") and safe_float(p.get("apob")) >= 130:
-        return True
-    if (not p.has("apob")) and p.has("ldl") and safe_float(p.get("ldl")) >= 190:
-        return True
-    if p.get("smoking") is True and safe_float(p.get("sbp")) >= 150:
-        return True
-    return False
-
-def _labs_first_needed(p: Patient) -> List[str]:
-    """
-    Labs-first philosophy: missing ApoB/Lp(a) should defer CAC in most cases.
-    Returns list of suggested labs.
-    """
-    labs = []
-    if not p.has("apob"):
-        labs.append("ApoB")
-    if not p.has("lpa"):
-        labs.append("Lp(a)")
-    return labs
-
-def cac_decision_support(
-    p: Patient,
-    evidence: Dict[str, Any],
-    risk10: Dict[str, Any],
-    level: int,
-    confidence: Dict[str, Any],
-    trace: List[Dict[str, Any]],
-) -> Dict[str, Any]:
-    """
-    Returns CAC guidance as one of:
-      - suppressed: not recommended (won't change management or already known)
-      - deferred: get labs first (ApoB/Lp(a) missing) unless special need
-      - optional: reasonable clarifier if uncertainty persists
-    This is intentionally conservative to prevent CAC pressure.
-    """
-    # If CAC already known, don't "recommend" ordering.
-    if evidence.get("cac_status") != "Unknown":
-        add_trace(trace, "CAC_ordering_suppressed_known", evidence.get("cac_status"), "CAC already known")
-        return {
-            "status": "suppressed",
-            "reason": "CAC already available; use existing result.",
-            "message": None,
-            "reasons": ["CAC already known"],
-        }
-
-    # Clinical ASCVD / clear intensity drivers -> no CAC.
-    if _dominant_high_risk_driver_present(p, evidence):
-        add_trace(trace, "CAC_ordering_suppressed_dominant_driver", True, "Dominant driver makes CAC low-yield")
-        return {
-            "status": "suppressed",
-            "reason": "Management already justified by dominant risk driver(s).",
-            "message": (
-                "CAC is not required for appropriate management because treatment intensity is already justified "
-                "by current risk drivers."
-            ),
-            "reasons": ["Dominant driver present → CAC unlikely to change management"],
-        }
-
-    # If decision uncertainty proxy is false, suppress.
-    if not _decision_uncertainty_proxy(p, risk10, level):
-        add_trace(trace, "CAC_ordering_suppressed_not_uncertain", {"risk": risk10.get("risk_pct"), "level": level}, "Not in uncertainty zone")
-        return {
-            "status": "suppressed",
-            "reason": "Not in a state where CAC is likely to change decisions.",
-            "message": (
-                "CAC is not routinely recommended here. Consider CAC only if you are truly uncertain and the result "
-                "would change treatment intensity."
-            ),
-            "reasons": ["Not in gray-zone uncertainty where CAC changes decisions"],
-        }
-
-    # Labs-first gate
-    labs_needed = _labs_first_needed(p)
-    if labs_needed:
-        add_trace(trace, "CAC_ordering_deferred_labs_first", labs_needed, "Defer CAC until key labs available")
-        return {
-            "status": "deferred",
-            "reason": "Obtain low-harm blood-based clarifiers first.",
-            "message": (
-                f"Structural clarification (CAC) is optional but should generally be deferred until {', '.join(labs_needed)} "
-                f"are available, because these labs often resolve uncertainty without imaging."
-            ),
-            "reasons": [f"Missing {', '.join(labs_needed)} → labs-first sequencing"],
-            "labs_first": labs_needed,
-        }
-
-    # If labs are available and uncertainty persists -> CAC optional
-    add_trace(trace, "CAC_ordering_optional", {"risk": risk10.get("risk_pct"), "level": level}, "CAC may refine confidence")
-    return {
-        "status": "optional",
-        "reason": "Residual uncertainty after labs; CAC may refine confidence.",
-        "message": (
-            "CAC may be considered as a confidence/refinement tool if the result would change whether you start therapy "
-            "or how aggressive you are. If you would treat (or defer) regardless, CAC is unlikely to add value."
-        ),
-        "reasons": ["Gray-zone risk + labs available → CAC can refine confidence"],
-    }
-
-
-# ----------------------------
+# -------------------------------------------------------------------
 # Aspirin module
-# ----------------------------
+# -------------------------------------------------------------------
 def _bleeding_flags(p: Patient) -> Tuple[bool, List[str]]:
     flags: List[str] = []
     for k, label in [
@@ -1191,21 +1132,17 @@ def _bleeding_flags(p: Patient) -> Tuple[bool, List[str]]:
     return (len(flags) > 0), flags
 
 def aspirin_explanation(status: str, rationale: List[str]) -> str:
-    reasons = [str(x).strip() for x in (rationale or []) if str(x).strip()]
-    if not reasons:
+    rs = [str(x).strip() for x in (rationale or []) if str(x).strip()]
+    if not rs:
         return ""
-    if len(reasons) <= 3:
-        return "Reasons: " + "; ".join(reasons) + "."
-    return "Reasons: " + "; ".join(reasons[:3]) + "."
+    return "Reasons: " + "; ".join(rs[:3]) + "."
 
-def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+def aspirin_advice(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     age = int(p.get("age", 0)) if p.has("age") else None
-    cac = int(p.get("cac", 0)) if p.has("cac") else None
     ascvd = (p.get("ascvd") is True)
     bleed_high, bleed_flags = _bleeding_flags(p)
 
     if ascvd:
-        add_trace(trace, "Aspirin_ASCVD", True, "Secondary prevention")
         status = "Secondary prevention: typically indicated if no contraindication"
         rationale = ["ASCVD present"]
         if bleed_flags:
@@ -1220,7 +1157,6 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         }
 
     if age is None:
-        add_trace(trace, "Aspirin_age_missing", None, "Not assessed")
         status = "Not assessed"
         rationale = ["Age missing"]
         return {
@@ -1232,7 +1168,6 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         }
 
     if age < 40 or age >= 70:
-        add_trace(trace, "Aspirin_age_out_of_range", age, "Avoid primary prevention aspirin by age")
         status = "Avoid (primary prevention)"
         rationale = [f"Age {age} (bleeding risk likely outweighs benefit)"]
         return {
@@ -1244,7 +1179,6 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         }
 
     if bleed_flags:
-        add_trace(trace, "Aspirin_bleed_flags", bleed_flags, "Avoid due to bleed risk")
         status = "Avoid (primary prevention)"
         rationale = ["High bleeding risk: " + "; ".join(bleed_flags)]
         return {
@@ -1256,28 +1190,24 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         }
 
     risk_pct = risk10.get("risk_pct")
+    cac = plaque.get("cac_value")
     risk_ok = (risk_pct is not None and float(risk_pct) >= 10.0)
-    cac_ok = (cac is not None and int(cac) >= 100)
+    cac_ok = (cac is not None and isinstance(cac, int) and cac >= 100)
 
     if cac_ok or risk_ok:
-        reasons = []
-        if cac_ok:
-            reasons.append("CAC ≥100")
-        if risk_ok:
-            reasons.append(f"ASCVD PCE 10-year risk ≥10% ({risk_pct}%)")
+        reasons: List[str] = []
+        if cac_ok: reasons.append("CAC ≥100")
+        if risk_ok: reasons.append(f"ASCVD PCE ≥10% ({risk_pct}%)")
         reasons.append("Bleeding risk low by available flags")
-        add_trace(trace, "Aspirin_consider", reasons, "Consider aspirin shared decision")
         status = "Consider (shared decision)"
-        rationale = reasons
         return {
             "status": status,
-            "rationale": rationale,
-            "explanation": aspirin_explanation(status, rationale),
+            "rationale": reasons,
+            "explanation": aspirin_explanation(status, reasons),
             "bleeding_risk_high": bleed_high,
             "bleeding_flags": bleed_flags,
         }
 
-    add_trace(trace, "Aspirin_avoid_low_benefit", risk_pct, "Avoid/individualize")
     status = "Avoid / individualize"
     rationale = ["Primary prevention benefit likely small at current risk level"]
     return {
@@ -1288,390 +1218,254 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any
         "bleeding_flags": bleed_flags,
     }
 
+# -------------------------------------------------------------------
+# Report helpers (canonical)
+# -------------------------------------------------------------------
+def trajectory_note(p: Patient, risk10: Dict[str, Any]) -> str:
+    if p.has("apob") and safe_float(p.get("apob")) >= 100:
+        return "Rising atherogenic burden — track ApoB over time."
+    if risk10.get("risk_pct") is not None and float(risk10.get("risk_pct")) >= 15:
+        return "Elevated near-term risk — closer follow-up advised."
+    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 3:
+        return "Inflammatory signal — address drivers and recheck."
+    return "Stable profile with available data."
 
-# ----------------------------
-# Level explanation object (clinician-facing + patient explainer)
-# ----------------------------
-def explain_levels(
-    p: Patient,
-    level: int,
-    evidence: Dict[str, Any],
-    anchors: Dict[str, Any],
-    confidence: Dict[str, Any],
-    drivers_all: List[str],
-    trace: List[Dict[str, Any]],
-    risk10: Dict[str, Any],
-) -> Dict[str, Any]:
-    strength = recommendation_strength(confidence)
-    decision_conf = decision_confidence_label(strength)
+def _primary_driver(drivers: List[str]) -> str:
+    return drivers[0] if drivers else "—"
 
-    clinical = bool(evidence.get("clinical_ascvd"))
-    cs = str(evidence.get("cac_status", "Unknown"))
+def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
+    near = (anchors.get("nearTerm") or {}).get("summary", "—")
+    life = (anchors.get("lifetime") or {}).get("summary", "—")
+    # tighten a bit
+    near = near.replace(" / CAC unknown", "").replace(" / Plaque unmeasured", "")
+    return near, life
 
-    if clinical:
-        meaning = "Clinical ASCVD is present; management reflects secondary prevention intensity."
-        base_plan = "High-intensity lipid lowering; aggressive targets; address all enhancers."
-    elif level == 1:
-        meaning = "Low biologic risk signals and no evidence of plaque with current data."
-        base_plan = "Lifestyle-first; periodic reassessment; avoid over-medicalization."
-    elif level == 2:
-        meaning = "Emerging risk without proven plaque."
-        base_plan = "Complete key data; lifestyle sprint; shared decision on therapy based on trajectory."
-    elif level == 3:
-        meaning = "Actionable biologic risk; plaque may be present but is not yet proven."
-        if cs.startswith("Known zero"):
-            base_plan = "Shared decision toward lipid lowering; CAC=0 supports staged escalation; treat enhancers aggressively."
-        elif cs == "Unknown":
-            base_plan = (
-                "Shared decision toward lipid lowering. Missing plaque data does not require immediate imaging; "
-                "use CAC only if it would change the decision."
-            )
-        else:
-            base_plan = "Shared decision toward lipid lowering; target-driven prevention."
-    elif level == 4:
-        meaning = "Subclinical plaque is present (early disease)."
-        base_plan = "Treat like early disease: statin generally recommended; target-driven therapy; reassess response."
-    else:
-        meaning = "High plaque burden or disease-equivalent intensity."
-        base_plan = "Aggressive lipid targets; consider add-ons; treat as disease-equivalent intensity."
-
-    prefix = {
-        "Recommended": "Recommended: ",
-        "Consider": "Consider: ",
-        "Pending more data": "Pending more data: ",
-    }.get(strength, "")
-
-    plan = prefix + base_plan
-
-    why = drivers_all[:3]
-    if strength == "Pending more data":
-        miss = confidence.get("top_missing") or []
-        if miss:
-            why = why[:2] + [f"Key missing data: {', '.join(miss)}"]
-        else:
-            why = why[:2] + ["Key missing data limits decisiveness"]
-
-    add_trace(trace, "Recommendation_strength", strength, "Confidence-gated plan applied")
-
-    explainer = level_explainer_for_patient(level, evidence, drivers_all[:3])
-
-    return {
-        "postureLevel": level,
-        "managementLevel": level,
-        "label": posture_labels(level),
-        "meaning": meaning,
-        "why": why,
-        "defaultPosture": plan,
-        "recommendationStrength": strength,
-        "decisionConfidence": decision_conf,
-        "evidence": evidence,
-        "anchorsSummary": {
-            "nearTerm": anchors["nearTerm"]["summary"],
-            "lifetime": anchors["lifetime"]["summary"],
-        },
-        "explainer": explainer,
-        "trajectoryNote": trajectory_note(p, risk10),
-    }
-
-# ----------------------------
-# Public API
-# ----------------------------
+# -------------------------------------------------------------------
+# Public API: evaluate()
+# -------------------------------------------------------------------
 def evaluate(p: Patient) -> Dict[str, Any]:
     trace: List[Dict[str, Any]] = []
     add_trace(trace, "Engine_start", VERSION["levels"], "Begin evaluation")
 
-    evidence = evidence_model(p, trace)
-
-    # Epic-aligned ASCVD PCE (2019 interpretation)
-    risk10 = ascvd_pce_10y_risk_epic_2019(p, trace)
-
+    plaque = plaque_state(p, trace)
+    risk10 = ascvd_pce_10y_risk(p, trace)
     conf = completeness(p)
-    rs = risk_signal_score(p, trace)
-    anchors = build_anchors(p, risk10, evidence)
+    rss = risk_signal_score(p, trace)
+    anchors = build_anchors(p, risk10, plaque)
     prevent10 = prevent10_total_and_ascvd(p, trace)
 
-    level, level_triggers = posture_level(p, evidence, trace)
+    level, sublevel, level_triggers = assign_level(p, plaque, risk10, trace)
     targets = levels_targets(level)
-    burden_str = atherosclerotic_disease_burden(p)
 
-    drivers_all = ranked_drivers(p, evidence, trace)
+    therapy_on = on_lipid_therapy(p)
+    at_tgt = at_target(p, targets)
+
+    dec_conf = decision_confidence(p, level, conf, plaque)
+    stab_band, stab_note = decision_stability(p, level, conf, plaque)
+
+    # CAC support object (separate from plaque state)
+    cac_support = cac_decision_support(p, plaque, risk10, level, trace)
+
+    # Aspirin
+    asp = aspirin_advice(p, risk10, plaque, trace)
+
+    # Drivers
+    drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
-    rs = {**rs, "drivers": drivers_top}
 
-    asp = aspirin_advice(p, risk10, trace)
+    # Plan sentence
+    plan = plan_sentence(level, sublevel, therapy_on, at_tgt)
 
-    # New CAC decision support (ordering logic decoupled from Levels)
-    cac_support = cac_decision_support(
-        p=p,
-        evidence=evidence,
-        risk10=risk10,
-        level=level,
-        confidence=conf,
-        trace=trace,
-    )
+    # Next steps
+    next_acts = next_actions(p, targets)
 
-    levels_obj = explain_levels(
-        p=p,
-        level=level,
-        evidence=evidence,
-        anchors=anchors,
-        confidence=conf,
-        drivers_all=drivers_all,
-        trace=trace,
-        risk10=risk10,
-    )
-    levels_obj["triggers"] = sorted(set(level_triggers))
+    # Construct level object with app.py compatibility
+    levels_obj = {
+        "postureLevel": level,
+        "managementLevel": level,
+        "sublevel": sublevel,
+        "label": posture_label(level, sublevel=sublevel),
+        "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
+        "triggers": sorted(set(level_triggers or [])),
+        "defaultPosture": plan,  # app.py scrubs prefixes; we keep clean sentence
+        "decisionConfidence": dec_conf,  # cleaned label
+        "decisionStability": stab_band,
+        "decisionStabilityNote": stab_note,
 
-    next_acts = next_actions(p, level, targets, evidence)
+        # Plaque fields (new)
+        "plaqueEvidence": plaque.get("plaque_evidence", "—"),
+        "plaqueBurden": plaque.get("plaque_burden", "—"),
 
+        # Legacy evidence dict expected by app.py
+        "evidence": {
+            "clinical_ascvd": True if p.get("ascvd") is True else False,
+            "cac_status": plaque.get("plaque_evidence", "Unknown"),
+            "burden_band": plaque.get("plaque_burden", "Not quantified"),
+            "cac_value": plaque.get("cac_value"),
+        },
+
+        "anchorsSummary": {
+            "nearTerm": (anchors.get("nearTerm") or {}).get("summary", "—"),
+            "lifetime": (anchors.get("lifetime") or {}).get("summary", "—"),
+        },
+        "legend": levels_legend_compact(),
+        "trajectoryNote": trajectory_note(p, risk10),
+    }
+
+    # Disease burden string (legacy)
+    disease_burden = "Unknown"
+    if p.get("ascvd") is True:
+        disease_burden = "Present (clinical ASCVD)"
+    elif plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
+        disease_burden = f"Present (CAC {int(plaque['cac_value'])})"
+    elif plaque.get("plaque_present") is False:
+        disease_burden = "Not detected (CAC=0)"
+    elif plaque.get("plaque_evidence", "").startswith("Unknown"):
+        disease_burden = "Unknown (CAC not available)"
+
+    # Insights: keep keys your app reads
     insights = {
-        "cac_decision_support": cac_support,   # <— single source of truth for CAC ordering guidance
-        "decision_robustness": conf.get("confidence", "Low"),
-        "decision_robustness_note": (
-            "Higher when plaque known or key labs available; lower when key inputs missing."
-        ),
+        "cac_decision_support": cac_support,
+        "structural_clarification": cac_support.get("message"),
+        "phenotype_label": None,
+        "phenotype_definition": None,
+        # Replace "robustness" with stability, but keep legacy slots
+        "decision_stability": stab_band,
+        "decision_stability_note": stab_note,
+        "decision_robustness": stab_band,  # legacy alias (your UI may display it)
+        "decision_robustness_note": stab_note,
     }
 
     out = {
         "version": VERSION,
         "system": SYSTEM_NAME,
         "levels": levels_obj,
-        "riskSignal": rs,
-        "ascvdPce10yRisk": risk10,  # renamed key (but keep compatibility below)
-        "pooledCohortEquations10yAscvdRisk": risk10,  # backward-compatible alias for existing app usage
+        "riskSignal": {**rss, "drivers": drivers_top},
+        "pooledCohortEquations10yAscvdRisk": risk10,  # legacy key
+        "ascvdPce10yRisk": risk10,                    # new alias
         "prevent10": prevent10,
         "targets": targets,
         "confidence": conf,
-        "diseaseBurden": burden_str,
+        "diseaseBurden": disease_burden,
         "drivers": drivers_top,
         "drivers_all": drivers_all,
         "nextActions": next_acts,
-        "escGoals": esc_numeric_goals(level, clinical_ascvd=bool(evidence.get("clinical_ascvd"))),
+        "escGoals": esc_numeric_goals(level, clinical_ascvd=bool(p.get("ascvd") is True)),
         "aspirin": asp,
         "anchors": anchors,
         "lpaInfo": lpa_info(p, trace),
         "insights": insights,
         "trace": trace,
-        "trajectoryNote": trajectory_note(p, risk10),
+        "trajectoryNote": levels_obj.get("trajectoryNote"),
     }
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
 
-
-# ----------------------------
-# Quick text output (note-friendly)
-# ----------------------------
+# -------------------------------------------------------------------
+# Canonical EMR output (locked style)
+# -------------------------------------------------------------------
 def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
-    lvl = out["levels"]
-    rs = out["riskSignal"]
-    risk10 = out["pooledCohortEquations10yAscvdRisk"]
-    t = out["targets"]
-    conf = out["confidence"]
-    prev = out.get("prevent10", {}) or {}
-    ins = out.get("insights", {}) or {}
-    cac_sup = (ins.get("cac_decision_support") or {})
+    lvl = out.get("levels") or {}
+    rs = out.get("riskSignal") or {}
+    risk10 = out.get("pooledCohortEquations10yAscvdRisk") or {}
+    prev = out.get("prevent10") or {}
+    t = out.get("targets") or {}
+    asp = out.get("aspirin") or {}
+    anchors = out.get("anchors") or {}
+    ins = out.get("insights") or {}
+
+    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
+    sub = lvl.get("sublevel")
+    ev = lvl.get("evidence") or {}
+
+    plaque_evidence = lvl.get("plaqueEvidence") or ev.get("cac_status") or "—"
+    plaque_burden = lvl.get("plaqueBurden") or ev.get("burden_band") or "—"
+
+    dec_conf = lvl.get("decisionConfidence", "—")
+    stab = lvl.get("decisionStability", ins.get("decision_stability", "—"))
+    stab_note = lvl.get("decisionStabilityNote", ins.get("decision_stability_note", ""))
+
+    p_total = prev.get("total_cvd_10y_pct")
+    p_ascvd = prev.get("ascvd_10y_pct")
 
     lines: List[str] = []
-    lines.append(f"{SYSTEM_NAME} {out['version']['levels']} — Quick Reference")
+    lines.append("RISK CONTINUUM — CLINICAL REPORT")
+    lines.append("-" * 64)
 
-    lines.append(
-        f"Level {lvl.get('postureLevel', lvl.get('level'))}: "
-        f"{lvl['label'].split('—',1)[1].strip()}"
-    )
+    lvl_name = "—"
+    if level == 1:
+        lvl_name = "Minimal risk signal"
+    elif level == 2:
+        lvl_name = "Emerging risk signals"
+    elif level == 3:
+        lvl_name = "Actionable biologic risk"
+    elif level == 4:
+        lvl_name = "Subclinical atherosclerosis present"
+    elif level == 5:
+        lvl_name = "Very high risk / ASCVD intensity"
 
-    if lvl.get("explainer"):
-        lines.append(f"Level explainer: {lvl.get('explainer')}")
-
-    ev = lvl.get("evidence", {})
-    lines.append(f"Evidence: {ev.get('cac_status','Unknown')} / burden: {ev.get('burden_band','Unknown')}")
-    lines.append(f"Atherosclerotic disease burden: {out['diseaseBurden']}")
-
-    miss = ", ".join(conf["top_missing"]) if conf["top_missing"] else "none"
-    lines.append(f"Data completeness: {conf['confidence']} ({conf['pct']}% complete; missing: {miss})")
-    lines.append(f"Decision confidence: {lvl.get('decisionConfidence','—')}")
+    subtxt = f" ({sub})" if sub else ""
+    lines.append(f"Level: {level}{subtxt} — {lvl_name}")
+    lines.append("")
+    lines.append(f"Plaque Evidence: {plaque_evidence}")
+    lines.append(f"Plaque Burden: {plaque_burden}")
+    lines.append("")
+    lines.append(f"Decision confidence: {dec_conf}")
+    if stab_note:
+        lines.append(f"Decision stability: {stab} ({stab_note})")
+    else:
+        lines.append(f"Decision stability: {stab}")
     lines.append("")
 
-    # CAC ordering guidance (decoupled from Level pressure)
-    if cac_sup:
-        status = cac_sup.get("status")
-        msg = cac_sup.get("message")
-        if status == "optional":
-            lines.append("CAC guidance: Optional (confidence/refinement tool)")
-        elif status == "deferred":
-            lines.append("CAC guidance: Deferred (labs-first)")
-        elif status == "suppressed":
-            lines.append("CAC guidance: Suppressed (low-yield)")
-        else:
-            lines.append("CAC guidance: —")
-
-        if msg:
-            lines.append(msg)
-        labs_first = cac_sup.get("labs_first") or []
-        if labs_first:
-            lines.append("First-line clarifiers: " + ", ".join(labs_first))
-        reasons = cac_sup.get("reasons") or []
-        if reasons:
-            lines.append("CAC reasoning: " + "; ".join(reasons[:3]))
-        lines.append("")
-
-    lines.append(f"Risk Signal Score: {rs['score']}/100 ({rs['band']}) — {rs['note']}")
-
+    lines.append("KEY METRICS")
+    lines.append(f"- Risk Signal Score (RSS): {rs.get('score','—')} / 100 ({rs.get('band','—')})")
     if risk10.get("risk_pct") is not None:
-        lines.append(f"ASCVD PCE (10-year): {risk10['risk_pct']}% ({risk10['category']})")
+        lines.append(f"- ASCVD PCE (10-year): {risk10.get('risk_pct')}% ({risk10.get('category','—')})")
     else:
-        if risk10.get("missing"):
-            lines.append(f"ASCVD PCE (10-year): not calculated (missing {', '.join(risk10['missing'][:3])})")
+        miss = risk10.get("missing")
+        if miss:
+            lines.append(f"- ASCVD PCE (10-year): not calculated (missing {', '.join(miss[:3])})")
         else:
-            lines.append("ASCVD PCE (10-year): not calculated")
+            lines.append("- ASCVD PCE (10-year): not calculated")
 
-    if prev.get("total_cvd_10y_pct") is not None or prev.get("ascvd_10y_pct") is not None:
-        lines.append(
-            f"PREVENT (10-year): total CVD {prev.get('total_cvd_10y_pct','—')}% / ASCVD {prev.get('ascvd_10y_pct','—')}%"
-        )
+    lines.append("- PREVENT (10-year, population model):")
+    lines.append(f"  • Total CVD: {p_total if p_total is not None else '—'}%")
+    lines.append(f"  • ASCVD: {p_ascvd if p_ascvd is not None else '—'}%")
+    lines.append("")
+
+    lines.append("TARGETS")
+    if "ldl" in t:
+        lines.append(f"- LDL-C: <{int(t.get('ldl'))} mg/dL")
+    if "apob" in t:
+        lines.append(f"- ApoB: <{int(t.get('apob'))} mg/dL")
+    lines.append("")
+
+    lines.append("PLAN & ACTIONS")
+    plan = str(lvl.get("defaultPosture") or "").strip() or "—"
+    lines.append(f"- Plan: {plan}")
+    na = out.get("nextActions") or []
+    if na:
+        lines.append("- Next steps:")
+        for a in na[:3]:
+            lines.append(f"  • {a}")
     else:
-        if prev.get("missing"):
-            lines.append(f"PREVENT (10-year): not calculated (missing {', '.join(prev['missing'][:3])})")
-        else:
-            lines.append("PREVENT (10-year): not calculated")
+        lines.append("- Next steps: —")
+    lines.append(f"- Aspirin: {asp.get('status','Not assessed')}")
+    lines.append("")
 
-    lines.append(
-        "Note: Risk Signal reflects biologic/plaque signal; calculators estimate event probability—discordance can be informative."
-    )
+    lines.append("CORONARY CALCIUM (CAC)")
+    cac_msg = (ins.get("structural_clarification") or "").strip()
+    if cac_msg:
+        lines.append(f"- {cac_msg}")
+    else:
+        lines.append("- —")
+    lines.append("")
 
-    if out.get("drivers"):
-        lines.append("Drivers: " + "; ".join(out["drivers"]))
-
-    lines.append("Targets")
-    if p.has("apob"):
-        lines.append(f"• ApoB: {fmt_int(p.get('apob'))} mg/dL → target <{t['apob']} mg/dL")
-    if p.has("ldl"):
-        lines.append(f"• LDL-C: {fmt_int(p.get('ldl'))} mg/dL → target <{t['ldl']} mg/dL")
-
-    lines.append(out["escGoals"])
-
-    if out.get("nextActions"):
-        lines.append("Next: " + " / ".join(out["nextActions"]))
-
-    lines.append(f"Aspirin 81 mg: {out['aspirin']['status']}")
-
-    if out.get("trajectoryNote"):
-        lines.append(f"Trajectory note: {out['trajectoryNote']}")
+    primary = _primary_driver(out.get("drivers") or [])
+    near, life = _context_anchors_sentence(anchors)
+    lines.append("CLINICAL CONTEXT")
+    lines.append(f"- Primary driver: {primary}")
+    lines.append(f"- Anchors: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(lines)
-
-# ============================================================
-# COMPATIBILITY PATCH (drop-in; paste at END of file)
-# Restores legacy exports expected by app.py v2.8
-# ============================================================
-
-# Debug sentinel used by app.py (safe to expose)
-try:
-    PCE_DEBUG_SENTINEL
-except NameError:
-    PCE_DEBUG_SENTINEL = "PCE_EPIC_2019_ALIGNED_v2_9"
-
-# short_why helper expected by app.py import
-def short_why(items: List[str], max_items: int = 2) -> str:
-    if not items:
-        return ""
-    cleaned = [str(x).strip() for x in items if str(x).strip()]
-    return "; ".join(cleaned[:max_items])
-
-# Legend helper (optional but keeps lvl.get("legend") populated)
-def levels_legend_compact() -> List[str]:
-    return [
-        "Level 1: minimal signal → reinforce basics, periodic reassess",
-        "Level 2A: mild/isolated signal → education, complete data, lifestyle sprint",
-        "Level 2B: converging signals → lifestyle sprint + shorter reassess",
-        "Level 3A: actionable biologic risk → shared decision; consider therapy based on trajectory",
-        "Level 3B: biologic risk + enhancers → therapy often favored; refine with CAC if unknown",
-        "Level 4: subclinical plaque present → treat like early disease; target-driven therapy",
-        "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
-    ]
-
-def _level3_sublevel_compat(p: Patient, risk10: Dict[str, Any]) -> str:
-    """
-    Matches your prior semantics loosely:
-    - 3B if enhancers present (Lp(a) elevated OR FHx OR inflammation)
-    - 3C if intermediate risk (>=7.5) without enhancers
-    - 3A otherwise
-    """
-    enh = 0
-    try:
-        # Lp(a) elevated without trace
-        if lpa_elevated_no_trace(p):
-            enh += 1
-    except Exception:
-        pass
-    if p.get("fhx") is True:
-        enh += 1
-    try:
-        if inflammation_flags(p) or has_chronic_inflammatory_disease(p):
-            enh += 1
-    except Exception:
-        pass
-
-    rp = risk10.get("risk_pct")
-    intermediate = (rp is not None and float(rp) >= 7.5)
-
-    if enh >= 1:
-        return "3B"
-    if intermediate:
-        return "3C"
-    return "3A"
-
-# Wrap evaluate() to add legacy keys without editing earlier code
-try:
-    _evaluate_impl = evaluate  # keep original
-except NameError:
-    _evaluate_impl = None
-
-def evaluate(p: Patient) -> Dict[str, Any]:
-    """
-    Backward-compatible wrapper:
-    - keeps engine output intact
-    - adds legacy fields required by app.py v2.8
-    """
-    if _evaluate_impl is None:
-        raise RuntimeError("Internal error: base evaluate() not found")
-
-    out = _evaluate_impl(p)
-
-    # Ensure levels has sublevel + legend
-    lvl = out.get("levels") or {}
-    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-    risk10 = out.get("pooledCohortEquations10yAscvdRisk") or out.get("ascvdPce10yRisk") or {}
-    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 1)
-
-    if level == 3 and not lvl.get("sublevel"):
-        try:
-            lvl["sublevel"] = _level3_sublevel_compat(p, risk10)
-        except Exception:
-            lvl["sublevel"] = "3A"
-
-    if not lvl.get("legend"):
-        lvl["legend"] = levels_legend_compact()
-
-    out["levels"] = lvl
-
-    # Ensure insights has legacy structural_clarification + phenotype placeholders
-    ins = out.get("insights") or {}
-    cac_support = ins.get("cac_decision_support") if isinstance(ins, dict) else None
-
-    # Provide legacy key used by app.py
-    if "structural_clarification" not in ins:
-        msg = None
-        if isinstance(cac_support, dict):
-            msg = cac_support.get("message")
-        ins["structural_clarification"] = msg
-
-    # App references these optionally
-    ins.setdefault("phenotype_label", None)
-    ins.setdefault("phenotype_definition", None)
-
-    out["insights"] = ins
-    return out
-
-
-
