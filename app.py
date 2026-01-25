@@ -145,12 +145,35 @@ def scrub_terms(s: str) -> str:
     s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
     s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
     s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
+    s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
     return s
 
 def scrub_list(xs):
     if not xs:
         return xs
     return [scrub_terms(str(x)) for x in xs]
+
+# ============================================================
+# Normalized extractors (single source of truth)
+# ============================================================
+def extract_management_plan(levels: dict) -> str:
+    return str((levels.get("managementPlan") or levels.get("defaultPosture") or "")).strip()
+
+def extract_decision_stability(levels: dict, insights: dict):
+    band = levels.get("decisionStability") or insights.get("decision_stability") or "—"
+    note = levels.get("decisionStabilityNote") or insights.get("decision_stability_note") or ""
+    return scrub_terms(band), scrub_terms(note)
+
+def extract_aspirin_line(asp: dict) -> str:
+    raw = scrub_terms(asp.get("status", "Not assessed"))
+    l = raw.lower()
+    if l.startswith("avoid"):
+        return "Not indicated"
+    if l.startswith("consider"):
+        return "Consider (shared decision)"
+    if l.startswith("secondary prevention"):
+        return "Secondary prevention (if no contraindication)"
+    return raw or "—"
 
 # ============================================================
 # Visual: Risk Continuum bar
@@ -500,7 +523,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["smoking_val"] = "Yes" if bool(parsed["smoker"]) else "No"
         applied.append("Smoking")
 
-    # Diabetes: trust parser only
     if parsed.get("diabetes") is not None:
         st.session_state["diabetes_choice_val"] = "Yes" if bool(parsed["diabetes"]) else "No"
         applied.append("Diabetes")
@@ -526,7 +548,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
     else:
         missing.append("Premature family history")
 
-    # CAC reset logic
     if parsed.get("cac_not_done") is True:
         st.session_state["cac_known_val"] = "No"
         st.session_state["cac_val"] = 0
@@ -542,7 +563,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
             st.session_state["cac_val"] = 0
             missing.append("Calcium score")
 
-    # PREVENT fields
     if parsed.get("bmi") is not None:
         try:
             st.session_state["bmi_val"] = float(parsed["bmi"])
@@ -561,7 +581,6 @@ def apply_parsed_to_session(parsed: dict, raw_txt: str):
         st.session_state["lipid_lowering_val"] = "Yes" if bool(parsed["lipidLowering"]) else "No"
         applied.append("Lipid therapy")
 
-    # Optional: hsCRP + inflammatory flags
     h = parse_hscrp_from_text(raw_txt)
     if h is not None:
         st.session_state["hscrp_val"] = float(h)
@@ -1000,10 +1019,6 @@ legend = lvl.get("legend") or FALLBACK_LEVEL_LEGEND
 
 decision_conf = scrub_terms(lvl.get("decisionConfidence") or "—")
 
-plan_raw = str(lvl.get("defaultPosture") or "")
-plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", plan_raw).strip()
-plan_clean = scrub_terms(plan_clean)
-
 next_actions = scrub_list(out.get("nextActions", []) or [])
 drivers = scrub_list(out.get("drivers", []) or [])
 
@@ -1020,43 +1035,54 @@ p_total = prevent10.get("total_cvd_10y_pct")
 p_ascvd = prevent10.get("ascvd_10y_pct")
 p_note = scrub_terms(prevent10.get("notes", ""))
 
-asp_status = scrub_terms(asp.get("status", "Not assessed"))
-asp_expl = scrub_terms(asp.get("explanation", ""))
-
 anchors = out.get("anchors", {}) or {}
 near_anchor = scrub_terms((anchors.get("nearTerm") or {}).get("summary", "—"))
 life_anchor = scrub_terms((anchors.get("lifetime") or {}).get("summary", "—"))
 
+# ============================================================
+# Normalized display fields (single source of truth)
+# ============================================================
+plan_raw = extract_management_plan(lvl)
+plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", plan_raw).strip()
+plan_clean = scrub_terms(plan_clean)
+
+decision_stability, decision_stability_note = extract_decision_stability(lvl, ins)
+
+asp_expl = scrub_terms(asp.get("explanation", ""))  # Details tab only
+asp_line = extract_aspirin_line(asp)               # Report + EMR note
+asp_status_raw = scrub_terms(asp.get("status", "Not assessed"))
+
 st.caption(f"Last calculation: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ============================================================
-# EMR Note text (for copy box)
+# EMR Note text (for copy box) — CLEANED (no glossary)
 # ============================================================
 def build_emr_note() -> str:
     lines = []
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
     lines.append("-" * 64)
-    lines.append(f"Level: {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
-    lines.append(f"Evidence: {scrub_terms(ev.get('cac_status','—'))} / Burden: {scrub_terms(ev.get('burden_band','—'))}")
-    lines.append(f"Decision confidence: {decision_conf}")
 
-    if ins.get("decision_robustness"):
-        rob = scrub_terms(ins.get("decision_robustness"))
-        rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
-        lines.append(f"Decision robustness: {rob}" + (f" — {rob_note}" if rob_note else ""))
+    lines.append(f"Level: {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
+    lines.append(f"Plaque status: {scrub_terms(ev.get('cac_status','—'))}")
+    lines.append(f"Plaque burden: {scrub_terms(ev.get('burden_band','—'))}")
+
+    lines.append(f"Decision confidence: {decision_conf}")
+    lines.append(
+        f"Decision stability: {decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
+    )
 
     lines.append("")
     lines.append("KEY METRICS")
-    lines.append(f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})")
-    lines.append(f"- PCE 10y ASCVD: {pce_line} {pce_cat}".strip())
+    lines.append(f"- Risk Signal Score: {rs.get('score','—')}/100 ({rs.get('band','—')})")
+    lines.append(f"- ASCVD PCE (10y): {pce_line} {pce_cat}".strip())
+
     lines.append(
-        f"- PREVENT (population model) 10y: "
+        f"- PREVENT (10y, population model): "
         f"total CVD {p_total if p_total is not None else '—'}%; "
         f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
     )
     if (p_total is None and p_ascvd is None) and p_note:
         lines.append(f"  PREVENT note: {p_note}")
-    lines.append(f"  ({PREVENT_EXPLAINER})")
 
     lines.append("")
     lines.append("TARGETS")
@@ -1069,31 +1095,36 @@ def build_emr_note() -> str:
         lines.append("- —")
 
     lines.append("")
-    lines.append("PLAN & ACTIONS")
-    lines.append(f"- Plan: {plan_clean or '—'}")
+    lines.append("MANAGEMENT PLAN")
+    lines.append(plan_clean or "—")
+
+    lines.append("")
+    lines.append("NEXT STEPS")
     if next_actions:
-        lines.append("- Next steps:")
         for a in next_actions[:3]:
-            lines.append(f"  • {a}")
+            aa = str(a).strip()
+            if aa.endswith("."):
+                aa = aa[:-1]
+            lines.append(f"- {aa}")
     else:
-        lines.append("- Next steps: —")
+        lines.append("- —")
 
-    if asp_expl:
-        lines.append(f"- Aspirin: {asp_status} — {asp_expl}")
-    else:
-        lines.append(f"- Aspirin: {asp_status}")
+    lines.append(f"- Aspirin: {asp_line}")
 
-    if ins.get("structural_clarification"):
-        lines.append(f"- {scrub_terms(ins.get('structural_clarification'))}")
+    cs = (ins.get("cac_decision_support") or {}).get("status")
+    cac_msg = scrub_terms(ins.get("structural_clarification") or "")
+    if cs and cs != "suppressed":
+        if cac_msg:
+            lines.append(f"- Coronary calcium: {cac_msg}")
+    elif (not cs) and cac_msg:
+        lines.append(f"- Coronary calcium: {cac_msg}")
 
     lines.append("")
     lines.append("CLINICAL CONTEXT")
     if drivers:
-        lines.append(f"- Risk driver: {drivers[0]}")
-    if ins.get("phenotype_label"):
-        lines.append(f"- Phenotype: {scrub_terms(ins.get('phenotype_label'))}")
+        lines.append(f"- Primary driver: {drivers[0]}")
     if ev.get("cac_status") == "Unknown":
-        lines.append("- Structural status: Unknown (CAC not performed)")
+        lines.append("- Plaque status: Unmeasured (CAC not performed)")
     lines.append(f"- Anchors: Near-term: {near_anchor} | Lifetime: {life_anchor}")
     lines.append("")
     return "\n".join(lines)
@@ -1106,15 +1137,16 @@ tab_report, tab_details, tab_debug = st.tabs(["Report", "Details", "Debug"])
 with tab_report:
     st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
+    stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
     st.markdown(
         f"""
 <div class="block">
   <div class="block-title">Snapshot</div>
   <div class="kvline"><b>Level:</b> {level}{f" ({sub})" if sub else ""} — {LEVEL_NAMES.get(level,'—')}</div>
-  <div class="kvline"><b>Evidence:</b> {scrub_terms(ev.get('cac_status','—'))} / <b>Burden:</b> {scrub_terms(ev.get('burden_band','—'))}</div>
-  <div class="kvline"><b>Decision confidence:</b> {decision_conf}</div>
-  <div class="kvline"><b>Key metrics:</b> RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • PCE 10y {pce_line} {pce_cat}</div>
-  <div class="kvline"><b>PREVENT (population model) 10y:</b>
+  <div class="kvline"><b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))} &nbsp; <b>Plaque burden:</b> {scrub_terms(ev.get('burden_band','—'))}</div>
+  <div class="kvline"><b>Decision confidence:</b> {decision_conf} &nbsp; <b>Decision stability:</b> {stab_line}</div>
+  <div class="kvline"><b>Key metrics:</b> RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • ASCVD PCE (10y) {pce_line} {pce_cat}</div>
+  <div class="kvline"><b>PREVENT (10y, population model):</b>
       total CVD {f"{p_total}%" if p_total is not None else '—'} •
       ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
   </div>
@@ -1125,7 +1157,7 @@ with tab_report:
 
     st.caption(PREVENT_EXPLAINER)
     if (p_total is None and p_ascvd is None) and p_note:
-        st.caption(f"PREVENT (population model): {p_note}")
+        st.caption(f"PREVENT: {p_note}")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1134,47 +1166,45 @@ with tab_report:
         lipid_targets_line = f"{primary[0]} {primary[1]}"
         if apob_line:
             lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
-        st.markdown(f"<div class='kvline'><b>Lipid targets:</b> {lipid_targets_line}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='kvline'><b>Risk-reduction intensity:</b> {lipid_targets_line}</div>", unsafe_allow_html=True)
         st.caption(guideline_anchor_note(level, clinical_ascvd))
         if apob_line and not apob_measured:
             st.caption("ApoB not measured here — optional add-on to check for discordance.")
     else:
-        st.markdown("<div class='kvline'><b>Lipid targets:</b> —</div>", unsafe_allow_html=True)
+        st.markdown("<div class='kvline'><b>Risk-reduction intensity:</b> —</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="block"><div class="block-title">Plan & actions</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="block"><div class="block-title">Management</div></div>', unsafe_allow_html=True)
     st.markdown(f"**Plan:** {plan_clean or '—'}")
 
     if next_actions:
         st.markdown("**Next steps:**")
         for a in next_actions[:3]:
-            st.markdown(f"- {a}")
+            aa = str(a).strip()
+            if aa.endswith("."):
+                aa = aa[:-1]
+            st.markdown(f"- {aa}")
     else:
         st.markdown("**Next steps:** —")
 
-    if asp_expl:
-        st.markdown(f"**Aspirin:** {asp_status} — {asp_expl}")
-    else:
-        st.markdown(f"**Aspirin:** {asp_status}")
+    st.markdown(f"**Aspirin:** {asp_line}")
 
-    if ins.get("structural_clarification"):
-        st.caption(scrub_terms(ins.get("structural_clarification")))
+    cs = (ins.get("cac_decision_support") or {}).get("status")
+    cac_msg = scrub_terms(ins.get("structural_clarification") or "")
+    if cac_msg and cs != "suppressed":
+        st.caption(cac_msg)
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     st.markdown('<div class="block"><div class="block-title">Clinical context</div></div>', unsafe_allow_html=True)
     if drivers:
-        st.markdown(f"**Risk driver:** {drivers[0]}")
+        st.markdown(f"**Primary driver:** {drivers[0]}")
     if ins.get("phenotype_label"):
         st.markdown(f"**Phenotype:** {scrub_terms(ins.get('phenotype_label'))}")
-    if ins.get("decision_robustness"):
-        rob = scrub_terms(ins.get("decision_robustness"))
-        rob_note = scrub_terms(ins.get("decision_robustness_note", ""))
-        st.markdown(f"**Decision robustness:** {rob}" + (f" — {rob_note}" if rob_note else ""))
     if ev.get("cac_status") == "Unknown":
-        st.markdown("**Structural status:** Unknown (CAC not performed)")
+        st.markdown("**Plaque status:** Unmeasured (CAC not performed)")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1189,12 +1219,17 @@ with tab_details:
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    st.subheader("Decision stability (detail)")
+    st.markdown(f"**{decision_stability}**" + (f" — {decision_stability_note}" if decision_stability_note else ""))
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
     st.subheader("Aspirin (detail)")
     asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=5))
     if asp_expl:
-        st.write(f"**{asp_status}** — {asp_expl}" + (f" **Why (bullets):** {asp_why}" if asp_why else ""))
+        st.write(f"**{asp_status_raw}** — {asp_expl}" + (f" **Why:** {asp_why}" if asp_why else ""))
     else:
-        st.write(f"**{asp_status}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
+        st.write(f"**{asp_status_raw}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1226,9 +1261,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
-
-
 
 
 
