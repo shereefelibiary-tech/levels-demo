@@ -1088,6 +1088,7 @@ def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dic
 # =========================
 # CHUNK 6 / 6 — START
 # =========================
+
 # -------------------------------------------------------------------
 # CAC decision support (suppressed / deferred / optional; never recommended)
 # -------------------------------------------------------------------
@@ -1173,7 +1174,6 @@ def cac_decision_support(
 
 # -------------------------------------------------------------------
 # Therapy status + modality-aware plan sentence (buffer-aware language)
-# (UPDATED: default intensity embedded; signature includes plaque)
 # -------------------------------------------------------------------
 def on_lipid_therapy(p: Patient) -> bool:
     for k in ("lipid_lowering", "on_statin", "statin", "lipidTherapy"):
@@ -1366,15 +1366,6 @@ def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
 # -------------------------------------------------------------------
 def evaluate(p: Patient) -> Dict[str, Any]:
     trace: List[Dict[str, Any]] = []
-    add_trace(trace, "Engine_start", VERSION
-# =========================
-# CHUNK 6 / 6 — CONTINUATION (COMPLETE THE FILE)
-# Paste starting RIGHT AFTER the line:
-#     add_trace(trace, "Engine_start", VERSION
-# =========================
-
-def evaluate(p: Patient) -> Dict[str, Any]:
-    trace: List[Dict[str, Any]] = []
     add_trace(trace, "Engine_start", VERSION["levels"], "Begin evaluation")
 
     plaque = plaque_state(p, trace)
@@ -1399,7 +1390,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
 
-    # UPDATED: plan_sentence call includes plaque
     plan = plan_sentence(level, sublevel, therapy_on, at_tgt, risk10, plaque)
     next_acts = next_actions(p, targets)
 
@@ -1411,7 +1401,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
         "triggers": sorted(set(level_triggers or [])),
 
-        # STEP 1: canonical key + legacy alias (backward compatible)
         "managementPlan": plan,
         "defaultPosture": plan,
 
@@ -1453,7 +1442,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "phenotype_label": None,
         "phenotype_definition": None,
 
-        # Keep legacy stability/robustness keys for UI compatibility
         "decision_stability": stab_band,
         "decision_stability_note": stab_note,
         "decision_robustness": stab_band,
@@ -1571,7 +1559,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append("")
 
     lines.append("PLAN & ACTIONS")
-    # STEP 1: prefer managementPlan, fall back to defaultPosture
     plan = str((lvl.get("managementPlan") or lvl.get("defaultPosture") or "")).strip() or "—"
     lines.append(f"- Plan: {plan}")
 
