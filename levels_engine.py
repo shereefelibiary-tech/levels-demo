@@ -145,7 +145,7 @@ def a1c_status(p: Patient) -> Optional[str]:
     return "diabetes_range"
 
 def has_chronic_inflammatory_disease(p: Patient) -> bool:
-    return any(p.get(k) is True for k in ["ra", "psoriasis", "sle", "ibd", "hiv"])
+    return any(p.get(k) is True for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"])
 
 def inflammation_flags(p: Patient) -> List[str]:
     flags: List[str] = []
@@ -1661,4 +1661,5 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
