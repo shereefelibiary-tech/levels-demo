@@ -1,5 +1,8 @@
+# =========================
+# CHUNK 1 / 4 — START
+# =========================
 # levels_engine.py
-# Risk Continuum™ Engine — v3.0 (locked language; Epic-aligned PCE; CAC gating; modality-aware plan)
+# Risk Continuum™ Engine — v3.1 (buffer-based thresholds; locked language; Epic-aligned PCE; CAC gating; modality-aware plan)
 #
 # Goals:
 # - Outputs "ease and confidence" in CV risk management decisions
@@ -7,6 +10,7 @@
 # - CAC is optional/deferred/suppressed (never "recommended")
 # - Plaque concepts are explicit: Plaque Evidence vs Plaque Burden
 # - Decision Confidence vs Decision Stability are distinct, consistent, and calm
+# - Buffered binaries: hard gates + reasonableness buffer around cutoffs
 #
 # Preserves:
 # - RSS scoring (biologic + plaque signal)
@@ -22,17 +26,35 @@ from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 
 SYSTEM_NAME = "Risk Continuum™"
-PCE_DEBUG_SENTINEL = "PCE_EPIC_2019_ALIGNED_v3_0"
+PCE_DEBUG_SENTINEL = "PCE_EPIC_2019_ALIGNED_v3_1"
 
 VERSION = {
     "system": SYSTEM_NAME,
-    "levels": "v3.0-risk-continuum-locked",
+    "levels": "v3.1-risk-continuum-buffered",
     "riskSignal": "RSS v1.0",
     "riskCalc": "ASCVD PCE (ACC/AHA 2019 interpretation; Epic-aligned implementation)",
     "aspirin": "Aspirin v1.0 (CAC≥100 OR ASCVD PCE≥10%, age 40–69, low bleed risk)",
     "prevent": "PREVENT (AHA) population model 10y: total CVD + ASCVD",
-    "insights": "Locked clinical language v1.0",
+    "insights": "Locked clinical language v1.0 (buffered binaries)",
 }
+
+# -------------------------------------------------------------------
+# Buffer-based gates (tight, conservative)
+# -------------------------------------------------------------------
+PCE_HARD_NO_MAX = 4.0         # <4% → suppress CAC
+PCE_BUFFER_MIN = 4.0          # 4–6% → buffer/pause zone
+PCE_BUFFER_MAX = 6.0
+PCE_ACTION_MIN = 6.0          # ≥6% → actionable zone (preference-sensitive depending on context)
+PCE_ACTION_MAX = 20.0         # ≥20% → high risk; CAC usually low incremental value
+
+A1C_BUFFER_MIN = 6.2          # 6.2–6.4% → near diabetes boundary (avoid over-labeling)
+A1C_BUFFER_MAX = 6.4
+
+# Optional (used for language + drivers; not required for gating)
+LDL_BUFFER_MIN = 170.0
+LDL_BUFFER_MAX = 189.0
+APOB_BUFFER_MIN = 110.0
+APOB_BUFFER_MAX = 129.0
 
 # -------------------------------------------------------------------
 # Patient wrapper
@@ -86,15 +108,23 @@ def levels_legend_compact() -> List[str]:
         "Level 1: minimal signal → reinforce basics; periodic reassess",
         "Level 2: emerging signals → complete data; lifestyle sprint; reassess",
         "Level 3A: actionable biology → lifestyle-first; pharmacologic reasonable if targets unmet",
-        "Level 3B: actionable biology + enhancers → pharmacologic therapy often favored; CAC optional if it would alter intensity/timing",
+        "Level 3B: actionable biology + enhancers → pharmacologic therapy often favored; CAC optional only if it would change timing/intensity",
         "Level 4: plaque present → treat like early disease; target-driven therapy",
         "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
+        "Buffered binaries: hard gates at edges; narrow buffer near cutoffs to absorb noise and avoid cascades",
     ]
 
 # -------------------------------------------------------------------
 # A1c + inflammation helpers
 # -------------------------------------------------------------------
 def a1c_status(p: Patient) -> Optional[str]:
+    """
+    Returns:
+      - normal
+      - prediabetes
+      - near_diabetes_boundary (6.2–6.4)
+      - diabetes_range (≥6.5)
+    """
     if not p.has("a1c"):
         return None
     a1c = safe_float(p.get("a1c"), default=float("nan"))
@@ -102,6 +132,8 @@ def a1c_status(p: Patient) -> Optional[str]:
         return None
     if a1c < 5.7:
         return "normal"
+    if A1C_BUFFER_MIN <= a1c <= A1C_BUFFER_MAX:
+        return "near_diabetes_boundary"
     if a1c < 6.5:
         return "prediabetes"
     return "diabetes_range"
@@ -240,14 +272,19 @@ def plaque_state(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
             "certainty": "Moderate",
         }
 
+    # Interpretive buffer: CAC 1–9 should not flip posture alone (avoid cascade)
     if cac <= 9:
-        band = "Minimal"
+        band = "Minimal (1–9)"
+        certainty = "High"
     elif cac <= 99:
-        band = "Low"
+        band = "Low (10–99)"
+        certainty = "High"
     elif cac <= 399:
-        band = "Moderate"
+        band = "Moderate (100–399)"
+        certainty = "High"
     else:
-        band = "High"
+        band = "High (≥400)"
+        certainty = "High"
 
     add_trace(trace, "CAC_positive", cac, f"CAC positive; burden={band}")
     return {
@@ -255,7 +292,7 @@ def plaque_state(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         "plaque_burden": f"{band} (Agatston {cac})",
         "cac_value": cac,
         "plaque_present": True,
-        "certainty": "High",
+        "certainty": certainty,
     }
 
 # -------------------------------------------------------------------
@@ -265,13 +302,37 @@ def _clip(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 def _pce_category(risk_pct: float) -> str:
-    if risk_pct < 5:
-        return "Low (<5%)"
+    if risk_pct < PCE_HARD_NO_MAX:
+        return f"Low (<{PCE_HARD_NO_MAX:.0f}%)"
+    if PCE_BUFFER_MIN <= risk_pct <= PCE_BUFFER_MAX:
+        return f"Near boundary ({PCE_BUFFER_MIN:.0f}–{PCE_BUFFER_MAX:.0f}%)"
     if risk_pct < 7.5:
         return "Borderline (5–7.4%)"
-    if risk_pct < 20:
+    if risk_pct < PCE_ACTION_MAX:
         return "Intermediate (7.5–19.9%)"
-    return "High (≥20%)"
+    return f"High (≥{PCE_ACTION_MAX:.0f}%)"
+
+def pce_zone(risk_pct: Optional[float]) -> str:
+    """
+    Buffered-binary zones:
+      - hard_no: <4%
+      - buffer: 4–6%
+      - actionable: ≥6% and <20%
+      - high: ≥20%
+      - unknown: None
+    """
+    if risk_pct is None:
+        return "unknown"
+    rp = float(risk_pct)
+    if rp < PCE_HARD_NO_MAX:
+        return "hard_no"
+    if PCE_BUFFER_MIN <= rp <= PCE_BUFFER_MAX:
+        return "buffer"
+    if rp >= PCE_ACTION_MAX:
+        return "high"
+    if rp >= PCE_ACTION_MIN:
+        return "actionable"
+    return "buffer"
 
 def ascvd_pce_10y_risk(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -383,13 +444,20 @@ def ascvd_pce_10y_risk(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any
     risk_pct = round(risk * 100.0, 1)
     cat = _pce_category(risk_pct)
 
-    add_trace(trace, "PCE_calculated", {"risk_pct": risk_pct, "category": cat}, "ASCVD PCE calculated")
+    add_trace(trace, "PCE_calculated", {"risk_pct": risk_pct, "category": cat, "zone": pce_zone(risk_pct)}, "ASCVD PCE calculated")
     return {
         "risk_pct": risk_pct,
         "category": cat,
         "missing": [],
         "notes": "ASCVD PCE (Epic-aligned).",
     }
+
+# =========================
+# CHUNK 1 / 4 — END
+# =========================
+# =========================
+# CHUNK 2 / 4 — START
+# =========================
 
 # -------------------------------------------------------------------
 # PREVENT (AHA) — population comparator (RESTORED: v2.8 full equations + safe evaluator)
@@ -602,6 +670,7 @@ def prevent10_total_and_ascvd(p: Patient, trace: List[Dict[str, Any]]) -> Dict[s
         "missing": [],
         "notes": "PREVENT (population model).",
     }
+
 # -------------------------------------------------------------------
 # Data completeness (diagnostic only)
 # -------------------------------------------------------------------
@@ -681,7 +750,13 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
     metab = 0
     if p.get("diabetes") is True: metab += 6
     if p.get("smoking") is True: metab += 4
-    if a1c_status(p) == "prediabetes": metab += 2
+
+    a1s = a1c_status(p)
+    # Buffer: near diabetes boundary signals attention without labeling disease
+    if a1s == "near_diabetes_boundary":
+        metab += 1
+    elif a1s == "prediabetes":
+        metab += 2
     metab = min(metab, 10)
 
     total = clamp(int(round(burden + athero + genetics + infl + metab)))
@@ -692,6 +767,13 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
         "band": rss_band(total),
         "note": "Biologic + plaque signal (not event probability).",
     }
+
+# =========================
+# CHUNK 2 / 4 — END
+# =========================
+# =========================
+# CHUNK 3 / 4 — START
+# =========================
 
 # -------------------------------------------------------------------
 # Targets + ESC/EAS framing
@@ -726,25 +808,42 @@ def ranked_drivers(p: Patient, plaque: Dict[str, Any], trace: List[Dict[str, Any
     elif plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
         drivers.append((10, f"CAC {int(plaque['cac_value'])}"))
 
-    if p.has("apob") and safe_float(p.get("apob")) >= 100:
-        drivers.append((20, f"ApoB {fmt_int(p.get('apob'))}"))
-    elif p.has("ldl") and safe_float(p.get("ldl")) >= 130:
-        drivers.append((20, f"LDL-C {fmt_int(p.get('ldl'))}"))
+    if p.has("apob"):
+        ap = safe_float(p.get("apob"))
+        if ap >= 130:
+            drivers.append((20, f"ApoB {fmt_int(p.get('apob'))}"))
+        elif APOB_BUFFER_MIN <= ap <= APOB_BUFFER_MAX:
+            drivers.append((25, f"ApoB {fmt_int(p.get('apob'))} (near boundary)"))
+        elif ap >= 100:
+            drivers.append((30, f"ApoB {fmt_int(p.get('apob'))}"))
+    elif p.has("ldl"):
+        ld = safe_float(p.get("ldl"))
+        if ld >= 190:
+            drivers.append((20, f"LDL-C {fmt_int(p.get('ldl'))}"))
+        elif LDL_BUFFER_MIN <= ld <= LDL_BUFFER_MAX:
+            drivers.append((25, f"LDL-C {fmt_int(p.get('ldl'))} (near boundary)"))
+        elif ld >= 130:
+            drivers.append((30, f"LDL-C {fmt_int(p.get('ldl'))}"))
 
     if lpa_elevated(p, trace):
-        drivers.append((30, "Lp(a) elevated"))
+        drivers.append((40, "Lp(a) elevated"))
 
-    if p.get("diabetes") is True:
-        drivers.append((40, "Diabetes"))
+    a1s = a1c_status(p)
+    if a1s == "diabetes_range" or p.get("diabetes") is True:
+        drivers.append((41, "Diabetes"))
+    elif a1s == "near_diabetes_boundary":
+        drivers.append((55, "A1c near diabetes threshold"))
+    elif a1s == "prediabetes":
+        drivers.append((60, "Prediabetes"))
 
     if p.get("smoking") is True:
-        drivers.append((41, "Smoking"))
+        drivers.append((42, "Smoking"))
 
     if inflammation_flags(p) or has_chronic_inflammatory_disease(p):
         drivers.append((50, "Inflammatory signal"))
 
     if p.get("fhx") is True:
-        drivers.append((60, "Premature family history"))
+        drivers.append((52, "Premature family history"))
 
     drivers.sort(key=lambda x: (x[0], x[1]))
     ranked = [d for _, d in drivers]
@@ -757,7 +856,12 @@ def ranked_drivers(p: Patient, plaque: Dict[str, Any], trace: List[Dict[str, Any
 def build_anchors(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any]) -> Dict[str, Any]:
     near: List[str] = []
     if risk10.get("risk_pct") is not None:
-        near.append(f"ASCVD PCE {risk10['risk_pct']}% ({risk10['category']})")
+        rp = float(risk10["risk_pct"])
+        z = pce_zone(rp)
+        if z == "buffer":
+            near.append(f"ASCVD PCE {rp}% (near boundary)")
+        else:
+            near.append(f"ASCVD PCE {rp}% ({risk10.get('category','—')})")
     else:
         near.append("ASCVD PCE not available")
 
@@ -770,10 +874,22 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any]) ->
         near.append("Plaque unmeasured")
 
     life: List[str] = []
-    if p.has("apob") and safe_float(p.get("apob")) >= 100:
-        life.append(f"ApoB {fmt_int(p.get('apob'))}")
-    elif not p.has("apob") and p.has("ldl") and safe_float(p.get("ldl")) >= 130:
-        life.append(f"LDL-C {fmt_int(p.get('ldl'))}")
+    if p.has("apob"):
+        ap = safe_float(p.get("apob"))
+        if ap >= 130:
+            life.append(f"ApoB {fmt_int(p.get('apob'))}")
+        elif APOB_BUFFER_MIN <= ap <= APOB_BUFFER_MAX:
+            life.append(f"ApoB {fmt_int(p.get('apob'))} (near boundary)")
+        elif ap >= 100:
+            life.append(f"ApoB {fmt_int(p.get('apob'))}")
+    elif p.has("ldl"):
+        ld = safe_float(p.get("ldl"))
+        if ld >= 190:
+            life.append(f"LDL-C {fmt_int(p.get('ldl'))}")
+        elif LDL_BUFFER_MIN <= ld <= LDL_BUFFER_MAX:
+            life.append(f"LDL-C {fmt_int(p.get('ldl'))} (near boundary)")
+        elif ld >= 130:
+            life.append(f"LDL-C {fmt_int(p.get('ldl'))}")
 
     if lpa_elevated_no_trace(p):
         life.append("Lp(a) elevated")
@@ -781,10 +897,12 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any]) ->
     if p.get("fhx") is True:
         life.append("Premature family history")
 
-    if a1c_status(p) == "prediabetes":
+    a1s = a1c_status(p)
+    if a1s == "near_diabetes_boundary":
+        life.append("A1c near diabetes threshold")
+    elif a1s == "prediabetes":
         life.append("Prediabetes")
-
-    if p.get("diabetes") is True:
+    elif a1s == "diabetes_range" or p.get("diabetes") is True:
         life.append("Diabetes")
 
     if not life:
@@ -801,7 +919,7 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any]) ->
 LEVEL_LABELS = {
     0: "Level 0 — Not assessed",
     1: "Level 1 — Minimal risk signal",
-    2: "Level 2 — Emerging risk signals",  # (internal only; UI uses 2A/2B)
+    2: "Level 2 — Emerging risk signals",  # UI uses 2A/2B
     3: "Level 3 — Actionable biologic risk",
     4: "Level 4 — Subclinical atherosclerosis present",
     5: "Level 5 — Very high risk / ASCVD intensity",
@@ -810,7 +928,6 @@ LEVEL_LABELS = {
 def posture_label(level: int, sublevel: Optional[str] = None) -> str:
     base = LEVEL_LABELS.get(level, f"Level {level}")
     if sublevel:
-        # Replace "Level 2" with "Level 2A/2B" etc in display label
         if level in (2, 3):
             parts = base.split("—", 1)
             if len(parts) == 2:
@@ -826,8 +943,13 @@ def _mild_signals(p: Patient) -> List[str]:
         sig.append("ApoB 80–99")
     if p.has("ldl") and 100 <= safe_float(p.get("ldl")) <= 129:
         sig.append("LDL 100–129")
-    if a1c_status(p) == "prediabetes":
+
+    a1s = a1c_status(p)
+    if a1s == "prediabetes":
         sig.append("Prediabetes")
+    elif a1s == "near_diabetes_boundary":
+        sig.append("A1c 6.2–6.4 (near diabetes threshold)")
+
     if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2 and not has_chronic_inflammatory_disease(p):
         sig.append("hsCRP≥2")
     return sig
@@ -848,8 +970,11 @@ def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
     if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
         sig.append("Inflammation present")
 
-    if p.get("diabetes") is True:
+    a1s = a1c_status(p)
+    if a1s == "diabetes_range" or p.get("diabetes") is True:
         sig.append("Diabetes")
+    elif a1s == "near_diabetes_boundary":
+        sig.append("A1c near diabetes threshold")
 
     if p.get("smoking") is True:
         sig.append("Smoking")
@@ -857,20 +982,13 @@ def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
     return sig
 
 def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[int, Optional[str], List[str]]:
-    """
-    Returns: (level, sublevel, triggers)
-      - Sublevels used only for Level 2 (2A/2B) and Level 3 (3A/3B).
-      - No 3C.
-    """
     triggers: List[str] = []
 
-    # Secondary prevention / disease-equivalent
     if p.get("ascvd") is True:
         triggers.append("Clinical ASCVD")
         add_trace(trace, "Level_override_ASCVD", True, "Level=5")
         return 5, None, triggers
 
-    # Plaque present drives Level 4/5
     if plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
         cac = int(plaque["cac_value"])
         triggers.append(f"CAC {cac}")
@@ -880,11 +998,9 @@ def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], tra
         add_trace(trace, "Level_CAC_1_99", cac, "Level=4")
         return 4, None, triggers
 
-    # High biology -> Level 3
     hs = _high_signals(p, trace)
     if hs:
         triggers.extend(hs)
-        # 3B = enhancers present (Lp(a) elevated OR FHx OR inflammation)
         enh = 0
         if lpa_elevated_no_trace(p): enh += 1
         if p.get("fhx") is True: enh += 1
@@ -895,7 +1011,6 @@ def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], tra
         add_trace(trace, "Level_high_biology", hs[:4], "Level=3")
         return 3, sub, triggers
 
-    # Mild biology -> Level 2A/2B
     ms = _mild_signals(p)
     if ms:
         triggers.extend(ms)
@@ -907,7 +1022,6 @@ def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], tra
         add_trace(trace, "Level_emerging_risk", ms[:4], "Level=2")
         return 2, sub, triggers
 
-    # Otherwise Level 1 if any data
     if p.data:
         add_trace(trace, "Level_low_biology", None, "Level=1")
         return 1, None, triggers
@@ -918,13 +1032,6 @@ def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], tra
 # Decision Confidence (label only: High/Moderate/Low)
 # -------------------------------------------------------------------
 def decision_confidence(p: Patient, level: int, conf: Dict[str, Any], plaque: Dict[str, Any]) -> str:
-    """
-    Confidence is the appropriateness of a plan today (not a data completeness %).
-    Conservative mapping:
-      - High if plaque known (CAC or ASCVD) OR level>=4 OR completeness high
-      - Moderate if completeness moderate
-      - Low otherwise
-    """
     if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
         return "High"
     if level >= 4:
@@ -939,16 +1046,10 @@ def decision_confidence(p: Patient, level: int, conf: Dict[str, Any], plaque: Di
 # -------------------------------------------------------------------
 # Decision Stability (how likely plan changes with additional data)
 # -------------------------------------------------------------------
-def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dict[str, Any]) -> Tuple[str, str]:
-    """
-    Stability is the likelihood that management would change with commonly considered next information.
-    Returns: (band, short_parenthetical_note)
-    """
-    # If plaque is measured (CAC known or ASCVD), stability is high.
+def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dict[str, Any], risk10: Dict[str, Any]) -> Tuple[str, str]:
     if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
         return "High", "plaque assessed"
 
-    # If dominant drivers already justify intensity, stability is high even if plaque unmeasured.
     dominant = False
     if p.get("diabetes") is True:
         dominant = True
@@ -961,7 +1062,10 @@ def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dic
     if dominant:
         return "High", "dominant risk drivers"
 
-    # Low stability if key clarifiers are missing and plaque unmeasured
+    rp = risk10.get("risk_pct")
+    if pce_zone(rp) == "buffer":
+        return "Low", "near boundary; plaque unmeasured"
+
     missing_clarifiers = []
     if not p.has("apob"):
         missing_clarifiers.append("ApoB")
@@ -970,7 +1074,6 @@ def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dic
     if missing_clarifiers and level in (2, 3):
         return "Low", "key clarifiers incomplete"
 
-    # Otherwise moderate: plan is reasonable, but could change intensity/timing
     return "Moderate", "plaque status unmeasured"
 
 # -------------------------------------------------------------------
@@ -983,34 +1086,29 @@ def cac_decision_support(
     level: int,
     trace: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """
-    CAC guidance lives outside Levels. States:
-      - suppressed: low-yield or already assessed
-      - deferred: labs-first (ApoB/Lp(a) missing)
-      - optional: may refine intensity/timing in gray-zone decisions
-    """
-    # If plaque assessed already (CAC known or ASCVD), suppress ordering.
     if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
         add_trace(trace, "CAC_support_suppressed_known", plaque.get("plaque_evidence"), "Plaque already assessed")
-        return {
-            "status": "suppressed",
-            "message": None,
-            "reasons": ["Plaque already assessed"],
-        }
+        return {"status": "suppressed", "message": None, "reasons": ["Plaque already assessed"]}
 
     rp = risk10.get("risk_pct")
-    in_gray = (rp is not None and 5.0 <= float(rp) <= 20.0)
+    zone = pce_zone(rp)
 
-    # Outside gray-zone → suppress
-    if not in_gray:
-        add_trace(trace, "CAC_support_suppressed_not_gray", rp, "Not in 5–20% zone")
+    if zone == "hard_no":
+        add_trace(trace, "CAC_support_suppressed_hard_no", rp, f"PCE <{PCE_HARD_NO_MAX}%")
         return {
             "status": "suppressed",
-            "message": "CAC is not routinely indicated outside gray-zone risk decisions.",
-            "reasons": ["Not in gray-zone risk range"],
+            "message": "CAC is not indicated in clearly low near-term risk profiles.",
+            "reasons": [f"ASCVD PCE <{PCE_HARD_NO_MAX:.0f}% (low near-term risk)"],
         }
 
-    # Labs-first gate
+    if zone == "high":
+        add_trace(trace, "CAC_support_suppressed_high_risk", rp, "High risk → low incremental value")
+        return {
+            "status": "suppressed",
+            "message": "CAC is typically low-yield when near-term risk is already high and management would not change.",
+            "reasons": [f"ASCVD PCE ≥{PCE_ACTION_MAX:.0f}% (management usually proceeds without CAC)"],
+        }
+
     labs_needed: List[str] = []
     if not p.has("apob"):
         labs_needed.append("ApoB")
@@ -1021,47 +1119,56 @@ def cac_decision_support(
         add_trace(trace, "CAC_support_deferred_labs_first", labs_needed, "Defer CAC until key labs available")
         return {
             "status": "deferred",
-            "message": f"CAC is optional but is generally deferred until {', '.join(labs_needed)} are available.",
+            "message": (
+                "This profile sits near a decision boundary. Additional testing is not required. "
+                f"If imaging is being considered, it is generally deferred until {', '.join(labs_needed)} are available."
+            ),
             "reasons": [f"Missing {', '.join(labs_needed)}"],
             "labs_first": labs_needed,
         }
 
-    # Optional when Level 3 or converging Level 2B and results could alter intensity/timing
-    if level in (3, 2):
-        add_trace(trace, "CAC_support_optional", {"risk": rp, "level": level}, "CAC optional for refinement")
+    if zone == "buffer":
+        add_trace(trace, "CAC_support_deferred_buffer", rp, "Buffer zone → defer default")
+        return {
+            "status": "deferred",
+            "message": (
+                "This profile is near a decision boundary. No escalation is required. "
+                "CAC may be considered only if the result would meaningfully change treatment timing or intensity; "
+                "deferring CAC with interval reassessment is reasonable."
+            ),
+            "reasons": [f"ASCVD PCE {PCE_BUFFER_MIN:.0f}–{PCE_BUFFER_MAX:.0f}% (buffer zone); plaque unmeasured"],
+        }
+
+    preference_sensitive = (level in (2, 3))
+    if preference_sensitive:
+        add_trace(trace, "CAC_support_optional_actionable", {"risk": rp, "level": level}, "Optional in preference-sensitive zone")
         return {
             "status": "optional",
             "message": (
                 "CAC is optional. Imaging is not required for appropriate management. "
-                "CAC may be considered only if results would alter treatment intensity or timing."
+                "CAC may be considered only if results would meaningfully change treatment timing or intensity. "
+                "Deferring CAC with interval reassessment is reasonable."
             ),
-            "reasons": ["Gray-zone risk; key labs available; plaque unmeasured"],
+            "reasons": ["Preference-sensitive decision zone; key labs available; plaque unmeasured"],
         }
 
+    add_trace(trace, "CAC_support_suppressed_not_preference_sensitive", {"risk": rp, "level": level}, "Low incremental value in current posture")
     return {
         "status": "suppressed",
-        "message": "CAC is not routinely indicated at this risk posture.",
-        "reasons": ["Low-yield in current posture"],
+        "message": "CAC is not routinely indicated in the current management posture.",
+        "reasons": ["Low incremental value in current posture"],
     }
 
 # -------------------------------------------------------------------
-# Therapy status + modality-aware plan sentence
+# Therapy status + modality-aware plan sentence (buffer-aware language)
 # -------------------------------------------------------------------
 def on_lipid_therapy(p: Patient) -> bool:
-    """
-    Uses existing field used by your app ('lipid_lowering') when available.
-    Safe fallback keys supported.
-    """
     for k in ("lipid_lowering", "on_statin", "statin", "lipidTherapy"):
         if p.has(k) and bool(p.get(k)) is True:
             return True
     return False
 
 def at_target(p: Patient, targets: Dict[str, int]) -> bool:
-    """
-    True if available measured markers meet targets.
-    If neither ApoB nor LDL is available, returns False (cannot confirm at target).
-    """
     have = False
     ok = True
     if p.has("apob"):
@@ -1072,33 +1179,39 @@ def at_target(p: Patient, targets: Dict[str, int]) -> bool:
         ok = ok and (safe_float(p.get("ldl")) <= float(targets.get("ldl", 10**9)))
     return bool(have and ok)
 
-def plan_sentence(level: int, sublevel: Optional[str], therapy_on: bool, at_tgt: bool) -> str:
-    """
-    Locked, senior tone; no second person; no drug names.
-    """
-    # Level 1–2: lifestyle-first
+def plan_sentence(level: int, sublevel: Optional[str], therapy_on: bool, at_tgt: bool, risk10: Dict[str, Any]) -> str:
+    zone = pce_zone(risk10.get("risk_pct"))
+
     if level == 1:
         return "Lifestyle-focused prevention with periodic reassessment."
     if level == 2:
+        if zone == "buffer":
+            return "Lifestyle-focused risk reduction with data completion. No escalation is required near boundary estimates; interval reassessment is appropriate."
         return "Lifestyle-focused risk reduction with data completion and reassessment."
 
-    # Level 3: modality-aware
     if level == 3:
         if therapy_on and at_tgt:
             return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
         if therapy_on and not at_tgt:
             return "Current pharmacologic therapy appears appropriate; intensification or adjustment may be considered if targets are not achieved."
-        # untreated
         if sublevel == "3B":
-            return "Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved or if risk modifiers favor earlier initiation."
+            if zone == "buffer":
+                return ("Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. "
+                        "This profile sits near a decision boundary; no escalation is required. "
+                        "Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved or if modifiers favor earlier initiation.")
+            return ("Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. "
+                    "Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved or if modifiers favor earlier initiation.")
+        if zone == "buffer":
+            return ("Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. "
+                    "This profile sits near a decision boundary; no escalation is required. "
+                    "Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved.")
         return "Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved."
 
-    # Level 4–5: pharmacologic recommended
     if level == 4:
         if therapy_on and at_tgt:
             return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
         return "Pharmacologic lipid lowering is recommended to achieve targets; lifestyle optimization remains adjunctive."
-    # Level 5
+
     if therapy_on and at_tgt:
         return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
     return "Secondary-prevention intensity lipid lowering is indicated to achieve targets; consider add-ons as needed."
@@ -1113,6 +1226,13 @@ def next_actions(p: Patient, targets: Dict[str, int]) -> List[str]:
     if p.has("ldl") and safe_float(p.get("ldl")) > targets["ldl"]:
         acts.append(f"Reduce LDL-C toward <{targets['ldl']} mg/dL.")
     return acts[:3]
+
+# =========================
+# CHUNK 3 / 4 — END
+# =========================
+# =========================
+# CHUNK 4 / 4 — START
+# =========================
 
 # -------------------------------------------------------------------
 # Aspirin module
@@ -1219,7 +1339,7 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any], t
     }
 
 # -------------------------------------------------------------------
-# Report helpers (canonical)
+# Report helpers
 # -------------------------------------------------------------------
 def trajectory_note(p: Patient, risk10: Dict[str, Any]) -> str:
     if p.has("apob") and safe_float(p.get("apob")) >= 100:
@@ -1236,7 +1356,6 @@ def _primary_driver(drivers: List[str]) -> str:
 def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
     near = (anchors.get("nearTerm") or {}).get("summary", "—")
     life = (anchors.get("lifetime") or {}).get("summary", "—")
-    # tighten a bit
     near = near.replace(" / CAC unknown", "").replace(" / Plaque unmeasured", "")
     return near, life
 
@@ -1261,25 +1380,17 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     at_tgt = at_target(p, targets)
 
     dec_conf = decision_confidence(p, level, conf, plaque)
-    stab_band, stab_note = decision_stability(p, level, conf, plaque)
+    stab_band, stab_note = decision_stability(p, level, conf, plaque, risk10)
 
-    # CAC support object (separate from plaque state)
     cac_support = cac_decision_support(p, plaque, risk10, level, trace)
-
-    # Aspirin
     asp = aspirin_advice(p, risk10, plaque, trace)
 
-    # Drivers
     drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
 
-    # Plan sentence
-    plan = plan_sentence(level, sublevel, therapy_on, at_tgt)
-
-    # Next steps
+    plan = plan_sentence(level, sublevel, therapy_on, at_tgt, risk10)
     next_acts = next_actions(p, targets)
 
-    # Construct level object with app.py compatibility
     levels_obj = {
         "postureLevel": level,
         "managementLevel": level,
@@ -1287,16 +1398,14 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "label": posture_label(level, sublevel=sublevel),
         "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
         "triggers": sorted(set(level_triggers or [])),
-        "defaultPosture": plan,  # app.py scrubs prefixes; we keep clean sentence
-        "decisionConfidence": dec_conf,  # cleaned label
+        "defaultPosture": plan,
+        "decisionConfidence": dec_conf,
         "decisionStability": stab_band,
         "decisionStabilityNote": stab_note,
 
-        # Plaque fields (new)
         "plaqueEvidence": plaque.get("plaque_evidence", "—"),
         "plaqueBurden": plaque.get("plaque_burden", "—"),
 
-        # Legacy evidence dict expected by app.py
         "evidence": {
             "clinical_ascvd": True if p.get("ascvd") is True else False,
             "cac_status": plaque.get("plaque_evidence", "Unknown"),
@@ -1312,7 +1421,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "trajectoryNote": trajectory_note(p, risk10),
     }
 
-    # Disease burden string (legacy)
     disease_burden = "Unknown"
     if p.get("ascvd") is True:
         disease_burden = "Present (clinical ASCVD)"
@@ -1323,17 +1431,16 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     elif plaque.get("plaque_evidence", "").startswith("Unknown"):
         disease_burden = "Unknown (CAC not available)"
 
-    # Insights: keep keys your app reads
     insights = {
         "cac_decision_support": cac_support,
         "structural_clarification": cac_support.get("message"),
         "phenotype_label": None,
         "phenotype_definition": None,
-        # Replace "robustness" with stability, but keep legacy slots
         "decision_stability": stab_band,
         "decision_stability_note": stab_note,
-        "decision_robustness": stab_band,  # legacy alias (your UI may display it)
+        "decision_robustness": stab_band,
         "decision_robustness_note": stab_note,
+        "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
 
     out = {
@@ -1341,8 +1448,8 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "system": SYSTEM_NAME,
         "levels": levels_obj,
         "riskSignal": {**rss, "drivers": drivers_top},
-        "pooledCohortEquations10yAscvdRisk": risk10,  # legacy key
-        "ascvdPce10yRisk": risk10,                    # new alias
+        "pooledCohortEquations10yAscvdRisk": risk10,
+        "ascvdPce10yRisk": risk10,
         "prevent10": prevent10,
         "targets": targets,
         "confidence": conf,
@@ -1422,6 +1529,9 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"- Risk Signal Score (RSS): {rs.get('score','—')} / 100 ({rs.get('band','—')})")
     if risk10.get("risk_pct") is not None:
         lines.append(f"- ASCVD PCE (10-year): {risk10.get('risk_pct')}% ({risk10.get('category','—')})")
+        z = ins.get("pce_zone")
+        if z == "buffer":
+            lines.append(f"- Buffered binary note: near a decision boundary ({PCE_BUFFER_MIN:.0f}–{PCE_BUFFER_MAX:.0f}%). No escalation is required.")
     else:
         miss = risk10.get("missing")
         if miss:
@@ -1469,3 +1579,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"- Anchors: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(lines)
+
+# =========================
+# CHUNK 4 / 4 — END
+# =========================
