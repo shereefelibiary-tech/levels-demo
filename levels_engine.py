@@ -1491,22 +1491,47 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
     level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
     sub = lvl.get("sublevel")
-    ev = lvl.get("evidence") or {}
 
-    plaque_evidence = lvl.get("plaqueEvidence") or ev.get("cac_status") or "—"
-    plaque_burden = lvl.get("plaqueBurden") or ev.get("burden_band") or "—"
+    # --- Plaque presentation (prefer "Plaque status" language)
+    plaque_evidence = lvl.get("plaqueEvidence") or "—"
+    plaque_burden = lvl.get("plaqueBurden") or "—"
+    plaque_status = "Unmeasured"
+    pe_l = str(plaque_evidence).lower()
+    if "cac = 0" in pe_l or "cac=0" in pe_l:
+        plaque_status = "CAC = 0"
+    elif "cac positive" in pe_l:
+        plaque_status = "CAC positive"
+    elif "clinical ascvd" in pe_l:
+        plaque_status = "Clinical ASCVD"
+    elif "unknown" in pe_l or "no structural" in pe_l or "unmeasured" in pe_l:
+        plaque_status = "Unmeasured"
 
+    # --- Decision labels
     dec_conf = lvl.get("decisionConfidence", "—")
     stab = lvl.get("decisionStability", ins.get("decision_stability", "—"))
     stab_note = lvl.get("decisionStabilityNote", ins.get("decision_stability_note", ""))
 
+    # --- PREVENT
     p_total = prev.get("total_cvd_10y_pct")
     p_ascvd = prev.get("ascvd_10y_pct")
 
-    lines: List[str] = []
-    lines.append("RISK CONTINUUM — CLINICAL REPORT")
-    lines.append("-" * 64)
+    # --- CAC support (use status if available)
+    cac_support = ins.get("cac_decision_support") or {}
+    cac_status = (cac_support.get("status") or "").strip().lower()
 
+    # --- Aspirin: tighten output
+    asp_status_raw = str(asp.get("status", "Not assessed") or "").strip()
+    asp_l = asp_status_raw.lower()
+    if asp_l.startswith("avoid"):
+        asp_line = "Aspirin: Not indicated"
+    elif asp_l.startswith("consider"):
+        asp_line = "Aspirin: Consider (shared decision)"
+    elif asp_l.startswith("secondary prevention"):
+        asp_line = "Aspirin: Secondary prevention (if no contraindication)"
+    else:
+        asp_line = f"Aspirin: {asp_status_raw}" if asp_status_raw else "Aspirin: —"
+
+    # --- Level display
     lvl_name = "—"
     if level == 1:
         lvl_name = "Minimal risk signal"
@@ -1519,76 +1544,121 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     elif level == 5:
         lvl_name = "Very high risk / ASCVD intensity"
 
-    subtxt = f" ({sub})" if sub else ""
-    lines.append(f"Level: {level}{subtxt} — {lvl_name}")
+    subtxt = f"{sub}" if sub else None
+
+    # --- Compose report
+    lines: List[str] = []
+    lines.append("RISK CONTINUUM — CLINICAL REPORT")
+    lines.append("-" * 60)
+
+    if subtxt:
+        lines.append(f"Level: {subtxt} — {lvl_name}")
+    else:
+        lines.append(f"Level: {level} — {lvl_name}")
+
     lines.append("")
-    lines.append(f"Plaque Evidence: {plaque_evidence}")
-    lines.append(f"Plaque Burden: {plaque_burden}")
+    lines.append(f"Plaque status: {plaque_status}")
+    # Keep burden in one line, avoid “Evidence/Burden” redundancy
+    if plaque_status in ("CAC positive", "CAC = 0", "Clinical ASCVD"):
+        lines.append(f"Plaque burden: {plaque_burden}")
     lines.append("")
+
+    # Rename robustness -> stability, and keep note tight
     lines.append(f"Decision confidence: {dec_conf}")
     if stab_note:
-        lines.append(f"Decision stability: {stab} ({stab_note})")
+        # Shorten phrasing
+        note = str(stab_note).replace("plaque status", "plaque").replace("near boundary", "near boundary")
+        lines.append(f"Decision stability: {stab} ({note})")
     else:
         lines.append(f"Decision stability: {stab}")
     lines.append("")
 
     lines.append("KEY METRICS")
-    lines.append(f"- Risk Signal Score (RSS): {rs.get('score','—')} / 100 ({rs.get('band','—')})")
+    lines.append(f"- Risk Signal Score: {rs.get('score','—')} / 100 ({rs.get('band','—')})")
+
+    # PCE line (tight)
     if risk10.get("risk_pct") is not None:
-        lines.append(f"- ASCVD PCE (10-year): {risk10.get('risk_pct')}% ({risk10.get('category','—')})")
-        z = ins.get("pce_zone")
-        if z == "buffer":
-            lines.append(f"- Buffered binary note: near a decision boundary ({PCE_BUFFER_MIN:.0f}–{PCE_BUFFER_MAX:.0f}%). No escalation is required.")
+        cat = risk10.get("category", "—")
+        lines.append(f"- ASCVD PCE (10y): {risk10.get('risk_pct')}% ({cat})")
     else:
         miss = risk10.get("missing")
         if miss:
-            lines.append(f"- ASCVD PCE (10-year): not calculated (missing {', '.join(miss[:3])})")
+            lines.append(f"- ASCVD PCE (10y): not calculated (missing {', '.join(miss[:3])})")
         else:
-            lines.append("- ASCVD PCE (10-year): not calculated")
+            lines.append("- ASCVD PCE (10y): not calculated")
 
-    lines.append("- PREVENT (10-year, population model):")
+    # PREVENT (no parenthetical explanation here; belongs in glossary)
+    lines.append("- PREVENT (10y, population model):")
     lines.append(f"  • Total CVD: {p_total if p_total is not None else '—'}%")
     lines.append(f"  • ASCVD: {p_ascvd if p_ascvd is not None else '—'}%")
     lines.append("")
 
-    lines.append("TARGETS")
+    # Targets as intensity markers (not mandates)
+    lines.append("TARGETS (Risk-reduction intensity)")
     if "ldl" in t:
-        lines.append(f"- LDL-C: <{int(t.get('ldl'))} mg/dL")
+        lines.append(f"- LDL-C <{int(t.get('ldl'))} mg/dL")
     if "apob" in t:
-        lines.append(f"- ApoB: <{int(t.get('apob'))} mg/dL")
+        lines.append(f"- ApoB <{int(t.get('apob'))} mg/dL")
     lines.append("")
 
-    lines.append("PLAN & ACTIONS")
+    # Plan
+    lines.append("MANAGEMENT PLAN")
     plan = str((lvl.get("managementPlan") or lvl.get("defaultPosture") or "")).strip() or "—"
-    lines.append(f"- Plan: {plan}")
+    lines.append(plan)
+    lines.append("")
 
+    # Next steps (keep concise)
+    lines.append("NEXT STEPS")
     na = out.get("nextActions") or []
     if na:
-        lines.append("- Next steps:")
         for a in na[:3]:
-            lines.append(f"  • {a}")
-    else:
-        lines.append("- Next steps: —")
-
-    lines.append(f"- Aspirin: {asp.get('status','Not assessed')}")
-    lines.append("")
-
-    lines.append("CORONARY CALCIUM (CAC)")
-    cac_msg = (ins.get("structural_clarification") or "").strip()
-    if cac_msg:
-        lines.append(f"- {cac_msg}")
+            # Remove trailing periods for cleaner bullets
+            aa = str(a).strip()
+            if aa.endswith("."):
+                aa = aa[:-1]
+            lines.append(f"- {aa}")
     else:
         lines.append("- —")
+    lines.append(f"- {asp_line}")
     lines.append("")
 
-    primary = _primary_driver(out.get("drivers") or [])
-    near, life = _context_anchors_sentence(anchors)
+    # CAC (single, calm statement; avoid repeating boundary language)
+    lines.append("CORONARY CALCIUM")
+    if cac_status == "suppressed":
+        lines.append("Not indicated.")
+    elif cac_status == "deferred":
+        lines.append("Not required at this time; deferral with interval reassessment is reasonable.")
+    elif cac_status == "optional":
+        lines.append("Optional; consider only if results would change treatment timing or intensity.")
+    else:
+        # Fallback if status missing
+        msg = (ins.get("structural_clarification") or "").strip()
+        if msg:
+            lines.append(msg)
+        else:
+            lines.append("—")
+    lines.append("")
+
+    # Context (tight)
+    primary = (out.get("drivers") or ["—"])[0]
+    near = (anchors.get("nearTerm") or {}).get("summary", "—")
+    life = (anchors.get("lifetime") or {}).get("summary", "—")
     lines.append("CLINICAL CONTEXT")
     lines.append(f"- Primary driver: {primary}")
     lines.append(f"- Anchors: Near-term: {near} | Lifetime: {life}")
+    lines.append("")
+
+    # Small glossary (high-yield)
+    lines.append("Glossary (brief)")
+    lines.append("- Risk Signal Score: composite biologic + plaque-related signal (not event probability).")
+    lines.append("- ASCVD PCE: 10-year event risk estimate (population-based).")
+    lines.append("- PREVENT: population comparator for total CVD and ASCVD risk.")
+    lines.append("- Decision stability: likelihood management changes with new information.")
+    lines.append("- Targets: intensity markers for risk reduction; not mandates for escalation.")
 
     return "\n".join(lines)
 
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
