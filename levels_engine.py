@@ -1,5 +1,5 @@
 # =========================
-# CHUNK 1 / 4 — START
+# CHUNK 1 / 6 — START
 # =========================
 # levels_engine.py
 # Risk Continuum™ Engine — v3.1 (buffer-based thresholds; locked language; Epic-aligned PCE; CAC gating; modality-aware plan)
@@ -113,7 +113,13 @@ def levels_legend_compact() -> List[str]:
         "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
         "Buffered binaries: hard gates at edges; narrow buffer near cutoffs to absorb noise and avoid cascades",
     ]
+# =========================
+# CHUNK 1 / 6 — END
+# =========================
 
+# =========================
+# CHUNK 2 / 6 — START
+# =========================
 # -------------------------------------------------------------------
 # A1c + inflammation helpers
 # -------------------------------------------------------------------
@@ -294,7 +300,12 @@ def plaque_state(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         "plaque_present": True,
         "certainty": certainty,
     }
-
+# =========================
+# CHUNK 2 / 6 — END
+# =========================
+# =========================
+# CHUNK 3 / 6 — START
+# =========================
 # -------------------------------------------------------------------
 # ASCVD PCE (Epic-aligned 2019 interpretation)
 # -------------------------------------------------------------------
@@ -451,14 +462,12 @@ def ascvd_pce_10y_risk(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any
         "missing": [],
         "notes": "ASCVD PCE (Epic-aligned).",
     }
-
 # =========================
-# CHUNK 1 / 4 — END
+# CHUNK 3 / 6 — END
 # =========================
 # =========================
-# CHUNK 2 / 4 — START
+# CHUNK 4 / 6 — START
 # =========================
-
 # -------------------------------------------------------------------
 # PREVENT (AHA) — population comparator (RESTORED: v2.8 full equations + safe evaluator)
 # -------------------------------------------------------------------
@@ -767,14 +776,12 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
         "band": rss_band(total),
         "note": "Biologic + plaque signal (not event probability).",
     }
-
 # =========================
-# CHUNK 2 / 4 — END
+# CHUNK 4 / 6 — END
 # =========================
 # =========================
-# CHUNK 3 / 4 — START
+# CHUNK 5 / 6 — START
 # =========================
-
 # -------------------------------------------------------------------
 # Targets + ESC/EAS framing
 # -------------------------------------------------------------------
@@ -1075,7 +1082,12 @@ def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dic
         return "Low", "key clarifiers incomplete"
 
     return "Moderate", "plaque status unmeasured"
-
+# =========================
+# CHUNK 5 / 6 — END
+# =========================
+# =========================
+# CHUNK 6 / 6 — START
+# =========================
 # -------------------------------------------------------------------
 # CAC decision support (suppressed / deferred / optional; never recommended)
 # -------------------------------------------------------------------
@@ -1161,6 +1173,7 @@ def cac_decision_support(
 
 # -------------------------------------------------------------------
 # Therapy status + modality-aware plan sentence (buffer-aware language)
+# (UPDATED: default intensity embedded; signature includes plaque)
 # -------------------------------------------------------------------
 def on_lipid_therapy(p: Patient) -> bool:
     for k in ("lipid_lowering", "on_statin", "statin", "lipidTherapy"):
@@ -1179,41 +1192,36 @@ def at_target(p: Patient, targets: Dict[str, int]) -> bool:
         ok = ok and (safe_float(p.get("ldl")) <= float(targets.get("ldl", 10**9)))
     return bool(have and ok)
 
-def plan_sentence(level: int, sublevel: Optional[str], therapy_on: bool, at_tgt: bool, risk10: Dict[str, Any]) -> str:
+def plan_sentence(level: int, sublevel: Optional[str], therapy_on: bool, at_tgt: bool, risk10: Dict[str, Any], plaque: Dict[str, Any]) -> str:
     zone = pce_zone(risk10.get("risk_pct"))
 
     if level == 1:
         return "Lifestyle-focused prevention with periodic reassessment."
+
     if level == 2:
         if zone == "buffer":
-            return "Lifestyle-focused risk reduction with data completion. No escalation is required near boundary estimates; interval reassessment is appropriate."
+            return "Lifestyle-focused risk reduction with data completion. Interval reassessment is appropriate."
         return "Lifestyle-focused risk reduction with data completion and reassessment."
 
     if level == 3:
         if therapy_on and at_tgt:
-            return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
+            return "Moderate-intensity lipid lowering meets targets; continuation with periodic reassessment is appropriate."
         if therapy_on and not at_tgt:
-            return "Current pharmacologic therapy appears appropriate; intensification or adjustment may be considered if targets are not achieved."
+            return "Moderate-intensity lipid lowering is appropriate; adjustment may be considered if targets are not achieved."
+
         if sublevel == "3B":
-            if zone == "buffer":
-                return ("Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. "
-                        "This profile sits near a decision boundary; no escalation is required. "
-                        "Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved or if modifiers favor earlier initiation.")
-            return ("Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. "
-                    "Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved or if modifiers favor earlier initiation.")
-        if zone == "buffer":
-            return ("Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. "
-                    "This profile sits near a decision boundary; no escalation is required. "
-                    "Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved.")
-        return "Shared decision toward lipid lowering based on biologic risk and lifetime trajectory. Lifestyle optimization is appropriate; pharmacologic therapy is reasonable if targets are not achieved."
+            return ("Moderate-intensity lipid lowering based on biologic risk and lifetime factors. "
+                    "Lifestyle optimization is appropriate. Pharmacologic therapy is reasonable if targets are not achieved or if modifiers favor earlier initiation.")
+        return ("Moderate-intensity lipid lowering based on biologic risk and lifetime factors. "
+                "Lifestyle optimization is appropriate. Pharmacologic therapy is reasonable if targets are not achieved.")
 
     if level == 4:
         if therapy_on and at_tgt:
-            return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
-        return "Pharmacologic lipid lowering is recommended to achieve targets; lifestyle optimization remains adjunctive."
+            return "High-intensity lipid lowering meets targets; continuation with periodic reassessment is appropriate."
+        return "High-intensity lipid lowering is appropriate to achieve targets; lifestyle optimization remains adjunctive."
 
     if therapy_on and at_tgt:
-        return "Current pharmacologic therapy meets targets; continuation with periodic reassessment is appropriate."
+        return "Secondary-prevention intensity lipid lowering meets targets; continuation with periodic reassessment is appropriate."
     return "Secondary-prevention intensity lipid lowering is indicated to achieve targets; consider add-ons as needed."
 
 # -------------------------------------------------------------------
@@ -1226,13 +1234,6 @@ def next_actions(p: Patient, targets: Dict[str, int]) -> List[str]:
     if p.has("ldl") and safe_float(p.get("ldl")) > targets["ldl"]:
         acts.append(f"Reduce LDL-C toward <{targets['ldl']} mg/dL.")
     return acts[:3]
-
-# =========================
-# CHUNK 3 / 4 — END
-# =========================
-# =========================
-# CHUNK 4 / 4 — START
-# =========================
 
 # -------------------------------------------------------------------
 # Aspirin module
@@ -1361,7 +1362,17 @@ def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
 
 # -------------------------------------------------------------------
 # Public API: evaluate()
+# (UPDATED: plan_sentence call includes plaque; defaultPosture aliased)
 # -------------------------------------------------------------------
+def evaluate(p: Patient) -> Dict[str, Any]:
+    trace: List[Dict[str, Any]] = []
+    add_trace(trace, "Engine_start", VERSION
+# =========================
+# CHUNK 6 / 6 — CONTINUATION (COMPLETE THE FILE)
+# Paste starting RIGHT AFTER the line:
+#     add_trace(trace, "Engine_start", VERSION
+# =========================
+
 def evaluate(p: Patient) -> Dict[str, Any]:
     trace: List[Dict[str, Any]] = []
     add_trace(trace, "Engine_start", VERSION["levels"], "Begin evaluation")
@@ -1388,7 +1399,8 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
 
-    plan = plan_sentence(level, sublevel, therapy_on, at_tgt, risk10)
+    # UPDATED: plan_sentence call includes plaque
+    plan = plan_sentence(level, sublevel, therapy_on, at_tgt, risk10, plaque)
     next_acts = next_actions(p, targets)
 
     levels_obj = {
@@ -1398,7 +1410,11 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "label": posture_label(level, sublevel=sublevel),
         "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
         "triggers": sorted(set(level_triggers or [])),
+
+        # STEP 1: canonical key + legacy alias (backward compatible)
+        "managementPlan": plan,
         "defaultPosture": plan,
+
         "decisionConfidence": dec_conf,
         "decisionStability": stab_band,
         "decisionStabilityNote": stab_note,
@@ -1436,10 +1452,13 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "structural_clarification": cac_support.get("message"),
         "phenotype_label": None,
         "phenotype_definition": None,
+
+        # Keep legacy stability/robustness keys for UI compatibility
         "decision_stability": stab_band,
         "decision_stability_note": stab_note,
         "decision_robustness": stab_band,
         "decision_robustness_note": stab_note,
+
         "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
 
@@ -1552,8 +1571,10 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append("")
 
     lines.append("PLAN & ACTIONS")
-    plan = str(lvl.get("defaultPosture") or "").strip() or "—"
+    # STEP 1: prefer managementPlan, fall back to defaultPosture
+    plan = str((lvl.get("managementPlan") or lvl.get("defaultPosture") or "")).strip() or "—"
     lines.append(f"- Plan: {plan}")
+
     na = out.get("nextActions") or []
     if na:
         lines.append("- Next steps:")
@@ -1561,6 +1582,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
             lines.append(f"  • {a}")
     else:
         lines.append("- Next steps: —")
+
     lines.append(f"- Aspirin: {asp.get('status','Not assessed')}")
     lines.append("")
 
@@ -1581,5 +1603,5 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 # =========================
-# CHUNK 4 / 4 — END
+# CHUNK 6 / 6 — END
 # =========================
