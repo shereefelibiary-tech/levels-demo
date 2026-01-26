@@ -262,18 +262,52 @@ def extract_bp_treated(raw: str) -> Optional[bool]:
 
 
 def extract_race_african_american(raw: str) -> Optional[bool]:
+    """
+    Returns True if patient is African American/Black, False if explicitly not,
+    otherwise None.
+
+    Precedence:
+      1) Explicit Arnett-style boolean field: "Is Non-Hispanic African American: Yes/No"
+      2) Explicit demographics line: "Race/Ethnicity: White (non-Hispanic)" etc
+      3) Explicit negations (not black / non-black / not African American)
+      4) Generic keyword presence as last resort
+    """
     t = raw.lower()
+
+    # 1) Explicit field (MOST IMPORTANT) — must be checked before keyword presence
+    m = re.search(
+        r"\bis\s*non-?hispanic\s*african\s*american\s*:\s*(yes|no|true|false)\b",
+        t,
+    )
+    if m:
+        v = m.group(1)
+        return True if v in ("yes", "true") else False
+
+    # 2) Demographics "Race/Ethnicity:" line
+    m = re.search(r"\brace\s*/\s*ethnicity\s*:\s*([^\n\r]+)", t)
+    if m:
+        line = m.group(1)
+        # map common cases
+        if re.search(r"\bwhite\b", line):
+            return False
+        if re.search(r"\b(black|african american)\b", line):
+            return True
+        # if it says "non-hispanic african american: no" elsewhere, we'd have caught it above
+        # for other races/ethnicities, leave unknown so we don't misclassify
+        return None
+
+    # 3) Explicit negations
     if re.search(r"\b(non[-\s]?black|not black|non[-\s]?african american|not african american)\b", t):
         return False
-    if re.search(r"\b(african american|black)\b", t):
-        return True
+
+    # 4) Generic keyword presence (LAST RESORT only)
     if re.search(r"\brace\s*[:=]\s*aa\b", t) or re.search(r"\bethnicity\s*[:=]\s*aa\b", t):
         return True
-    if re.search(r"\bis\s*non-?hispanic\s*african\s*american\s*:\s*(yes|true)\b", t):
+    if re.search(r"\b(african american|black)\b", t):
         return True
-    if re.search(r"\bis\s*non-?hispanic\s*african\s*american\s*:\s*(no|false)\b", t):
-        return False
+
     return None
+
 
 
 # ----------------------------
