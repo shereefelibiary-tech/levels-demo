@@ -355,16 +355,78 @@ def extract_cac_not_done(raw: str) -> bool:
 # PREVENT helpers: BMI, eGFR, lipid-lowering therapy
 # ----------------------------
 def extract_bmi(raw: str) -> Optional[float]:
-    t = raw
-    return _first_float(r"\b(?:bmi|body\s*mass\s*index)\s*[:=]?\s*(\d{1,2}(?:\.\d+)?)\b", t)
+    t = raw.lower()
+
+    # 1) Standard "BMI: 27.4" or "Body mass index: 27.4"
+    v = _first_float(r"\b(?:bmi|body\s*mass\s*index)\s*[:=]?\s*(\d{1,2}(?:\.\d+)?)\b", t)
+    if v is not None:
+        return v
+
+    # 2) Epic narrative: "Body mass index is 38.74 kg/m²."
+    v = _first_float(r"\bbody\s*mass\s*index\s+is\s+(\d{1,2}(?:\.\d+)?)\b", t)
+    if v is not None:
+        return v
+
+    # 3) Epic narrative: "Estimated body mass index is 38.74 kg/m² ..."
+    v = _first_float(r"\bestimated\s+body\s*mass\s*index\s+is\s+(\d{1,2}(?:\.\d+)?)\b", t)
+    if v is not None:
+        return v
+
+    return None
+
+
+
+def extract_egfr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
+    """
+    Returns (egfr_value, reason_if_missing_or_unreliable)
+
+    Handles:
+      - "eGFR: 72" / "estimated GFR 72"
+      - Epic unavailability text:
+          "eGFR cannot be calculated ( ... older than the maximum 180 days allowed.)"
+          "Computed eGFR Cre unavailable..."
+    """
+    t = raw.lower()
+
+    # 1) Numeric eGFR present (best case)
+    v = _first_float(r"\b(?:egfr|estimated\s*gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
+    if v is None:
+        v = _first_float(r"\b(?:gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
+
+    if v is not None:
+        # Optional sanity guard
+        if v < 5 or v > 200:
+            return v, "egfr_value_out_of_range_verify"
+        return v, None
+
+    # 2) Explicit unavailability reasons (Epic-style)
+    # Older than allowable lookback
+    if re.search(r"\begfr\b.*\bcannot\s+be\s+calculated\b.*\bolder\b.*\b180\s+days\b", t):
+        return None, "egfr_unavailable_older_than_180d"
+
+    # Generic "unavailable" / "not found" phrasing
+    if re.search(r"\b(computed\s+egfr|egfr)\b.*\bunavailable\b", t):
+        return None, "egfr_unavailable"
+
+    if re.search(r"\begfr\b.*\bno\s+results\s+found\b", t):
+        return None, "egfr_not_found"
+
+    # Some systems say "did not fit some other criterion"
+    if re.search(r"\begfr\b.*\bdid\s+not\s+fit\b.*\bcriterion\b", t):
+        return None, "egfr_unavailable_criteria_not_met"
+
+    # If creatinine clearance is mentioned as not calculable, it often correlates with missing creatinine
+    if re.search(r"\bcrcl\b.*\bcannot\s+be\s+calculated\b", t):
+        return None, "egfr_unavailable_related_missing_creatinine"
+
+    return None, None
 
 
 def extract_egfr(raw: str) -> Optional[float]:
-    t = raw
-    v = _first_float(r"\b(?:eGFR|egfr|estimated\s*gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
-    if v is None:
-        v = _first_float(r"\b(?:gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
+    # Backward compatible wrapper so existing callers still work
+    v, _reason = extract_egfr_with_reason(raw)
     return v
+
 
 
 def extract_lipid_lowering(raw: str) -> Optional[bool]:
