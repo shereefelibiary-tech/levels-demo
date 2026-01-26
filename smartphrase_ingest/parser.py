@@ -546,7 +546,10 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
 
     # PREVENT-related
     extracted["bmi"] = extract_bmi(raw)
-    extracted["egfr"] = extract_egfr(raw)
+    egfr_val, egfr_reason = extract_egfr_with_reason(raw)
+    extracted["egfr"] = egfr_val
+    extracted["egfr_reason"] = egfr_reason
+
     extracted["lipidLowering"] = extract_lipid_lowering(raw)
 
     # Diabetes override: A1c >= 6.5 forces diabetes = True
@@ -589,17 +592,19 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
 
     keys = (
-        "age", "sex", "sbp",
-        "tc", "hdl", "ldl",
-        "apob", "lpa", "lpa_unit",
-        "cac",
-        "a1c",
-        "smoker", "diabetes",
-        "bpTreated", "africanAmerican",
-        "bmi", "egfr", "lipidLowering",
-        # new additive keys:
-        "fhx", "fhx_text", "cac_not_done",
-    )
+    "age", "sex", "sbp",
+    "tc", "hdl", "ldl",
+    "apob", "lpa", "lpa_unit",
+    "cac",
+    "a1c",
+    "smoker", "diabetes",
+    "bpTreated", "africanAmerican",
+    "bmi", "egfr", "lipidLowering",
+    # new additive keys:
+    "fhx", "fhx_text", "cac_not_done",
+    "egfr_reason",
+)
+
     for k in keys:
         if x.get(k) is not None:
             out[k] = x.get(k)
