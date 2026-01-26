@@ -77,7 +77,13 @@ def extract_sex(raw: str) -> Tuple[Optional[str], Optional[str]]:
             norm.append("F")
 
     if not norm:
+        # Fail-safe fallback: if a single explicit word is present anywhere, accept it.
+        if re.search(r"\bfemale\b", t):
+            return "F", None
+        if re.search(r"\bmale\b", t):
+            return "M", None
         return None, "Sex not detected"
+
     if "M" in norm and "F" in norm:
         return None, "Sex conflict detected (both male and female found)"
 
@@ -122,7 +128,11 @@ def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
     t = raw
 
     # Explicit systolic-only variants
-    m = re.search(r"\b(?:systolic\s+blood\s+pressure|systolic\s*bp|sbp)\s*[:=]?\s*(\d{2,3})\b", t, flags=re.I)
+    m = re.search(
+        r"\b(?:systolic\s+blood\s+pressure|systolic\s*bp|sbp)\s*[:=]?\s*(\d{2,3})\b",
+        t,
+        flags=re.I,
+    )
     if m:
         try:
             sbp = int(m.group(1))
@@ -257,7 +267,7 @@ def extract_bp_treated(raw: str) -> Optional[bool]:
     m = re.search(r"\bbp\s*treated\s*[:=]\s*(yes|no|true|false)\b", t)
     if m:
         v = m.group(1)
-        return True if v in ("yes","true") else False
+        return True if v in ("yes", "true") else False
     return None
 
 
@@ -274,7 +284,7 @@ def extract_race_african_american(raw: str) -> Optional[bool]:
     """
     t = raw.lower()
 
-    # 1) Explicit field (MOST IMPORTANT) — must be checked before keyword presence
+    # 1) Explicit field (MOST IMPORTANT)
     m = re.search(
         r"\bis\s*non-?hispanic\s*african\s*american\s*:\s*(yes|no|true|false)\b",
         t,
@@ -287,27 +297,23 @@ def extract_race_african_american(raw: str) -> Optional[bool]:
     m = re.search(r"\brace\s*/\s*ethnicity\s*:\s*([^\n\r]+)", t)
     if m:
         line = m.group(1)
-        # map common cases
         if re.search(r"\bwhite\b", line):
             return False
         if re.search(r"\b(black|african american)\b", line):
             return True
-        # if it says "non-hispanic african american: no" elsewhere, we'd have caught it above
-        # for other races/ethnicities, leave unknown so we don't misclassify
         return None
 
     # 3) Explicit negations
     if re.search(r"\b(non[-\s]?black|not black|non[-\s]?african american|not african american)\b", t):
         return False
 
-    # 4) Generic keyword presence (LAST RESORT only)
+    # 4) Generic keyword presence (LAST RESORT)
     if re.search(r"\brace\s*[:=]\s*aa\b", t) or re.search(r"\bethnicity\s*[:=]\s*aa\b", t):
         return True
     if re.search(r"\b(african american|black)\b", t):
         return True
 
     return None
-
 
 
 # ----------------------------
@@ -347,7 +353,6 @@ def extract_fhx(raw: str) -> Tuple[Optional[bool], Optional[str]]:
 # ----------------------------
 def extract_cac_not_done(raw: str) -> bool:
     t = raw.lower()
-    # any of these implies absence
     return bool(re.search(r"\b(cac|calcium|agatston)\b.*\b(not\s*done|not\s*performed|unknown|n/?a|none)\b", t))
 
 
@@ -358,22 +363,21 @@ def extract_bmi(raw: str) -> Optional[float]:
     t = raw.lower()
 
     # 1) Standard "BMI: 27.4" or "Body mass index: 27.4"
-    v = _first_float(r"\b(?:bmi|body\s*mass\s*index)\s*[:=]?\s*(\d{1,2}(?:\.\d+)?)\b", t)
+    v = _first_float(r"\b(?:bmi|body\s*mass\s*index)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
     if v is not None:
         return v
 
     # 2) Epic narrative: "Body mass index is 38.74 kg/m²."
-    v = _first_float(r"\bbody\s*mass\s*index\s+is\s+(\d{1,2}(?:\.\d+)?)\b", t)
+    v = _first_float(r"\bbody\s*mass\s*index\s+is\s+(\d{1,3}(?:\.\d+)?)\b", t)
     if v is not None:
         return v
 
     # 3) Epic narrative: "Estimated body mass index is 38.74 kg/m² ..."
-    v = _first_float(r"\bestimated\s+body\s*mass\s*index\s+is\s+(\d{1,2}(?:\.\d+)?)\b", t)
+    v = _first_float(r"\bestimated\s+body\s*mass\s*index\s+is\s+(\d{1,3}(?:\.\d+)?)\b", t)
     if v is not None:
         return v
 
     return None
-
 
 
 def extract_egfr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
@@ -382,40 +386,45 @@ def extract_egfr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
 
     Handles:
       - "eGFR: 72" / "estimated GFR 72"
+      - Epic numeric formats:
+          "Estimated Glomerular Filtration Rate: 91.3 ..."
+          "eGFR Cre: 91 ..."
       - Epic unavailability text:
-          "eGFR cannot be calculated ( ... older than the maximum 180 days allowed.)"
-          "Computed eGFR Cre unavailable..."
+          "eGFR cannot be calculated (... older than the maximum 180 days allowed.)"
+          "Computed eGFR ... unavailable"
     """
     t = raw.lower()
 
-    # 1) Numeric eGFR present (best case)
-    v = _first_float(r"\b(?:egfr|estimated\s*gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
+    # 1) Numeric eGFR present (standard + Epic)
+    v = _first_float(
+        r"\b(?:egfr|e\s*gfr|estimated\s+gfr|estimated\s+glomerular\s+filtration\s+rate)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b",
+        t,
+    )
+    if v is None:
+        v = _first_float(r"\bestimated\s+glomerular\s+filtration\s+rate\s*:\s*(\d{1,3}(?:\.\d+)?)\b", t)
+    if v is None:
+        v = _first_float(r"\begfr\s*cre\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
     if v is None:
         v = _first_float(r"\b(?:gfr)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\b", t)
 
     if v is not None:
-        # Optional sanity guard
         if v < 5 or v > 200:
             return v, "egfr_value_out_of_range_verify"
         return v, None
 
     # 2) Explicit unavailability reasons (Epic-style)
-    # Older than allowable lookback
     if re.search(r"\begfr\b.*\bcannot\s+be\s+calculated\b.*\bolder\b.*\b180\s+days\b", t):
         return None, "egfr_unavailable_older_than_180d"
 
-    # Generic "unavailable" / "not found" phrasing
     if re.search(r"\b(computed\s+egfr|egfr)\b.*\bunavailable\b", t):
         return None, "egfr_unavailable"
 
     if re.search(r"\begfr\b.*\bno\s+results\s+found\b", t):
         return None, "egfr_not_found"
 
-    # Some systems say "did not fit some other criterion"
     if re.search(r"\begfr\b.*\bdid\s+not\s+fit\b.*\bcriterion\b", t):
         return None, "egfr_unavailable_criteria_not_met"
 
-    # If creatinine clearance is mentioned as not calculable, it often correlates with missing creatinine
     if re.search(r"\bcrcl\b.*\bcannot\s+be\s+calculated\b", t):
         return None, "egfr_unavailable_related_missing_creatinine"
 
@@ -423,10 +432,8 @@ def extract_egfr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
 
 
 def extract_egfr(raw: str) -> Optional[float]:
-    # Backward compatible wrapper so existing callers still work
     v, _reason = extract_egfr_with_reason(raw)
     return v
-
 
 
 def extract_lipid_lowering(raw: str) -> Optional[bool]:
@@ -453,14 +460,14 @@ def extract_lipid_lowering(raw: str) -> Optional[bool]:
     m = re.search(r"\b(on\s+lipid\s*lowering|lipid\s*lowering)\s*[:=]\s*(yes|no|true|false)\b", t)
     if m:
         v = m.group(2)
-        return True if v in ("yes","true") else False
+        return True if v in ("yes", "true") else False
 
     return None
 
 
 def extract_labs(raw: str) -> Dict[str, Optional[float]]:
-    t = raw.lower()  # Normalize case early
-    # Broader TC detection: chol, cholesterol, total chol/tc, etc.
+    t = raw.lower()
+
     tc = _first_float(
         r"\b(?:total\s*(?:chol(?:esterol)?|tc)|chol(?:esterol)?|tc)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b",
         t
@@ -470,18 +477,15 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
     tg = _first_float(r"\b(?:triglycerides|trigs|tgs|tg)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
     apob = _first_float(r"\b(?:apo\s*b|apob)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
     lpa = _first_float(r"\b(?:lp\(a\)|lpa|lipoprotein\s*\(a\))\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t)
-    
-    # A1c: table format or inline
+
     a1c_table = _first_float(
         r"hemoglobin\s*a1c[\s\S]{0,300}?\b\d{1,2}/\d{1,2}/\d{2,4}\s+(\d{1,2}(?:\.\d+)?)\b",
         t,
     )
     a1c_inline = _first_float(r"\b(?:a1c|hba1c|hb\s*a1c)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t)
-    
-    # ASCVD 10y risk
+
     ascvd = _first_float(r"\bascvd\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t)
-    
-    # CAC score
+
     cac = _first_float(r"\b(?:cac|coronary\s*artery\s*calcium|calcium\s*score)\s*(?:score)?\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t)
 
     return {
@@ -541,7 +545,6 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
     cac_nd = extract_cac_not_done(raw)
     extracted["cac_not_done"] = cac_nd
     if cac_nd:
-        # Prefer explicit "not done" over any spurious CAC number matches
         extracted["cac"] = None
 
     # PREVENT-related
@@ -549,7 +552,6 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
     egfr_val, egfr_reason = extract_egfr_with_reason(raw)
     extracted["egfr"] = egfr_val
     extracted["egfr_reason"] = egfr_reason
-
     extracted["lipidLowering"] = extract_lipid_lowering(raw)
 
     # Diabetes override: A1c >= 6.5 forces diabetes = True
@@ -557,6 +559,10 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
         if extracted.get("diabetes") is False:
             conflicts.append("Diabetes conflict: text says no diabetes, but A1c ≥ 6.5%")
         extracted["diabetes"] = True
+
+    # Dev-friendly guardrails
+    if extracted.get("sex") is None:
+        warnings.append("Sex not detected — PCE/eGFR may be inaccurate")
 
     for key, label in [
         ("ldl", "LDL"),
@@ -570,7 +576,6 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
         if extracted.get(key) is None:
             warnings.append(f"{label} not detected")
 
-    # Only warn about CAC if it wasn't explicitly not done
     if extracted.get("cac") is None and not extracted.get("cac_not_done", False):
         warnings.append("CAC not detected")
 
@@ -584,7 +589,7 @@ def parse_ascvd_block(raw: str) -> Dict[str, Any]:
 def parse_smartphrase(raw: str) -> Dict[str, Any]:
     """
     UI adapter: returns exactly what your app expects.
-    (Additive keys: fhx, fhx_text, cac_not_done)
+    (Additive keys: fhx, fhx_text, cac_not_done, egfr_reason)
     """
     rep = parse_ascvd_block_with_report(raw)
     x = rep.extracted
@@ -592,18 +597,18 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
 
     keys = (
-    "age", "sex", "sbp",
-    "tc", "hdl", "ldl",
-    "apob", "lpa", "lpa_unit",
-    "cac",
-    "a1c",
-    "smoker", "diabetes",
-    "bpTreated", "africanAmerican",
-    "bmi", "egfr", "lipidLowering",
-    # new additive keys:
-    "fhx", "fhx_text", "cac_not_done",
-    "egfr_reason",
-)
+        "age", "sex", "sbp",
+        "tc", "hdl", "ldl",
+        "apob", "lpa", "lpa_unit",
+        "cac",
+        "a1c",
+        "smoker", "diabetes",
+        "bpTreated", "africanAmerican",
+        "bmi", "egfr", "lipidLowering",
+        # additive keys:
+        "fhx", "fhx_text", "cac_not_done",
+        "egfr_reason",
+    )
 
     for k in keys:
         if x.get(k) is not None:
@@ -617,4 +622,5 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
         out["former_smoker"] = x["former_smoker"]
 
     return out
+
 
