@@ -2016,18 +2016,10 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         lines.append(f"- {aa}")
     lines.append(f"- {asp_line}")
 
-    # CAC summary line (one line)
-    cac_support = ins.get("cac_decision_support") or {}
-    cac_status = (cac_support.get("status") or "").strip().lower()
-    if cac_status == "suppressed":
-        lines.append("- CAC: Not indicated")
-    elif cac_status == "deferred":
-        lines.append("- CAC: Defer (does not change management now)")
-    elif cac_status == "optional":
-        lines.append("- CAC: Optional (only if it changes when to start or how aggressively to treat)")
-    else:
-        msg = (ins.get("structural_clarification") or "").strip()
-        lines.append(f"- CAC: {msg}" if msg else "- CAC: —")
+       # CAC (idiot-proof, fixed)
+    lines.append("- Coronary calcium: Do not obtain at this time.")
+    lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
+
 
     # Context (one line)
     near = (anchors.get("nearTerm") or {}).get("summary", "—")
@@ -2040,6 +2032,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
