@@ -1154,6 +1154,9 @@ def build_emr_note() -> str:
     lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
     lines.append("- Aspirin: Not indicated.")
 
+    return "\n".join(lines)
+
+
 
 # ============================================================
 # Tabs
@@ -1252,7 +1255,7 @@ with tab_report:
         else:
             bullets = "• No immediate escalation indicated."
 
-               # Idiot-proof CAC wording (fixed; no dynamic recommendations)
+        # Idiot-proof CAC wording (fixed; no dynamic recommendations)
         cac_one_liner = (
             "Coronary calcium: Do not obtain at this time. "
             "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
@@ -1359,6 +1362,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
