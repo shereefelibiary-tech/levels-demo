@@ -844,6 +844,28 @@ def _atp_risk_factor_count(p: Patient) -> int:
 
     return rf
 
+
+def _atp_rf_count_with_completeness(p: Patient) -> Tuple[Optional[int], List[str]]:
+    """
+    Returns (risk_factor_count_or_None, missing_inputs_for_count)
+
+    If key inputs for ATP RF counting are missing, returns None to avoid pseudo-precision.
+    """
+    missing: List[str] = []
+    for k in ("age", "sex", "sbp", "bp_treated", "smoking", "hdl"):
+        if not p.has(k):
+            missing.append(k)
+
+    # If fhx is not present (or is None), avoid treating it as absent
+    if not p.has("fhx"):
+        missing.append("fhx")
+
+    if missing:
+        return None, missing
+
+    return _atp_risk_factor_count(p), []
+
+
 def atp_overlay_support(
     p: Patient,
     plaque: Dict[str, Any],
@@ -855,17 +877,37 @@ def atp_overlay_support(
     Legacy NCEP/ATP III LDL context overlay.
     - Display-only; does not change plan/level.
     - Locked tone: interpretive reference only.
-    - Suppressed when plaque is assessed or higher posture makes it low utility.
+    - Suppressed when plaque/particle burden is established or when near-term risk is not low.
 
     Returns:
       {"status": "suppressed"|"shown", "title": str|None, "lines": List[str]}
     """
-    # Suppress when ASCVD present or plaque is established
+
+    # ---- Hard suppressions (avoid misleading reassurance) ----
     if p.get("ascvd") is True:
         if trace is not None:
             add_trace(trace, "ATP_overlay_suppressed_ASCVD", True, "Clinical ASCVD")
         return {"status": "suppressed", "title": None, "lines": []}
 
+    # Hide when CAC burden is established (CAC ≥100)
+    try:
+        cac_val = plaque.get("cac_value", None)
+        if cac_val is None and p.has("cac"):
+            cac_val = int(p.get("cac"))
+        if isinstance(cac_val, int) and cac_val >= 100:
+            if trace is not None:
+                add_trace(trace, "ATP_overlay_suppressed_CAC100", cac_val, "Plaque burden established")
+            return {"status": "suppressed", "title": None, "lines": []}
+    except Exception:
+        pass
+
+    # Hide when ApoB burden is established (ApoB ≥130)
+    if p.has("apob") and safe_float(p.get("apob")) >= 130:
+        if trace is not None:
+            add_trace(trace, "ATP_overlay_suppressed_ApoB130", p.get("apob"), "Atherogenic burden established")
+        return {"status": "suppressed", "title": None, "lines": []}
+
+    # Suppress when plaque has already been assessed (CAC=0 or CAC positive)
     if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
         if trace is not None:
             add_trace(trace, "ATP_overlay_suppressed_plaque_assessed", plaque.get("plaque_evidence"), "Plaque assessed")
@@ -880,7 +922,15 @@ def atp_overlay_support(
     rp = risk10.get("risk_pct")
     rp_f = float(rp) if rp is not None else None
 
-    # ATP “risk equivalent” simplification for context
+    # ---- Near-term risk gating ----
+    # Default: show only when PCE <7.5% (low/borderline/buffer zone).
+    # If risk is unknown, allow display (it will likely be indeterminate).
+    if rp_f is not None and rp_f >= 7.5:
+        if trace is not None:
+            add_trace(trace, "ATP_overlay_suppressed_PCE75plus", rp_f, "Near-term risk not low")
+        return {"status": "suppressed", "title": None, "lines": []}
+
+    # ---- Category assignment (with indeterminate fallback) ----
     if p.get("diabetes") is True:
         category = "CHD risk equivalent"
         ldl_goal = "<100 mg/dL"
@@ -894,16 +944,22 @@ def atp_overlay_support(
         ldl_goal = "<130 mg/dL"
         drug_thresh = "Treat ≥130 mg/dL"
     else:
-        rf = _atp_risk_factor_count(p)
-        if rf >= 2:
-            category = "2+ risk factors with 10-year risk <10%"
-            ldl_goal = "<130 mg/dL"
-            drug_thresh = "Consider ≥160 mg/dL"
+        rf_count, rf_missing = _atp_rf_count_with_completeness(p)
+        if rf_count is None:
+            category = "Indeterminate (data incomplete for ATP risk-factor counting)"
+            ldl_goal = "Typically <130 mg/dL in most non–high-risk primary prevention profiles"
+            drug_thresh = "Often considered ≥160 mg/dL depending on risk-factor profile"
         else:
-            category = "0–1 risk factor"
-            ldl_goal = "<160 mg/dL"
-            drug_thresh = "Treat ≥190 mg/dL (consider 160–189 mg/dL)"
+            if rf_count >= 2:
+                category = "2+ risk factors with 10-year risk <10%"
+                ldl_goal = "<130 mg/dL"
+                drug_thresh = "Consider ≥160 mg/dL"
+            else:
+                category = "0–1 risk factor"
+                ldl_goal = "<160 mg/dL"
+                drug_thresh = "Treat ≥190 mg/dL (consider 160–189 mg/dL)"
 
+    # ---- LDL/ApoB line ----
     ldl_line = None
     if p.has("ldl"):
         ldl_line = f"Current LDL-C: {fmt_int(p.get('ldl'))} mg/dL"
@@ -921,9 +977,15 @@ def atp_overlay_support(
         lines.append(f"- {ldl_line}")
 
     if trace is not None:
-        add_trace(trace, "ATP_overlay_shown", {"category": category, "goal": ldl_goal, "threshold": drug_thresh}, "Legacy context displayed")
+        add_trace(
+            trace,
+            "ATP_overlay_shown",
+            {"category": category, "goal": ldl_goal, "threshold": drug_thresh, "pce": rp_f},
+            "Legacy context displayed",
+        )
 
     return {"status": "shown", "title": title, "lines": lines}
+
 
 # -------------------------------------------------------------------
 # Deterministic driver ranking
@@ -1793,4 +1855,5 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
