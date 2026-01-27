@@ -1623,11 +1623,12 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
 
     # 6) Gray-zone action: directive about what to do next (process), not hedged outcome
     # If near boundary and plaque unmeasured, CAC is only useful if it changes management.
-        if zone in ("buffer", "actionable"):
+    if zone in ("buffer", "actionable"):
         actions.append("Coronary calcium: Do not obtain at this time.")
-        actions.append("Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
+        actions.append(
+            "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
+        )
         return actions
-
 
     # 7) Low near-term risk: explicit stop
     if zone == "hard_no":
@@ -2016,7 +2017,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         lines.append(f"- {aa}")
     lines.append(f"- {asp_line}")
 
-       # CAC (idiot-proof, fixed)
+    # CAC (idiot-proof, fixed)
     lines.append("- Coronary calcium: Do not obtain at this time.")
     lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
 
@@ -2032,6 +2033,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
