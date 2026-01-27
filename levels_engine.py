@@ -805,6 +805,127 @@ def esc_numeric_goals(level: int, clinical_ascvd: bool) -> str:
     return "ESC/EAS goals: individualized."
 
 # -------------------------------------------------------------------
+# NEW: Legacy NCEP/ATP III overlay (display-only; gated)
+# -------------------------------------------------------------------
+def _atp_risk_factor_count(p: Patient) -> int:
+    """
+    Simplified ATP III major risk factors (contextual framing only):
+      - Age (men ≥45, women ≥55)
+      - Smoking (current)
+      - Hypertension (treated OR SBP ≥140)
+      - Low HDL-C (<40)
+      - Family history premature ASCVD (if present)
+    """
+    rf = 0
+
+    age = int(p.get("age", 0)) if p.has("age") else None
+    sex_raw = str(p.get("sex", "")).strip().lower()
+    male = sex_raw in ("m", "male")
+
+    if age is not None:
+        if male and age >= 45:
+            rf += 1
+        if (not male) and age >= 55:
+            rf += 1
+
+    if p.get("smoking") is True:
+        rf += 1
+
+    sbp = safe_float(p.get("sbp"), 0) if p.has("sbp") else 0
+    if p.get("bp_treated") is True or sbp >= 140:
+        rf += 1
+
+    hdl = safe_float(p.get("hdl"), 999) if p.has("hdl") else 999
+    if hdl < 40:
+        rf += 1
+
+    if p.get("fhx") is True:
+        rf += 1
+
+    return rf
+
+def atp_overlay_support(
+    p: Patient,
+    plaque: Dict[str, Any],
+    risk10: Dict[str, Any],
+    level: int,
+    trace: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Legacy NCEP/ATP III LDL context overlay.
+    - Display-only; does not change plan/level.
+    - Locked tone: interpretive reference only.
+    - Suppressed when plaque is assessed or higher posture makes it low utility.
+
+    Returns:
+      {"status": "suppressed"|"shown", "title": str|None, "lines": List[str]}
+    """
+    # Suppress when ASCVD present or plaque is established
+    if p.get("ascvd") is True:
+        if trace is not None:
+            add_trace(trace, "ATP_overlay_suppressed_ASCVD", True, "Clinical ASCVD")
+        return {"status": "suppressed", "title": None, "lines": []}
+
+    if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
+        if trace is not None:
+            add_trace(trace, "ATP_overlay_suppressed_plaque_assessed", plaque.get("plaque_evidence"), "Plaque assessed")
+        return {"status": "suppressed", "title": None, "lines": []}
+
+    # Suppress for Level ≥4 (already target-driven by plaque posture)
+    if int(level or 0) >= 4:
+        if trace is not None:
+            add_trace(trace, "ATP_overlay_suppressed_level4plus", level, "Higher posture")
+        return {"status": "suppressed", "title": None, "lines": []}
+
+    rp = risk10.get("risk_pct")
+    rp_f = float(rp) if rp is not None else None
+
+    # ATP “risk equivalent” simplification for context
+    if p.get("diabetes") is True:
+        category = "CHD risk equivalent"
+        ldl_goal = "<100 mg/dL"
+        drug_thresh = "Treat ≥130 mg/dL"
+    elif rp_f is not None and rp_f >= 20.0:
+        category = "High risk (10-year risk ≥20%)"
+        ldl_goal = "<100 mg/dL"
+        drug_thresh = "Treat ≥130 mg/dL"
+    elif rp_f is not None and rp_f >= 10.0:
+        category = "Intermediate risk (10-year risk 10–20%)"
+        ldl_goal = "<130 mg/dL"
+        drug_thresh = "Treat ≥130 mg/dL"
+    else:
+        rf = _atp_risk_factor_count(p)
+        if rf >= 2:
+            category = "2+ risk factors with 10-year risk <10%"
+            ldl_goal = "<130 mg/dL"
+            drug_thresh = "Consider ≥160 mg/dL"
+        else:
+            category = "0–1 risk factor"
+            ldl_goal = "<160 mg/dL"
+            drug_thresh = "Treat ≥190 mg/dL (consider 160–189 mg/dL)"
+
+    ldl_line = None
+    if p.has("ldl"):
+        ldl_line = f"Current LDL-C: {fmt_int(p.get('ldl'))} mg/dL"
+    elif p.has("apob"):
+        ldl_line = f"Current LDL-C: — (ApoB {fmt_int(p.get('apob'))} mg/dL available)"
+
+    title = "LEGACY NCEP / ATP III (LDL CONTEXT)"
+    lines = [
+        "Interpretive reference only; modern guidance is risk/intensity-based.",
+        f"- ATP risk category: {category}",
+        f"- LDL goal (legacy): {ldl_goal}",
+        f"- Drug threshold (legacy): {drug_thresh}",
+    ]
+    if ldl_line:
+        lines.append(f"- {ldl_line}")
+
+    if trace is not None:
+        add_trace(trace, "ATP_overlay_shown", {"category": category, "goal": ldl_goal, "threshold": drug_thresh}, "Legacy context displayed")
+
+    return {"status": "shown", "title": title, "lines": lines}
+
+# -------------------------------------------------------------------
 # Deterministic driver ranking
 # -------------------------------------------------------------------
 def ranked_drivers(p: Patient, plaque: Dict[str, Any], trace: List[Dict[str, Any]]) -> List[str]:
@@ -1488,6 +1609,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     asp = out.get("aspirin") or {}
     anchors = out.get("anchors") or {}
     ins = out.get("insights") or {}
+    trace = out.get("trace") or []
 
     level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
     sub = lvl.get("sublevel")
@@ -1566,7 +1688,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     # Rename robustness -> stability, and keep note tight
     lines.append(f"Decision confidence: {dec_conf}")
     if stab_note:
-        # Shorten phrasing
         note = str(stab_note).replace("plaque status", "plaque").replace("near boundary", "near boundary")
         lines.append(f"Decision stability: {stab} ({note})")
     else:
@@ -1601,6 +1722,19 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         lines.append(f"- ApoB <{int(t.get('apob'))} mg/dL")
     lines.append("")
 
+    # --- NEW: ATP overlay block (display-only; gated)
+    plaque_for_overlay = {
+        "plaque_present": None,
+        "plaque_evidence": (lvl.get("plaqueEvidence") or "—"),
+    }
+    atp = atp_overlay_support(p, plaque_for_overlay, risk10, level, trace=trace)
+    if atp.get("status") == "shown":
+        title = atp.get("title") or "LEGACY NCEP / ATP III (LDL CONTEXT)"
+        lines.append(title)
+        for ln in (atp.get("lines") or []):
+            lines.append(ln)
+        lines.append("")
+
     # Plan
     lines.append("MANAGEMENT PLAN")
     plan = str((lvl.get("managementPlan") or lvl.get("defaultPosture") or "")).strip() or "—"
@@ -1612,7 +1746,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     na = out.get("nextActions") or []
     if na:
         for a in na[:3]:
-            # Remove trailing periods for cleaner bullets
             aa = str(a).strip()
             if aa.endswith("."):
                 aa = aa[:-1]
@@ -1631,7 +1764,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     elif cac_status == "optional":
         lines.append("Optional; consider only if results would change treatment timing or intensity.")
     else:
-        # Fallback if status missing
         msg = (ins.get("structural_clarification") or "").strip()
         if msg:
             lines.append(msg)
@@ -1661,5 +1793,4 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
-
 
