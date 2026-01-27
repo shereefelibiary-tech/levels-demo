@@ -165,28 +165,53 @@ def extract_bp(raw: str) -> Optional[Tuple[int, int]]:
     return None
 
 
+def extract_diabetes_meds(raw: str) -> Optional[str]:
+    """
+    Extracts the raw diabetes meds line from SmartPhrase if present:
+      "Diabetes medications: ..."
+    Returns the RHS string, or None.
+    """
+    if not raw:
+        return None
+    m = re.search(r"\bdiabetes\s+medications\b\s*:\s*([^\n\r]+)", raw, flags=re.I)
+    if not m:
+        return None
+    val = m.group(1).strip()
+    if not val or val in ("***", "@DIABETESMEDS@"):
+        return None
+    return val
+
+
 def extract_diabetes_flag(raw: str) -> Optional[bool]:
     """
-    Stronger diabetes parsing:
-      - Diabetes: No / Yes
-      - Diabetic: No / Yes
-      - Common negations
-      - Then keywords like T2DM
-    """
-    t = raw.lower()
+    Safer diabetes parsing (fixes false positives from A1c reference tables).
 
-    # explicit fields (highest priority)
+    Priority:
+      1) Explicit fields: "Diabetes: Yes/No" or "Diabetic: Yes/No"
+      2) Strong negations
+      3) Strong positives ONLY (T2DM/DM2/Type 2 diabetes/Diabetes mellitus/ICD E10/E11)
+         (NOTE: we intentionally do NOT treat generic word "diabetes" as positive,
+          because A1c reference ranges often contain "Diabetes >6.4%" and would
+          otherwise trigger false positives.)
+    """
+    t = (raw or "").lower()
+
+    # 1) Explicit fields (highest priority)
     m = re.search(r"\b(diabetes|diabetic)\b\s*[:=]\s*(yes|no|true|false)\b", t)
     if m:
         v = m.group(2)
         return True if v in ("yes", "true") else False
 
-    # standard negations
-    if re.search(r"\b(no diabetes|not diabetic|denies diabetes)\b", t):
+    # 2) Standard negations
+    if re.search(r"\b(no diabetes|not diabetic|denies diabetes|without diabetes|non[-\s]?diabetic)\b", t):
         return False
 
-    # keyword positives
-    if re.search(r"\b(diabetes|t2dm|type 2 diabetes|type ii diabetes)\b", t):
+    # 3) Strong positives (diagnosis-like)
+    if re.search(r"\b(t2dm|dm2|type\s*2\s*diabetes|type\s*ii\s*diabetes|diabetes\s+mellitus)\b", t):
+        return True
+
+    # ICD hints
+    if re.search(r"\b(e10(\.\d+)?|e11(\.\d+)?)\b", t):
         return True
 
     return None
@@ -473,7 +498,13 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
         t
     )
     ldl = _first_float(r"\bldl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+
+    # HDL tolerance: allow high HDL values (parser should not reject >100).
+    # We'll accept up to 300 as "tolerant" and let downstream logic clamp if needed.
     hdl = _first_float(r"\bhdl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+    if hdl is not None and hdl > 300:
+        hdl = None
+
     tg = _first_float(r"\b(?:triglycerides|trigs|tgs|tg)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
     apob = _first_float(r"\b(?:apo\s*b|apob)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
     lpa = _first_float(r"\b(?:lp\(a\)|lpa|lipoprotein\s*\(a\))\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t)
@@ -536,6 +567,9 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
     extracted["africanAmerican"] = extract_race_african_american(raw)
     extracted["lpa_unit"] = extract_lpa_unit(raw)
 
+    # Diabetes meds (raw, additive)
+    extracted["dm_meds_raw"] = extract_diabetes_meds(raw)
+
     # Family history
     fhx_bool, fhx_text = extract_fhx(raw)
     extracted["fhx"] = fhx_bool
@@ -555,6 +589,7 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
     extracted["lipidLowering"] = extract_lipid_lowering(raw)
 
     # Diabetes override: A1c >= 6.5 forces diabetes = True
+    # (This remains, but keyword-based false positives are fixed by extract_diabetes_flag)
     if labs.get("a1c") is not None and labs["a1c"] >= 6.5:
         if extracted.get("diabetes") is False:
             conflicts.append("Diabetes conflict: text says no diabetes, but A1c ≥ 6.5%")
@@ -563,6 +598,10 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
     # Dev-friendly guardrails
     if extracted.get("sex") is None:
         warnings.append("Sex not detected — PCE/eGFR may be inaccurate")
+
+    # HDL tolerance warning (optional, non-breaking)
+    if extracted.get("hdl") is not None and extracted["hdl"] > 100:
+        warnings.append("HDL > 100 mg/dL detected — PCE may clamp or reject depending on implementation")
 
     for key, label in [
         ("ldl", "LDL"),
@@ -589,7 +628,7 @@ def parse_ascvd_block(raw: str) -> Dict[str, Any]:
 def parse_smartphrase(raw: str) -> Dict[str, Any]:
     """
     UI adapter: returns exactly what your app expects.
-    (Additive keys: fhx, fhx_text, cac_not_done, egfr_reason)
+    (Additive keys: fhx, fhx_text, cac_not_done, egfr_reason, dm_meds_raw)
     """
     rep = parse_ascvd_block_with_report(raw)
     x = rep.extracted
@@ -608,6 +647,7 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
         # additive keys:
         "fhx", "fhx_text", "cac_not_done",
         "egfr_reason",
+        "dm_meds_raw",
     )
 
     for k in keys:
