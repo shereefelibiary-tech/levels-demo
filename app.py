@@ -1217,8 +1217,7 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-
-        # ------------------------------------------------------------
+    # ------------------------------------------------------------
     # TIGHT ROW: Targets | Action | Clinical context
     # ------------------------------------------------------------
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
@@ -1262,17 +1261,23 @@ with tab_report:
 
     # --- Action (tight) ---
     with col_m:
-        # Use next_actions (already scrubbed) as the “Do” list
         if next_actions:
             bullets = "<br/>".join([f"• {_html.escape(str(x))}" for x in next_actions[:3]])
         else:
             bullets = "• —"
 
-        cs = (ins.get("cac_decision_support") or {}).get("status")
-        cac_msg = scrub_terms(ins.get("structural_clarification") or "")
-        cac_line = ""
-        if cs and cs != "suppressed" and cac_msg:
-            cac_line = f"• CAC: {_html.escape(cac_msg)}"
+        # CAC: show therapy decision + classification separately if available
+        cac_obj = (ins.get("cac_decision_support") or {})
+        therapy_cac_msg = scrub_terms(cac_obj.get("message") or "")
+        class_cac_msg = scrub_terms(cac_obj.get("classification_message") or "")
+        class_cac_val = bool(cac_obj.get("classification_value"))
+
+        cac_lines = []
+        if therapy_cac_msg and (cac_obj.get("status") or "") != "suppressed":
+            cac_lines.append(f"• CAC (treatment): {_html.escape(therapy_cac_msg)}")
+        if class_cac_val and class_cac_msg:
+            cac_lines.append(f"• CAC (classification): {_html.escape(class_cac_msg)}")
+        cac_html = "<br/>".join(cac_lines)
 
         st.markdown(
             f"""
@@ -1280,7 +1285,7 @@ with tab_report:
   <div class="block-title compact">Action</div>
   <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
   <div class="kvline compact"><b>Aspirin:</b> {_html.escape(asp_line)}</div>
-  {f"<div class='kvline compact inline-muted'>{cac_line}</div>" if cac_line else ""}
+  {f"<div class='kvline compact inline-muted'>{cac_html}</div>" if cac_html else ""}
 </div>
 """,
             unsafe_allow_html=True,
@@ -1319,7 +1324,6 @@ with tab_report:
         )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
 
     st.markdown("### Clinical Report (copy/paste into EMR)")
     st.caption("Click **Copy**, then paste into the EMR note.")
@@ -1374,6 +1378,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
