@@ -1150,9 +1150,14 @@ def build_emr_note() -> str:
 
     lines.append("")
     lines.append("NEXT STEPS")
-    lines.append("- Coronary calcium: Do not obtain at this time.")
-    lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
-    lines.append("- Aspirin: Not indicated.")
+
+    # CAC: only include the boilerplate when CAC is unmeasured
+    if str(ev.get("cac_status", "")).lower().startswith("unknown") or str(ev.get("cac_status", "")).lower().startswith("no structural"):
+        lines.append("- Coronary calcium: Do not obtain at this time.")
+        lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
+
+lines.append(f"- Aspirin: {asp_line}.")
+
 
     return "\n".join(lines)
 
@@ -1362,6 +1367,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
