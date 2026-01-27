@@ -63,13 +63,24 @@ html, body, [class*="css"] {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
+
+/* --- tighten global vertical gaps --- */
+.block-container { padding-top: 1.0rem; padding-bottom: 1.0rem; }
+div[data-testid="stVerticalBlock"] { gap: 0.6rem; }
+div[data-testid="stMarkdownContainer"] p { margin: 0.25rem 0; }
+div[data-testid="stMarkdownContainer"] ul { margin: 0.25rem 0 0.25rem 1.1rem; }
+div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
+
 .header-card {
   background:#fff; border:1px solid rgba(31,41,55,0.12);
   border-radius:14px; padding:16px 18px; margin-bottom:10px;
 }
 .header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
 .header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
-.hr { margin:12px 0 14px 0; border-top:1px solid rgba(31,41,55,0.12); }
+
+/* --- tighter hr spacing --- */
+.hr { margin:10px 0 10px 0; border-top:1px solid rgba(31,41,55,0.12); }
+
 .muted { color:#6b7280; font-size:0.9rem; }
 .small-help { color: rgba(31,41,55,0.70); font-size:0.88rem; }
 
@@ -85,6 +96,7 @@ html, body, [class*="css"] {
 .ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
+/* --- base block (kept) --- */
 .block {
   border:1px solid rgba(31,41,55,0.12);
   border-radius:14px;
@@ -101,6 +113,23 @@ html, body, [class*="css"] {
 }
 .kvline { margin: 6px 0; line-height:1.35; }
 .kvline b { font-weight:900; }
+
+/* --- compact variant for Report tab cards (Targets/Action/Context) --- */
+.block.compact {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+.block-title.compact {
+  margin-bottom: 6px;
+  font-size: 0.80rem;
+  letter-spacing: 0.07em;
+}
+.kvline.compact { margin: 4px 0; line-height: 1.22; }
+.compact-caption { margin-top: 4px; color: rgba(31,41,55,0.62); font-size: 0.82rem; }
+.inline-muted { color: rgba(31,41,55,0.65); font-size: 0.86rem; }
+
+/* --- slightly tighter expander header padding --- */
+div[data-testid="stExpander"] div[role="button"] { padding-top: 0.35rem; padding-bottom: 0.35rem; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -1261,6 +1290,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
