@@ -1128,48 +1128,72 @@ def posture_label(level: int, sublevel: Optional[str] = None) -> str:
 # Level assignment (2A/2B + 3A/3B only)
 # -------------------------------------------------------------------
 def _mild_signals(p: Patient) -> List[str]:
+    """
+    Mild signals = emerging risk signals that should NOT, by themselves, force Level 3.
+    Includes: prediabetes, near-diabetes-boundary A1c, modest ApoB/LDL, isolated hsCRP,
+    and (optionally) premature family history as an enhancer-class signal.
+    """
     sig: List[str] = []
+
+    # Modest atherogenic markers
     if p.has("apob") and 80 <= safe_float(p.get("apob")) <= 99:
         sig.append("ApoB 80–99")
     if p.has("ldl") and 100 <= safe_float(p.get("ldl")) <= 129:
         sig.append("LDL 100–129")
 
+    # Glycemia (emerging)
     a1s = a1c_status(p)
     if a1s == "prediabetes":
         sig.append("Prediabetes")
     elif a1s == "near_diabetes_boundary":
         sig.append("A1c 6.2–6.4 (near diabetes threshold)")
 
+    # Isolated hsCRP without a chronic inflammatory condition
     if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2 and not has_chronic_inflammatory_disease(p):
         sig.append("hsCRP≥2")
+
+    # Premature family history is an important modifier/enhancer, but not a sole Level 3 trigger
+    if p.get("fhx") is True:
+        sig.append("Premature family history")
+
     return sig
 
+
 def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
+    """
+    High signals = MAJOR actionable biologic drivers required to justify Level 3.
+    Intentionally excludes:
+      - Prediabetes
+      - A1c 6.2–6.4 (near diabetes threshold)
+      - Premature family history as a sole trigger
+    """
     sig: List[str] = []
+
+    # Atherogenic burden (major)
     if p.has("apob") and safe_float(p.get("apob")) >= 100:
         sig.append("ApoB≥100")
     elif p.has("ldl") and safe_float(p.get("ldl")) >= 130:
         sig.append("LDL≥130")
 
+    # Genetics (major)
     if lpa_elevated(p, trace):
         sig.append("Lp(a) elevated")
 
-    if p.get("fhx") is True:
-        sig.append("Premature family history")
-
+    # Inflammation (major)
     if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
         sig.append("Inflammation present")
 
+    # Metabolic disease (major only when diabetes-range / true diabetes)
     a1s = a1c_status(p)
     if a1s == "diabetes_range" or p.get("diabetes") is True:
         sig.append("Diabetes")
-    elif a1s == "near_diabetes_boundary":
-        sig.append("A1c near diabetes threshold")
 
+    # Smoking (major)
     if p.get("smoking") is True:
         sig.append("Smoking")
 
     return sig
+
 
 def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[int, Optional[str], List[str]]:
     triggers: List[str] = []
@@ -1855,5 +1879,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
