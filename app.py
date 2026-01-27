@@ -1188,52 +1188,104 @@ with tab_report:
     if (p_total is None and p_ascvd is None) and p_note:
         st.caption(f"PREVENT: {p_note}")
 
+    # ------------------------------------------------------------
+    # TIGHT ROW: Targets | Action | Clinical context
+    # (Replaces the old large Targets/Management/Clinical context blocks)
+    # ------------------------------------------------------------
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="block"><div class="block-title">Targets</div>', unsafe_allow_html=True)
-    if primary:
-        lipid_targets_line = f"{primary[0]} {primary[1]}"
-        if apob_line:
-            lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
-        st.markdown(f"<div class='kvline'><b>Risk-reduction intensity:</b> {lipid_targets_line}</div>", unsafe_allow_html=True)
-        st.caption(guideline_anchor_note(level, clinical_ascvd))
-        if apob_line and not apob_measured:
-            st.caption("ApoB not measured here — optional add-on to check for discordance.")
-    else:
-        st.markdown("<div class='kvline'><b>Risk-reduction intensity:</b> —</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    # --- Targets (tight) ---
+    with col_t:
+        if primary:
+            lipid_targets_line = f"{primary[0]} {primary[1]}"
+            if apob_line:
+                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
 
-    st.markdown('<div class="block"><div class="block-title">Management</div></div>', unsafe_allow_html=True)
-    st.markdown(f"**Plan:** {plan_clean or '—'}")
+            anchor = guideline_anchor_note(level, clinical_ascvd)
 
-    if next_actions:
-        st.markdown("**Next steps:**")
-        for a in next_actions[:3]:
-            aa = str(a).strip()
-            if aa.endswith("."):
-                aa = aa[:-1]
-            st.markdown(f"- {aa}")
-    else:
-        st.markdown("**Next steps:** —")
+            apob_note = ""
+            if apob_line and not apob_measured:
+                apob_note = "ApoB not measured — optional add-on if discordance suspected."
 
-    st.markdown(f"**Aspirin:** {asp_line}")
+            st.markdown(
+                f"""
+<div class="block compact">
+  <div class="block-title compact">Targets</div>
+  <div class="kvline compact"><b>Intensity:</b> {lipid_targets_line}</div>
+  <div class="compact-caption">{_html.escape(anchor)}</div>
+  {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
+<div class="block compact">
+  <div class="block-title compact">Targets</div>
+  <div class="kvline compact"><b>Intensity:</b> —</div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
 
-    cs = (ins.get("cac_decision_support") or {}).get("status")
-    cac_msg = scrub_terms(ins.get("structural_clarification") or "")
-    if cac_msg and cs != "suppressed":
-        st.caption(cac_msg)
+    # --- Action (tight) ---
+    with col_m:
+        if next_actions:
+            bullets = "<br/>".join([f"• {_html.escape(str(x))}" for x in next_actions[:3]])
+        else:
+            bullets = "• —"
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+        cs = (ins.get("cac_decision_support") or {}).get("status")
+        cac_msg = scrub_terms(ins.get("structural_clarification") or "")
+        cac_line = ""
+        if cs and cs != "suppressed" and cac_msg:
+            cac_line = f"• CAC: {_html.escape(cac_msg)}"
 
-    st.markdown('<div class="block"><div class="block-title">Clinical context</div></div>', unsafe_allow_html=True)
-    if drivers:
-        st.markdown(f"**Primary driver:** {drivers[0]}")
-    if ins.get("phenotype_label"):
-        st.markdown(f"**Phenotype:** {scrub_terms(ins.get('phenotype_label'))}")
-    if ev.get("cac_status") == "Unknown":
-        st.markdown("**Plaque status:** Unmeasured (CAC not performed)")
+        st.markdown(
+            f"""
+<div class="block compact">
+  <div class="block-title compact">Action</div>
+  <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
+  <div class="kvline compact"><b>Aspirin:</b> {_html.escape(asp_line)}</div>
+  {f"<div class='kvline compact inline-muted'>{cac_line}</div>" if cac_line else ""}
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    # --- Clinical context (tight) ---
+    with col_c:
+        driver_line = (
+            f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
+            if drivers else ""
+        )
+        phenotype_line = ""
+        if ins.get("phenotype_label"):
+            phenotype_line = (
+                f"<div class='kvline compact'><b>Phenotype:</b> "
+                f"{_html.escape(scrub_terms(ins.get('phenotype_label')))}</div>"
+            )
+
+        plaque_line = ""
+        if ev.get("cac_status") == "Unknown":
+            plaque_line = "<div class='kvline compact inline-muted'>Plaque unmeasured (CAC not performed)</div>"
+
+        st.markdown(
+            f"""
+<div class="block compact">
+  <div class="block-title compact">Clinical context</div>
+  {driver_line}
+  {phenotype_line}
+  {plaque_line}
+  <div class="kvline compact"><b>Near-term:</b> {_html.escape(near_anchor)}</div>
+  <div class="kvline compact"><b>Lifetime:</b> {_html.escape(life_anchor)}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1290,6 +1342,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
