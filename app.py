@@ -1149,35 +1149,11 @@ def build_emr_note() -> str:
     lines.append(plan_clean or "—")
 
     lines.append("")
-    lines.append("NEXT STEPS")
-    if next_actions:
-        for a in next_actions[:3]:
-            aa = str(a).strip()
-            if aa.endswith("."):
-                aa = aa[:-1]
-            lines.append(f"- {aa}")
-    else:
-        lines.append("- —")
+        lines.append("NEXT STEPS")
+    lines.append("- Coronary calcium: Do not obtain at this time.")
+    lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
+    lines.append("- Aspirin: Not indicated.")
 
-    lines.append(f"- Aspirin: {asp_line}")
-
-    cs = (ins.get("cac_decision_support") or {}).get("status")
-    cac_msg = scrub_terms(ins.get("structural_clarification") or "")
-    if cs and cs != "suppressed":
-        if cac_msg:
-            lines.append(f"- Coronary calcium: {cac_msg}")
-    elif (not cs) and cac_msg:
-        lines.append(f"- Coronary calcium: {cac_msg}")
-
-    lines.append("")
-    lines.append("CLINICAL CONTEXT")
-    if drivers:
-        lines.append(f"- Primary driver: {drivers[0]}")
-    if ev.get("cac_status") == "Unknown":
-        lines.append("- Plaque status: Unmeasured (CAC not performed)")
-    lines.append(f"- Anchors: Near-term: {near_anchor} | Lifetime: {life_anchor}")
-    lines.append("")
-    return "\n".join(lines)
 
 # ============================================================
 # Tabs
@@ -1276,21 +1252,12 @@ with tab_report:
         else:
             bullets = "• No immediate escalation indicated."
 
-        # Single CAC line (binary/clean)
-        cac_obj = (ins.get("cac_decision_support") or {})
-        cs = (cac_obj.get("status") or "").strip().lower()
-        class_val = bool(cac_obj.get("classification_value"))
+               # Idiot-proof CAC wording (fixed; no dynamic recommendations)
+        cac_one_liner = (
+            "Coronary calcium: Do not obtain at this time. "
+            "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
+        )
 
-        if cs == "suppressed":
-            cac_one_liner = "CAC: Do not order now — treatment decision is clear without imaging."
-        elif cs == "deferred":
-            cac_one_liner = "CAC: Defer — would not change treatment at this time."
-        elif class_val:
-            cac_one_liner = "CAC: Optional — may be used to assess plaque burden and guide treatment intensity."
-        elif cs == "optional":
-            cac_one_liner = "CAC: Reasonable now — obtain only if the result will change treatment intensity."
-        else:
-            cac_one_liner = "CAC: —"
 
         st.markdown(
             f"""
@@ -1392,6 +1359,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
