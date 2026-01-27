@@ -1184,9 +1184,18 @@ with tab_report:
         unsafe_allow_html=True,
     )
 
-    st.caption(PREVENT_EXPLAINER)
+    # Tight explainer line (prevents border/caption collision)
+    st.markdown(
+        f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>",
+        unsafe_allow_html=True,
+    )
+
     if (p_total is None and p_ascvd is None) and p_note:
-        st.caption(f"PREVENT: {p_note}")
+        st.markdown(
+            f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
+            unsafe_allow_html=True,
+        )
+
 
     # ------------------------------------------------------------
     # TIGHT ROW: Targets | Action | Clinical context
@@ -1342,6 +1351,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
