@@ -1931,7 +1931,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     prev = out.get("prevent10") or {}
     asp = out.get("aspirin") or {}
     anchors = out.get("anchors") or {}
-    ins = out.get("insights") or {}
 
     level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
     sub = lvl.get("sublevel")
@@ -2017,9 +2016,11 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         lines.append(f"- {aa}")
     lines.append(f"- {asp_line}")
 
-    # CAC (idiot-proof, fixed)
-    lines.append("- Coronary calcium: Do not obtain at this time.")
-    lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
+    # CAC (only when unmeasured)
+    if plaque_status == "Unmeasured":
+        lines.append("- Coronary calcium: Do not obtain at this time.")
+        lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
+
 
 
     # Context (one line)
@@ -2033,6 +2034,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
