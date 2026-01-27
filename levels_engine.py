@@ -1810,27 +1810,36 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "label": posture_label(level, sublevel=sublevel),
         "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
         "triggers": sorted(set(level_triggers or [])),
+
         "managementPlan": plan,
         "defaultPosture": plan,
+
         "decisionConfidence": dec_conf,
         "decisionStability": stab_band,
         "decisionStabilityNote": stab_note,
+
         "plaqueEvidence": plaque.get("plaque_evidence", "—"),
         "plaqueBurden": plaque.get("plaque_burden", "—"),
+
         "evidence": {
-            "clinical_ascvd": True if p.get("ascvd") is True else False,
+            "clinical_ascvd": bool(p.get("ascvd") is True),
             "cac_status": plaque.get("plaque_evidence", "Unknown"),
             "burden_band": plaque.get("plaque_burden", "Not quantified"),
             "cac_value": plaque.get("cac_value"),
         },
+
         "anchorsSummary": {
             "nearTerm": (anchors.get("nearTerm") or {}).get("summary", "—"),
             "lifetime": (anchors.get("lifetime") or {}).get("summary", "—"),
         },
+
         "legend": levels_legend_compact(),
         "trajectoryNote": trajectory_note(p, risk10),
     }
 
+    # -------------------------
+    # Disease burden label
+    # -------------------------
     disease_burden = "Unknown"
     if p.get("ascvd") is True:
         disease_burden = "Present (clinical ASCVD)"
@@ -1838,50 +1847,77 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         disease_burden = f"Present (CAC {int(plaque['cac_value'])})"
     elif plaque.get("plaque_present") is False:
         disease_burden = "Not detected (CAC=0)"
-    elif plaque.get("plaque_evidence", "").startswith("Unknown"):
+    elif str(plaque.get("plaque_evidence", "")).startswith("Unknown"):
         disease_burden = "Unknown (CAC not available)"
+
+    # ----------------------------------------------------
+    # CAC messaging: therapy decision + classification use
+    # ----------------------------------------------------
+    _clar = (cac_support.get("message") or "").strip()
+    _cclass = (cac_support.get("classification_message") or "").strip()
+    if _cclass:
+        _clar = (_clar + " " + _cclass).strip()
 
     insights = {
         "cac_decision_support": cac_support,
-        "structural_clarification": cac_support.get("message"),
+        "structural_clarification": _clar if _clar else None,
+
         "phenotype_label": None,
         "phenotype_definition": None,
+
         "decision_stability": stab_band,
         "decision_stability_note": stab_note,
         "decision_robustness": stab_band,
         "decision_robustness_note": stab_note,
+
         "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
 
+    # -------------------------
+    # Assemble output
+    # -------------------------
     out = {
         "version": VERSION,
         "system": SYSTEM_NAME,
+
         "levels": levels_obj,
+
         "riskSignal": {**rss, "drivers": drivers_top},
+
         "pooledCohortEquations10yAscvdRisk": risk10,
         "ascvdPce10yRisk": risk10,
         "prevent10": prevent10,
+
         "targets": targets,
         "confidence": conf,
         "diseaseBurden": disease_burden,
+
         "drivers": drivers_top,
         "drivers_all": drivers_all,
-        "nextActions": [],  # filled below with trigger→action sentences
-        "escGoals": esc_numeric_goals(level, clinical_ascvd=bool(p.get("ascvd") is True)),
+
+        "nextActions": [],  # filled below
+
+        "escGoals": esc_numeric_goals(
+            level,
+            clinical_ascvd=bool(p.get("ascvd") is True),
+        ),
+
         "aspirin": asp,
         "anchors": anchors,
         "lpaInfo": lpa_info(p, trace),
+
         "insights": insights,
         "trace": trace,
         "trajectoryNote": levels_obj.get("trajectoryNote"),
     }
 
-    # Fill nextActions with authoritative trigger→action lines
+    # -------------------------
+    # High-yield trigger → action lines
+    # -------------------------
     out["nextActions"] = compose_actions(p, out)
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
-
 
 # -------------------------------------------------------------------
 # Canonical EMR output (locked style) — direct: WHY → WHAT
@@ -2003,4 +2039,5 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
