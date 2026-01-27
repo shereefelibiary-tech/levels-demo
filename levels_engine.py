@@ -1297,8 +1297,18 @@ def decision_stability(p: Patient, level: int, conf: Dict[str, Any], plaque: Dic
 # =========================
 
 # -------------------------------------------------------------------
-# CAC decision support (suppressed / deferred / optional; never recommended)
-# (Tightened language: direct, no filler)
+# CAC decision support
+# Returns BOTH intents:
+#   1) therapy_decision: Should CAC be obtained to decide treatment now?
+#   2) classification: Would CAC add value to classify disease/intensity (Level 3→4)?
+#
+# Backward compatible keys preserved:
+#   - status, message, reasons, labs_first (when relevant)
+#
+# Additive keys:
+#   - classification_value: bool
+#   - classification_message: str|None
+#   - intents: dict (explicit split)
 # -------------------------------------------------------------------
 def cac_decision_support(
     p: Patient,
@@ -1307,29 +1317,99 @@ def cac_decision_support(
     level: int,
     trace: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    # Helper: determine whether CAC has classification value (disease state/intensity),
+    # even if treatment proceeds without imaging.
+    def _classification_value() -> bool:
+        # CAC only has classification value if plaque is currently unmeasured.
+        if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
+            return False
+        if p.get("ascvd") is True:
+            return False
+        if int(level or 0) != 3:
+            return False
+
+        # Actionable profiles where CAC can plausibly upshift intensity (Level 3 → 4)
+        ap = safe_float(p.get("apob")) if p.has("apob") else None
+        ld = safe_float(p.get("ldl")) if p.has("ldl") else None
+        dm = (p.get("diabetes") is True)
+
+        # ApoB cut aligned with your current “initiate” posture (110)
+        if ap is not None and ap >= 110:
+            return True
+
+        # Severe LDL when ApoB not available
+        if (ap is None) and (ld is not None) and (ld >= 190):
+            return True
+
+        # Diabetes (treated as high-risk condition where plaque confirmation may change intensity)
+        if dm:
+            return True
+
+        return False
+
+    classification_value = _classification_value()
+    classification_message = None
+    if classification_value:
+        classification_message = (
+            "Treatment should proceed without delay. "
+            "CAC may be obtained to determine whether subclinical atherosclerosis is present and to guide intensity (Level 3 vs Level 4)."
+        )
+
+    # -----------------------------
+    # Intent 1: therapy_decision
+    # -----------------------------
+    # If plaque already assessed, CAC does not help either intent.
     if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
         add_trace(trace, "CAC_support_suppressed_known", plaque.get("plaque_evidence"), "Plaque already assessed")
-        return {"status": "suppressed", "message": None, "reasons": ["Plaque already assessed"]}
+        out = {
+            "status": "suppressed",
+            "message": "Do not obtain a CAC at this time.",
+            "reasons": ["Plaque already assessed"],
+            "classification_value": False,
+            "classification_message": None,
+        }
+        out["intents"] = {
+            "therapy_decision": {"status": out["status"], "message": out["message"], "reasons": out["reasons"]},
+            "classification": {"value": out["classification_value"], "message": out["classification_message"]},
+        }
+        return out
 
     rp = risk10.get("risk_pct")
     zone = pce_zone(rp)
 
+    # Low near-term risk → CAC not needed to decide treatment now
     if zone == "hard_no":
         add_trace(trace, "CAC_support_suppressed_hard_no", rp, f"PCE <{PCE_HARD_NO_MAX}%")
-        return {
+        out = {
             "status": "suppressed",
-            "message": "Not indicated (low near-term risk).",
-            "reasons": [f"ASCVD PCE <{PCE_HARD_NO_MAX:.0f}%"],
+            "message": "Do not obtain a CAC at this time.",
+            "reasons": [f"ASCVD PCE <{PCE_HARD_NO_MAX:.0f}% (low near-term risk)"],
+            "classification_value": bool(classification_value),
+            "classification_message": classification_message,
         }
+        out["intents"] = {
+            "therapy_decision": {"status": out["status"], "message": out["message"], "reasons": out["reasons"]},
+            "classification": {"value": out["classification_value"], "message": out["classification_message"]},
+        }
+        return out
 
+    # High near-term risk → management proceeds; CAC not needed to decide treatment now
     if zone == "high":
         add_trace(trace, "CAC_support_suppressed_high_risk", rp, "High risk → low incremental value")
-        return {
+        out = {
             "status": "suppressed",
-            "message": "Not needed (management proceeds without CAC at this risk level).",
-            "reasons": [f"ASCVD PCE ≥{PCE_ACTION_MAX:.0f}%"],
+            "message": "Do not obtain a CAC at this time.",
+            "reasons": [f"ASCVD PCE ≥{PCE_ACTION_MAX:.0f}% (management proceeds without CAC)"],
+            "classification_value": bool(classification_value),
+            "classification_message": classification_message,
         }
+        out["intents"] = {
+            "therapy_decision": {"status": out["status"], "message": out["message"], "reasons": out["reasons"]},
+            "classification": {"value": out["classification_value"], "message": out["classification_message"]},
+        }
+        return out
 
+    # Missing key clarifiers → "not yet" for therapy decision
     labs_needed: List[str] = []
     if not p.has("apob"):
         labs_needed.append("ApoB")
@@ -1338,37 +1418,67 @@ def cac_decision_support(
 
     if labs_needed:
         add_trace(trace, "CAC_support_deferred_labs_first", labs_needed, "Defer CAC until key labs available")
-        return {
+        out = {
             "status": "deferred",
-            "message": f"Defer until {', '.join(labs_needed)} are available; CAC only if it will change intensity/timing.",
+            "message": f"Do not obtain a CAC yet; obtain {', '.join(labs_needed)} first.",
             "reasons": [f"Missing {', '.join(labs_needed)}"],
             "labs_first": labs_needed,
+            "classification_value": bool(classification_value),
+            "classification_message": classification_message,
         }
+        out["intents"] = {
+            "therapy_decision": {"status": out["status"], "message": out["message"], "reasons": out["reasons"], "labs_first": labs_needed},
+            "classification": {"value": out["classification_value"], "message": out["classification_message"]},
+        }
+        return out
 
+    # Buffer zone → default "no now" for therapy decision; allow only if it would change today’s action
     if zone == "buffer":
         add_trace(trace, "CAC_support_deferred_buffer", rp, "Buffer zone → defer default")
-        return {
+        out = {
             "status": "deferred",
-            "message": "Defer by default in the buffer zone; CAC only if it will change intensity/timing.",
-            "reasons": [f"ASCVD PCE {PCE_BUFFER_MIN:.0f}–{PCE_BUFFER_MAX:.0f}%"],
+            "message": "Do not obtain a CAC now. Obtain only if it would change treatment initiation or intensity.",
+            "reasons": [f"ASCVD PCE {PCE_BUFFER_MIN:.0f}–{PCE_BUFFER_MAX:.0f}% (buffer zone); plaque unmeasured"],
+            "classification_value": bool(classification_value),
+            "classification_message": classification_message,
         }
+        out["intents"] = {
+            "therapy_decision": {"status": out["status"], "message": out["message"], "reasons": out["reasons"]},
+            "classification": {"value": out["classification_value"], "message": out["classification_message"]},
+        }
+        return out
 
+    # Actionable preference-sensitive zone (Level 2/3): CAC can be used to resolve uncertainty, but is never required
     preference_sensitive = (level in (2, 3))
     if preference_sensitive:
         add_trace(trace, "CAC_support_optional_actionable", {"risk": rp, "level": level}, "Optional in preference-sensitive zone")
-        return {
+        out = {
             "status": "optional",
-            "message": "Optional; use only if it will change intensity/timing.",
+            "message": "Obtain a CAC only if the result would change treatment initiation or intensity.",
             "reasons": ["Preference-sensitive zone; key labs available; plaque unmeasured"],
+            "classification_value": bool(classification_value),
+            "classification_message": classification_message,
         }
+        out["intents"] = {
+            "therapy_decision": {"status": out["status"], "message": out["message"], "reasons": out["reasons"]},
+            "classification": {"value": out["classification_value"], "message": out["classification_message"]},
+        }
+        return out
 
+    # Fallback
     add_trace(trace, "CAC_support_suppressed_not_preference_sensitive", {"risk": rp, "level": level}, "Low incremental value in current posture")
-    return {
+    out = {
         "status": "suppressed",
-        "message": "Not indicated (low incremental value).",
+        "message": "Do not obtain a CAC at this time.",
         "reasons": ["Low incremental value in current posture"],
+        "classification_value": bool(classification_value),
+        "classification_message": classification_message,
     }
-
+    out["intents"] = {
+        "therapy_decision": {"status": out["status"], "message": out["message"], "reasons": out["reasons"]},
+        "classification": {"value": out["classification_value"], "message": out["classification_message"]},
+    }
+    return out
 
 # -------------------------------------------------------------------
 # Therapy status
@@ -1893,3 +2003,4 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
