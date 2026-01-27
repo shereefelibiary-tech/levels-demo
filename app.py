@@ -1258,16 +1258,14 @@ with tab_report:
 """,
                 unsafe_allow_html=True,
             )
-
     # --- Action (tight) ---
-        # --- Action (tight) ---
     with col_m:
         # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
         filtered_actions = []
         for x in (next_actions or [])[:6]:
             s = str(x).strip()
             # Filter out any CAC-rule lines coming from engine compose_actions
-            if "→ CAC" in s or s.lower().startswith("cac " ) or "cac " in s.lower():
+            if "→ CAC" in s or s.lower().startswith("cac ") or "cac " in s.lower():
                 continue
             filtered_actions.append(s)
             if len(filtered_actions) >= 3:
@@ -1284,7 +1282,6 @@ with tab_report:
         class_val = bool(cac_obj.get("classification_value"))
 
         # Build ONE clinician-facing CAC sentence
-        cac_one_liner = ""
         if cs == "suppressed":
             cac_one_liner = "CAC: Do not order now — treatment decision is clear without imaging."
         elif cs == "deferred":
@@ -1295,7 +1292,6 @@ with tab_report:
         elif cs == "optional":
             cac_one_liner = "CAC: Reasonable now — obtain only if the result will change treatment intensity."
         else:
-            # fallback if status missing
             cac_one_liner = "CAC: —"
 
         st.markdown(
@@ -1398,6 +1394,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
