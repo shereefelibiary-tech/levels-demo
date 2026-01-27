@@ -1149,7 +1149,7 @@ def build_emr_note() -> str:
     lines.append(plan_clean or "—")
 
     lines.append("")
-        lines.append("NEXT STEPS")
+    lines.append("NEXT STEPS")
     lines.append("- Coronary calcium: Do not obtain at this time.")
     lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
     lines.append("- Aspirin: Not indicated.")
@@ -1359,6 +1359,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
