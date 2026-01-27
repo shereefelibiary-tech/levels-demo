@@ -1261,10 +1261,13 @@ with tab_report:
             bullets = "• No immediate escalation indicated."
 
         # Idiot-proof CAC wording (fixed; no dynamic recommendations)
-        cac_one_liner = (
-            "Coronary calcium: Do not obtain at this time. "
-            "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
-        )
+        cac_one_liner = None
+        if str(ev.get("cac_status", "")).lower().startswith("unknown") or str(ev.get("cac_status", "")).lower().startswith("no structural"):
+            cac_one_liner = (
+                "Coronary calcium: Do not obtain at this time. "
+                "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
+    )
+
 
 
         st.markdown(
@@ -1273,7 +1276,8 @@ with tab_report:
   <div class="block-title compact">Action</div>
   <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
   <div class="kvline compact"><b>Aspirin:</b> {_html.escape(asp_line)}</div>
-  <div class="kvline compact inline-muted">• {_html.escape(cac_one_liner)}</div>
+ {f"<div class='kvline compact inline-muted'>• {_html.escape(cac_one_liner)}</div>" if cac_one_liner else ""}
+
 </div>
 """,
             unsafe_allow_html=True,
@@ -1367,6 +1371,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
