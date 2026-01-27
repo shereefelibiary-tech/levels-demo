@@ -925,13 +925,33 @@ with st.form("risk_continuum_form"):
     submitted = st.form_submit_button("Run", type="primary")
 
 # ============================================================
-# Cached engine call
+# Engine call (dev-friendly caching)
 # ============================================================
-@st.cache_data(ttl=300)
-def run_engine(data_json: str):
+
+with st.sidebar:
+    st.markdown("### Dev")
+    DEV_DISABLE_CACHE = st.checkbox("Disable cache (dev)", value=True)
+    if st.button("Clear cache now"):
+        st.cache_data.clear()
+        st.rerun()
+
+ENGINE_CACHE_SALT = (
+    str(getattr(le, "PCE_DEBUG_SENTINEL", "no_sentinel"))
+    + "|"
+    + str(VERSION.get("levels", ""))
+)
+
+def run_engine_uncached(data_json: str):
     data = json.loads(data_json)
     patient = Patient(data)
     return evaluate(patient)
+
+@st.cache_data(ttl=300)
+def run_engine_cached(data_json: str, cache_salt: str):
+    data = json.loads(data_json)
+    patient = Patient(data)
+    return evaluate(patient)
+
 
 # ============================================================
 # Run
@@ -1353,6 +1373,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
