@@ -1320,7 +1320,7 @@ def cac_decision_support(
     # Helper: determine whether CAC has classification value (disease state/intensity),
     # even if treatment proceeds without imaging.
     def _classification_value() -> bool:
-        # CAC only has classification value if plaque is currently unmeasured.
+        # Only relevant if plaque is currently unmeasured and Level 3 (where CAC can upshift to Level 4)
         if plaque.get("plaque_present") in (True, False) or plaque.get("plaque_evidence") == "Clinical ASCVD":
             return False
         if p.get("ascvd") is True:
@@ -1328,21 +1328,19 @@ def cac_decision_support(
         if int(level or 0) != 3:
             return False
 
-        # Actionable profiles where CAC can plausibly upshift intensity (Level 3 → 4)
+        # Keep diabetes True (per your preference)
+        if p.get("diabetes") is True:
+            return True
+
         ap = safe_float(p.get("apob")) if p.has("apob") else None
         ld = safe_float(p.get("ldl")) if p.has("ldl") else None
-        dm = (p.get("diabetes") is True)
 
-        # ApoB cut aligned with your current “initiate” posture (110)
-        if ap is not None and ap >= 110:
+        # Tightened classification window: ApoB 110–129
+        if ap is not None and (110 <= ap <= 129):
             return True
 
-        # Severe LDL when ApoB not available
-        if (ap is None) and (ld is not None) and (ld >= 190):
-            return True
-
-        # Diabetes (treated as high-risk condition where plaque confirmation may change intensity)
-        if dm:
+        # Tightened LDL window only when ApoB is missing: 160–189
+        if ap is None and ld is not None and (160 <= ld <= 189):
             return True
 
         return False
@@ -1352,7 +1350,7 @@ def cac_decision_support(
     if classification_value:
         classification_message = (
             "Treatment should proceed without delay. "
-            "CAC may be obtained to determine whether subclinical atherosclerosis is present and to guide intensity (Level 3 vs Level 4)."
+            "CAC may be obtained to determine whether subclinical atherosclerosis is present and to set intensity/targets (Level 3 vs Level 4)."
         )
 
     # -----------------------------
@@ -1479,6 +1477,7 @@ def cac_decision_support(
         "classification": {"value": out["classification_value"], "message": out["classification_message"]},
     }
     return out
+
 
 # -------------------------------------------------------------------
 # Therapy status
@@ -1625,7 +1624,7 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
     # 6) Gray-zone action: directive about what to do next (process), not hedged outcome
     # If near boundary and plaque unmeasured, CAC is only useful if it changes management.
     if zone in ("buffer", "actionable"):
-        actions.append("Plaque unmeasured → CAC only if the result would change treatment timing or intensity.")
+        actions.append("Plaque unmeasured → CAC only if it would change when to start or how aggressively to treat.")
         return actions
 
     # 7) Low near-term risk: explicit stop
@@ -2023,7 +2022,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     elif cac_status == "deferred":
         lines.append("- CAC: Defer (does not change management now)")
     elif cac_status == "optional":
-        lines.append("- CAC: Optional (only if it changes intensity/timing)")
+        lines.append("- CAC: Optional (only if it changes when to start or how aggressively to treat)")
     else:
         msg = (ins.get("structural_clarification") or "").strip()
         lines.append(f"- CAC: {msg}" if msg else "- CAC: —")
