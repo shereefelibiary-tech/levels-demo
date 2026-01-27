@@ -1260,24 +1260,43 @@ with tab_report:
             )
 
     # --- Action (tight) ---
+        # --- Action (tight) ---
     with col_m:
-        if next_actions:
-            bullets = "<br/>".join([f"• {_html.escape(str(x))}" for x in next_actions[:3]])
+        # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
+        filtered_actions = []
+        for x in (next_actions or [])[:6]:
+            s = str(x).strip()
+            # Filter out any CAC-rule lines coming from engine compose_actions
+            if "→ CAC" in s or s.lower().startswith("cac " ) or "cac " in s.lower():
+                continue
+            filtered_actions.append(s)
+            if len(filtered_actions) >= 3:
+                break
+
+        if filtered_actions:
+            bullets = "<br/>".join([f"• {_html.escape(s)}" for s in filtered_actions])
         else:
             bullets = "• —"
 
-        # CAC: show therapy decision + classification separately if available
+        # Single CAC line (binary/clean): decide what to show from dual-intent engine output
         cac_obj = (ins.get("cac_decision_support") or {})
-        therapy_cac_msg = scrub_terms(cac_obj.get("message") or "")
-        class_cac_msg = scrub_terms(cac_obj.get("classification_message") or "")
-        class_cac_val = bool(cac_obj.get("classification_value"))
+        cs = (cac_obj.get("status") or "").strip().lower()
+        class_val = bool(cac_obj.get("classification_value"))
 
-        cac_lines = []
-        if therapy_cac_msg and (cac_obj.get("status") or "") != "suppressed":
-            cac_lines.append(f"• CAC (treatment): {_html.escape(therapy_cac_msg)}")
-        if class_cac_val and class_cac_msg:
-            cac_lines.append(f"• CAC (classification): {_html.escape(class_cac_msg)}")
-        cac_html = "<br/>".join(cac_lines)
+        # Build ONE clinician-facing CAC sentence
+        cac_one_liner = ""
+        if cs == "suppressed":
+            cac_one_liner = "CAC: Do not order now — treatment decision is clear without imaging."
+        elif cs == "deferred":
+            cac_one_liner = "CAC: Defer — would not change treatment at this time."
+        elif class_val:
+            # Classification value gets priority over “optional” wording (more clinically meaningful)
+            cac_one_liner = "CAC: Optional — may be used to assess plaque burden and guide treatment intensity."
+        elif cs == "optional":
+            cac_one_liner = "CAC: Reasonable now — obtain only if the result will change treatment intensity."
+        else:
+            # fallback if status missing
+            cac_one_liner = "CAC: —"
 
         st.markdown(
             f"""
@@ -1285,11 +1304,12 @@ with tab_report:
   <div class="block-title compact">Action</div>
   <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
   <div class="kvline compact"><b>Aspirin:</b> {_html.escape(asp_line)}</div>
-  {f"<div class='kvline compact inline-muted'>{cac_html}</div>" if cac_html else ""}
+  <div class="kvline compact inline-muted">• {_html.escape(cac_one_liner)}</div>
 </div>
 """,
             unsafe_allow_html=True,
         )
+
 
     # --- Clinical context (tight) ---
     with col_c:
@@ -1378,6 +1398,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
