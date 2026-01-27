@@ -1118,7 +1118,8 @@ def build_emr_note() -> str:
 
     lines.append(f"Decision confidence: {decision_conf}")
     lines.append(
-        f"Decision stability: {decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
+        f"Decision stability: {decision_stability}"
+        + (f" — {decision_stability_note}" if decision_stability_note else "")
     )
 
     lines.append("")
@@ -1152,16 +1153,14 @@ def build_emr_note() -> str:
     lines.append("NEXT STEPS")
 
     # CAC: only include the boilerplate when CAC is unmeasured
-    if str(ev.get("cac_status", "")).lower().startswith("unknown") or str(ev.get("cac_status", "")).lower().startswith("no structural"):
+    cac_status = str(ev.get("cac_status", "")).strip().lower()
+    if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
         lines.append("- Coronary calcium: Do not obtain at this time.")
         lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
 
-lines.append(f"- Aspirin: {asp_line}.")
-
+    lines.append(f"- Aspirin: {asp_line}.")
 
     return "\n".join(lines)
-
-
 
 # ============================================================
 # Tabs
@@ -1243,7 +1242,7 @@ with tab_report:
                 unsafe_allow_html=True,
             )
 
-    # --- Action (tight) ---
+       # --- Action (tight) ---
     with col_m:
         # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
         filtered_actions = []
@@ -1260,15 +1259,14 @@ with tab_report:
         else:
             bullets = "• No immediate escalation indicated."
 
-        # Idiot-proof CAC wording (fixed; no dynamic recommendations)
+        # CAC one-liner only when plaque is unmeasured
         cac_one_liner = None
-        if str(ev.get("cac_status", "")).lower().startswith("unknown") or str(ev.get("cac_status", "")).lower().startswith("no structural"):
+        cac_status = str(ev.get("cac_status", "")).strip().lower()
+        if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
             cac_one_liner = (
                 "Coronary calcium: Do not obtain at this time. "
                 "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
-    )
-
-
+            )
 
         st.markdown(
             f"""
@@ -1276,12 +1274,12 @@ with tab_report:
   <div class="block-title compact">Action</div>
   <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
   <div class="kvline compact"><b>Aspirin:</b> {_html.escape(asp_line)}</div>
- {f"<div class='kvline compact inline-muted'>• {_html.escape(cac_one_liner)}</div>" if cac_one_liner else ""}
-
+  {f"<div class='kvline compact inline-muted'>• {_html.escape(cac_one_liner)}</div>" if cac_one_liner else ""}
 </div>
 """,
             unsafe_allow_html=True,
         )
+
 
     # --- Clinical context (tight) ---
     with col_c:
@@ -1371,6 +1369,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
