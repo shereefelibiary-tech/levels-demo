@@ -1217,56 +1217,38 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-       # --- Action (tight) ---
-    with col_m:
-        # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
-        filtered_actions = []
-        for x in (next_actions or [])[:6]:
-            s = str(x).strip()
-            # Filter out any CAC-rule lines coming from engine compose_actions
-            if "→ CAC" in s or s.lower().startswith("cac " ) or "cac " in s.lower():
-                continue
-            filtered_actions.append(s)
-            if len(filtered_actions) >= 3:
-                break
+    # ------------------------------------------------------------
+    # TIGHT ROW: Targets | Action | Clinical context
+    # ------------------------------------------------------------
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-        if filtered_actions:
-            bullets = "<br/>".join([f"• {_html.escape(s)}" for s in filtered_actions])
-        else:
-            bullets = "• —"
+    col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
 
-        # Single CAC line (binary/clean): decide what to show from dual-intent engine output
-        cac_obj = (ins.get("cac_decision_support") or {})
-        cs = (cac_obj.get("status") or "").strip().lower()
-        class_val = bool(cac_obj.get("classification_value"))
+    # --- Targets (tight) ---
+    with col_t:
+        if primary:
+            lipid_targets_line = f"{primary[0]} {primary[1]}"
+            if apob_line:
+                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
 
-        # Build ONE clinician-facing CAC sentence
-        cac_one_liner = ""
-        if cs == "suppressed":
-            cac_one_liner = "CAC: Do not order now — treatment decision is clear without imaging."
-        elif cs == "deferred":
-            cac_one_liner = "CAC: Defer — would not change treatment at this time."
-        elif class_val:
-            # Classification value gets priority over “optional” wording (more clinically meaningful)
-            cac_one_liner = "CAC: Optional — may be used to assess plaque burden and guide treatment intensity."
-        elif cs == "optional":
-            cac_one_liner = "CAC: Reasonable now — obtain only if the result will change treatment intensity."
-        else:
-            # fallback if status missing
-            cac_one_liner = "CAC: —"
+            anchor = guideline_anchor_note(level, clinical_ascvd)
 
-        st.markdown(
-            f"""
+            apob_note = ""
+            if apob_line and not apob_measured:
+                apob_note = "ApoB not measured — optional add-on if discordance suspected."
+
+            st.markdown(
+                f"""
 <div class="block compact">
-  <div class="block-title compact">Action</div>
-  <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
-  <div class="kvline compact"><b>Aspirin:</b> {_html.escape(asp_line)}</div>
-  <div class="kvline compact inline-muted">• {_html.escape(cac_one_liner)}</div>
+  <div class="block-title compact">Targets</div>
+  <div class="kvline compact"><b>Intensity:</b> {_html.escape(lipid_targets_line)}</div>
+  <div class="compact-caption">{_html.escape(anchor)}</div>
+  {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
 </div>
 """,
-            unsafe_allow_html=True,
-        )
-
+                unsafe_allow_html=True,
+            )
+        else:
             st.markdown(
                 """
 <div class="block compact">
@@ -1276,13 +1258,13 @@ with tab_report:
 """,
                 unsafe_allow_html=True,
             )
+
     # --- Action (tight) ---
     with col_m:
         # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
         filtered_actions = []
         for x in (next_actions or [])[:6]:
             s = str(x).strip()
-            # Filter out any CAC-rule lines coming from engine compose_actions
             if "→ CAC" in s or s.lower().startswith("cac ") or "cac " in s.lower():
                 continue
             filtered_actions.append(s)
@@ -1292,20 +1274,18 @@ with tab_report:
         if filtered_actions:
             bullets = "<br/>".join([f"• {_html.escape(s)}" for s in filtered_actions])
         else:
-            bullets = "• —"
+            bullets = "• No immediate escalation indicated."
 
-        # Single CAC line (binary/clean): decide what to show from dual-intent engine output
+        # Single CAC line (binary/clean)
         cac_obj = (ins.get("cac_decision_support") or {})
         cs = (cac_obj.get("status") or "").strip().lower()
         class_val = bool(cac_obj.get("classification_value"))
 
-        # Build ONE clinician-facing CAC sentence
         if cs == "suppressed":
             cac_one_liner = "CAC: Do not order now — treatment decision is clear without imaging."
         elif cs == "deferred":
             cac_one_liner = "CAC: Defer — would not change treatment at this time."
         elif class_val:
-            # Classification value gets priority over “optional” wording (more clinically meaningful)
             cac_one_liner = "CAC: Optional — may be used to assess plaque burden and guide treatment intensity."
         elif cs == "optional":
             cac_one_liner = "CAC: Reasonable now — obtain only if the result will change treatment intensity."
@@ -1323,7 +1303,6 @@ with tab_report:
 """,
             unsafe_allow_html=True,
         )
-
 
     # --- Clinical context (tight) ---
     with col_c:
@@ -1362,6 +1341,7 @@ with tab_report:
     st.markdown("### Clinical Report (copy/paste into EMR)")
     st.caption("Click **Copy**, then paste into the EMR note.")
     emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
+
 
 with tab_details:
     st.subheader("Anchors (near-term vs lifetime)")
@@ -1412,6 +1392,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
