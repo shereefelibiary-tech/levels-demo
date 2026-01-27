@@ -1197,9 +1197,8 @@ with tab_report:
         )
 
 
-    # ------------------------------------------------------------
+        # ------------------------------------------------------------
     # TIGHT ROW: Targets | Action | Clinical context
-    # (Replaces the old large Targets/Management/Clinical context blocks)
     # ------------------------------------------------------------
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1222,7 +1221,7 @@ with tab_report:
                 f"""
 <div class="block compact">
   <div class="block-title compact">Targets</div>
-  <div class="kvline compact"><b>Intensity:</b> {lipid_targets_line}</div>
+  <div class="kvline compact"><b>Intensity:</b> {_html.escape(lipid_targets_line)}</div>
   <div class="compact-caption">{_html.escape(anchor)}</div>
   {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
 </div>
@@ -1242,6 +1241,7 @@ with tab_report:
 
     # --- Action (tight) ---
     with col_m:
+        # Use next_actions (already scrubbed) as the “Do” list
         if next_actions:
             bullets = "<br/>".join([f"• {_html.escape(str(x))}" for x in next_actions[:3]])
         else:
@@ -1271,6 +1271,7 @@ with tab_report:
             f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
             if drivers else ""
         )
+
         phenotype_line = ""
         if ins.get("phenotype_label"):
             phenotype_line = (
@@ -1297,6 +1298,7 @@ with tab_report:
         )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
 
     st.markdown("### Clinical Report (copy/paste into EMR)")
     st.caption("Click **Copy**, then paste into the EMR note.")
@@ -1351,6 +1353,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
