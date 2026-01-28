@@ -1146,19 +1146,19 @@ def build_emr_note() -> str:
         lines.append("- —")
 
     lines.append("")
+    lines.append("RECOMMENDED ACTION")
+    lines.append("No escalation today. Complete missing data and reassess.")
+
+    lines.append("")
     lines.append("MANAGEMENT PLAN")
     lines.append(plan_clean or "—")
 
     lines.append("")
     lines.append("NEXT STEPS")
+    lines.append("- Coronary calcium: Do not obtain at this time.")
+    lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification (tie-breaker only).")
+    lines.append("- Aspirin: Not indicated.")
 
-    # CAC: only include the boilerplate when CAC is unmeasured
-    cac_status = str(ev.get("cac_status", "")).strip().lower()
-    if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
-        lines.append("- Coronary calcium: Do not obtain at this time.")
-        lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.")
-
-    lines.append(f"- Aspirin: {asp_line}.")
 
     return "\n".join(lines)
 
@@ -1203,28 +1203,28 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-    # ------------------------------------------------------------
-    # TIGHT ROW: Targets | Action | Clinical context
-    # ------------------------------------------------------------
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+   # ------------------------------------------------------------
+# TIGHT ROW: Targets | Action | Clinical context
+# ------------------------------------------------------------
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
+col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
 
-    # --- Targets (tight) ---
-    with col_t:
-        if primary:
-            lipid_targets_line = f"{primary[0]} {primary[1]}"
-            if apob_line:
-                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+# --- Targets (tight) ---
+with col_t:
+    if primary:
+        lipid_targets_line = f"{primary[0]} {primary[1]}"
+        if apob_line:
+            lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
 
-            anchor = guideline_anchor_note(level, clinical_ascvd)
+        anchor = guideline_anchor_note(level, clinical_ascvd)
 
-            apob_note = ""
-            if apob_line and not apob_measured:
-                apob_note = "ApoB not measured — optional add-on if discordance suspected."
+        apob_note = ""
+        if apob_line and not apob_measured:
+            apob_note = "ApoB not measured — optional add-on if discordance suspected."
 
-            st.markdown(
-                f"""
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Targets</div>
   <div class="kvline compact"><b>Intensity:</b> {_html.escape(lipid_targets_line)}</div>
@@ -1232,76 +1232,62 @@ with tab_report:
   {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                """
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
 <div class="block compact">
   <div class="block-title compact">Targets</div>
   <div class="kvline compact"><b>Intensity:</b> —</div>
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-
-    # --- Action (tight) ---
-    with col_m:
-        filtered_actions = []
-        for x in (next_actions or [])[:6]:
-            s = str(x).strip()
-            if "→ CAC" in s or s.lower().startswith("cac ") or "cac " in s.lower():
-                continue
-            filtered_actions.append(s)
-            if len(filtered_actions) >= 3:
-                break
-
-        if filtered_actions:
-            bullets = "<br/>".join([f"• {_html.escape(s)}" for s in filtered_actions])
-        else:
-            bullets = "• No immediate escalation indicated."
-
-        cac_one_liner = None
-        cac_status = str(ev.get("cac_status", "")).strip().lower()
-        if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
-            cac_one_liner = (
-                "Coronary calcium: Do not obtain at this time. "
-                "Obtain CAC only if a score of 0 would delay therapy or "
-                "a positive score would prompt initiation or intensification."
-            )
-
-        st.markdown(
-            f"""
-<div class="block compact">
-  <div class="block-title compact">Action</div>
-  <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
-  <div class="kvline compact"><b>Aspirin:</b> {_html.escape(asp_line)}</div>
-  {f"<div class='kvline compact inline-muted'>• {_html.escape(cac_one_liner)}</div>" if cac_one_liner else ""}
-</div>
-""",
             unsafe_allow_html=True,
         )
 
-    # --- Clinical context (tight) ---
-    with col_c:
-        driver_line = (
-            f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
-            if drivers else ""
+# --- Action (tight, idiot-proof) ---
+with col_m:
+    st.markdown(
+        f"""
+<div class="block compact">
+  <div class="block-title compact">Action</div>
+
+  <div class="kvline compact"><b>Recommended action:</b></div>
+  <div class="kvline compact">No escalation today. Complete missing data and reassess.</div>
+
+  <div class="kvline compact" style="margin-top:6px;"><b>Coronary calcium:</b></div>
+  <div class="kvline compact">Do not obtain at this time.</div>
+  <div class="kvline compact inline-muted">
+    Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification (tie-breaker only).
+  </div>
+
+  <div class="kvline compact" style="margin-top:6px;"><b>Aspirin:</b></div>
+  <div class="kvline compact">{_html.escape(asp_line)}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+# --- Clinical context (tight) ---
+with col_c:
+    driver_line = (
+        f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
+        if drivers else ""
+    )
+
+    phenotype_line = ""
+    if ins.get("phenotype_label"):
+        phenotype_line = (
+            f"<div class='kvline compact'><b>Phenotype:</b> "
+            f"{_html.escape(scrub_terms(ins.get('phenotype_label')))}</div>"
         )
 
-        phenotype_line = ""
-        if ins.get("phenotype_label"):
-            phenotype_line = (
-                f"<div class='kvline compact'><b>Phenotype:</b> "
-                f"{_html.escape(scrub_terms(ins.get('phenotype_label')))}</div>"
-            )
+    plaque_line = ""
+    if ev.get("cac_status") == "Unknown":
+        plaque_line = "<div class='kvline compact inline-muted'>Plaque unmeasured (CAC not performed)</div>"
 
-        plaque_line = ""
-        if ev.get("cac_status") == "Unknown":
-            plaque_line = "<div class='kvline compact inline-muted'>Plaque unmeasured (CAC not performed)</div>"
-
-        st.markdown(
-            f"""
+    st.markdown(
+        f"""
 <div class="block compact">
   <div class="block-title compact">Clinical context</div>
   {driver_line}
@@ -1311,65 +1297,14 @@ with tab_report:
   <div class="kvline compact"><b>Lifetime:</b> {_html.escape(life_anchor)}</div>
 </div>
 """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.markdown("### Clinical Report (copy/paste into EMR)")
-    st.caption("Click **Copy**, then paste into the EMR note.")
-    emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
-
-
-with tab_details:
-    st.subheader("Anchors (near-term vs lifetime)")
-    st.markdown(f"**Near-term anchor:** {near_anchor}")
-    st.markdown(f"**Lifetime anchor:** {life_anchor}")
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Decision stability (detail)")
-    st.markdown(
-        f"**{decision_stability}**"
-        + (f" — {decision_stability_note}" if decision_stability_note else "")
+        unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("Aspirin (detail)")
-    asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=5))
-    if asp_expl:
-        st.write(f"**{asp_status_raw}** — {asp_expl}" + (f" **Why:** {asp_why}" if asp_why else ""))
-    else:
-        st.write(f"**{asp_status_raw}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("PREVENT (population model) — details")
-    st.caption(PREVENT_EXPLAINER)
-    if p_total is not None or p_ascvd is not None:
-        st.markdown(f"**10-year total CVD:** {p_total}%")
-        st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
-    else:
-        st.caption(p_note or "PREVENT not calculated.")
-
-    with st.expander("How Levels work (legend)", expanded=False):
-        for item in legend:
-            st.write(f"• {scrub_terms(item)}")
-
-
-with tab_debug:
-    st.subheader("Engine quick output (raw text)")
-    st.code(note_text, language="text")
-
-    st.subheader("Trace (audit trail)")
-    st.json(out.get("trace", []))
-
-    if show_json:
-        st.subheader("JSON (debug)")
-        st.json(out)
-
-st.caption(
-    f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | "
-    f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
-    f"{VERSION.get('prevent','')}. No storage intended."
-)
+st.markdown("### Clinical Report (copy/paste into EMR)")
+st.caption("Click **Copy**, then paste into the EMR note.")
+emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
 
 
 
