@@ -1242,8 +1242,9 @@ with tab_report:
                 unsafe_allow_html=True,
             )
 
-    # --- Action (tight) ---
+        # --- Action (tight) ---
     with col_m:
+        # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
         filtered_actions = []
         for x in (next_actions or [])[:6]:
             s = str(x).strip()
@@ -1258,6 +1259,7 @@ with tab_report:
         else:
             bullets = "• No immediate escalation indicated."
 
+        # CAC one-liner only when plaque is unmeasured
         cac_one_liner = None
         cac_status = str(ev.get("cac_status", "")).strip().lower()
         if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
@@ -1277,6 +1279,7 @@ with tab_report:
 """,
             unsafe_allow_html=True,
         )
+
 
 
 
@@ -1369,6 +1372,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
