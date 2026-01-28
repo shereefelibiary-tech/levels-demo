@@ -1242,34 +1242,32 @@ with tab_report:
                 unsafe_allow_html=True,
             )
 
-       # --- Action (tight) ---
-with col_m:
-    # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
-    filtered_actions = []
-    for x in (next_actions or [])[:6]:
-        s = str(x).strip()
-        if "→ CAC" in s or s.lower().startswith("cac ") or "cac " in s.lower():
-            continue
-        filtered_actions.append(s)
-        if len(filtered_actions) >= 3:
-            break
+    # --- Action (tight) ---
+    with col_m:
+        filtered_actions = []
+        for x in (next_actions or [])[:6]:
+            s = str(x).strip()
+            if "→ CAC" in s or s.lower().startswith("cac ") or "cac " in s.lower():
+                continue
+            filtered_actions.append(s)
+            if len(filtered_actions) >= 3:
+                break
 
-    if filtered_actions:
-        bullets = "<br/>".join([f"• {_html.escape(s)}" for s in filtered_actions])
-    else:
-        bullets = "• No immediate escalation indicated."
+        if filtered_actions:
+            bullets = "<br/>".join([f"• {_html.escape(s)}" for s in filtered_actions])
+        else:
+            bullets = "• No immediate escalation indicated."
 
-    # CAC one-liner only when plaque is unmeasured
-    cac_one_liner = None
-    cac_status = str(ev.get("cac_status", "")).strip().lower()
-    if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
-        cac_one_liner = (
-            "Coronary calcium: Do not obtain at this time. "
-            "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
-        )
+        cac_one_liner = None
+        cac_status = str(ev.get("cac_status", "")).strip().lower()
+        if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
+            cac_one_liner = (
+                "Coronary calcium: Do not obtain at this time. "
+                "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
+            )
 
-    st.markdown(
-        f"""
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Action</div>
   <div class="kvline compact"><b>Do:</b><br/>{bullets}</div>
@@ -1277,8 +1275,9 @@ with col_m:
   {f"<div class='kvline compact inline-muted'>• {_html.escape(cac_one_liner)}</div>" if cac_one_liner else ""}
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
+
 
 
 
@@ -1370,6 +1369,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
