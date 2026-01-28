@@ -1176,19 +1176,22 @@ with tab_report:
 <div class="block">
   <div class="block-title">Snapshot</div>
   <div class="kvline"><b>Level:</b> {level}{f" ({sub})" if sub else ""} — {LEVEL_NAMES.get(level,'—')}</div>
-  <div class="kvline"><b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))} &nbsp; <b>Plaque burden:</b> {scrub_terms(ev.get('burden_band','—'))}</div>
-  <div class="kvline"><b>Decision confidence:</b> {decision_conf} &nbsp; <b>Decision stability:</b> {stab_line}</div>
-  <div class="kvline"><b>Key metrics:</b> RSS {rs.get('score','—')}/100 ({rs.get('band','—')}) • ASCVD PCE (10y) {pce_line} {pce_cat}</div>
+  <div class="kvline"><b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))}
+       &nbsp; <b>Plaque burden:</b> {scrub_terms(ev.get('burden_band','—'))}</div>
+  <div class="kvline"><b>Decision confidence:</b> {decision_conf}
+       &nbsp; <b>Decision stability:</b> {stab_line}</div>
+  <div class="kvline"><b>Key metrics:</b>
+       RSS {rs.get('score','—')}/100 ({rs.get('band','—')})
+       • ASCVD PCE (10y) {pce_line} {pce_cat}</div>
   <div class="kvline"><b>PREVENT (10y, population model):</b>
-      total CVD {f"{p_total}%" if p_total is not None else '—'} •
-      ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
+       total CVD {f"{p_total}%" if p_total is not None else '—'}
+       • ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    # Tight explainer line (prevents border/caption collision)
     st.markdown(
         f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>",
         unsafe_allow_html=True,
@@ -1242,9 +1245,8 @@ with tab_report:
                 unsafe_allow_html=True,
             )
 
-        # --- Action (tight) ---
+    # --- Action (tight) ---
     with col_m:
-        # Use next_actions as the “Do” list, but remove CAC-related lines (CAC gets a single summary line below)
         filtered_actions = []
         for x in (next_actions or [])[:6]:
             s = str(x).strip()
@@ -1259,13 +1261,13 @@ with tab_report:
         else:
             bullets = "• No immediate escalation indicated."
 
-        # CAC one-liner only when plaque is unmeasured
         cac_one_liner = None
         cac_status = str(ev.get("cac_status", "")).strip().lower()
         if cac_status.startswith("unknown") or cac_status.startswith("no structural"):
             cac_one_liner = (
                 "Coronary calcium: Do not obtain at this time. "
-                "Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification."
+                "Obtain CAC only if a score of 0 would delay therapy or "
+                "a positive score would prompt initiation or intensification."
             )
 
         st.markdown(
@@ -1279,10 +1281,6 @@ with tab_report:
 """,
             unsafe_allow_html=True,
         )
-
-
-
-
 
     # --- Clinical context (tight) ---
     with col_c:
@@ -1317,7 +1315,6 @@ with tab_report:
         )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
     st.markdown("### Clinical Report (copy/paste into EMR)")
     st.caption("Click **Copy**, then paste into the EMR note.")
     emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
@@ -1329,12 +1326,13 @@ with tab_details:
     st.markdown(f"**Lifetime anchor:** {life_anchor}")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
     st.subheader("Decision stability (detail)")
-    st.markdown(f"**{decision_stability}**" + (f" — {decision_stability_note}" if decision_stability_note else ""))
+    st.markdown(
+        f"**{decision_stability}**"
+        + (f" — {decision_stability_note}" if decision_stability_note else "")
+    )
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
     st.subheader("Aspirin (detail)")
     asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=5))
     if asp_expl:
@@ -1343,7 +1341,6 @@ with tab_details:
         st.write(f"**{asp_status_raw}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
     st.subheader("PREVENT (population model) — details")
     st.caption(PREVENT_EXPLAINER)
     if p_total is not None or p_ascvd is not None:
@@ -1355,6 +1352,7 @@ with tab_details:
     with st.expander("How Levels work (legend)", expanded=False):
         for item in legend:
             st.write(f"• {scrub_terms(item)}")
+
 
 with tab_debug:
     st.subheader("Engine quick output (raw text)")
@@ -1372,6 +1370,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
