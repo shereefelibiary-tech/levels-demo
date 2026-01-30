@@ -80,6 +80,7 @@ class Patient:
 def add_trace(trace: List[Dict[str, Any]], rule: str, value: Any = None, effect: str = "") -> None:
     trace.append({"rule": rule, "value": value, "effect": effect})
 
+
 # -------------------------------------------------------------------
 # Formatting helpers
 # -------------------------------------------------------------------
@@ -89,17 +90,20 @@ def safe_float(val, default=0.0) -> float:
     except (TypeError, ValueError):
         return float(default)
 
+
 def fmt_int(x):
     try:
         return int(round(float(x)))
     except Exception:
         return x
 
+
 def fmt_1dp(x):
     try:
         return round(float(x), 1)
     except Exception:
         return x
+
 
 def short_why(items: List[str], max_items: int = 2) -> str:
     """Used by app.py for compact rationale displays."""
@@ -108,19 +112,196 @@ def short_why(items: List[str], max_items: int = 2) -> str:
     cleaned = [str(x).strip() for x in items if str(x).strip()]
     return "; ".join(cleaned[:max_items])
 
+
+# ============================================================
+# Locked Definitions (single source of truth)
+# Put this block OUTSIDE of any function (top-level)
+# ============================================================
+
+LEVEL_DEFS = {
+    1: {
+        "name": "Minimal risk signal",
+        "definition": (
+            "No established atherosclerotic disease and no dominant biologic risk driver is present on the available data."
+        ),
+        "typical_pattern": [
+            "Plaque unmeasured or CAC=0",
+            "No major atherogenic burden signal (ApoB <100; if ApoB unavailable, LDL-C <130)",
+            "No diabetes-range signal, no current smoking, no inflammatory disease/flag driving risk",
+            "Near-term risk (if available) typically low",
+        ],
+        "medication_action": "Lifestyle-first. No escalation in lipid-lowering intensity is required. Periodic reassessment.",
+    },
+    2: {
+        "name": "Emerging risk signals",
+        "definition": (
+            "Pre-disease risk signals are present. Attention is directed toward data completion, trajectory, and risk clarification."
+        ),
+        "typical_pattern": [
+            "Mild biologic signals without established plaque",
+            "Preference-sensitive management after clarifiers and trajectory are assessed",
+        ],
+        "medication_action": "Complete missing data, run a lifestyle sprint, reassess; treatment may be reasonable depending on convergence (2B).",
+    },
+    3: {
+        "name": "Actionable biologic risk",
+        "definition": (
+            "Actionable biologic drivers are present even without known plaque. Management becomes more medication-forward."
+        ),
+        "typical_pattern": [
+            "Major actionable biologic driver present (ApoB/LDL, Lp(a), inflammatory disease/hsCRP context, diabetes-range, or smoking)",
+            "Plaque may be unmeasured; CAC is tie-breaker only if it would change timing/intensity",
+        ],
+        "medication_action": "Lipid-lowering therapy is reasonable (3A) or generally favored (3B).",
+    },
+    4: {
+        "name": "Subclinical atherosclerosis present",
+        "definition": "Atherosclerotic disease is present on imaging without established clinical ASCVD events.",
+        "typical_pattern": [
+            "CAC >0 and <100",
+            "Treat as early disease with target-driven lipid lowering",
+        ],
+        "medication_action": "Target-driven lipid lowering; high-intensity therapy is generally appropriate depending on tolerance and goals.",
+    },
+    5: {
+        "name": "Very high risk / ASCVD intensity",
+        "definition": (
+            "Clinical ASCVD is present or plaque burden is high enough that management is treated as very high risk."
+        ),
+        "typical_pattern": [
+            "Clinical ASCVD true OR CAC ≥100",
+            "Maximize tolerated therapy to achieve targets; consider add-ons if not at target",
+        ],
+        "medication_action": "Secondary-prevention intensity lipid lowering; maximize tolerated therapy; add-on therapy is reasonable if not at target.",
+    },
+}
+
+# Explicit lists (no “etc”) used for rendering + transparency
+MILD_SIGNALS_EXPLICIT = [
+    "ApoB 80–99 mg/dL (if measured)",
+    "LDL-C 100–129 mg/dL (used only if ApoB not measured)",
+    "Prediabetes-range A1c 5.7–6.1% (if present)",
+    "A1c 6.2–6.4% (near diabetes threshold; do not label diabetes)",
+    "hsCRP ≥2 mg/L without chronic inflammatory disease present",
+    "Premature family history (first-degree premature ASCVD) as an isolated enhancer",
+]
+
+MAJOR_ACTIONABLE_DRIVERS_EXPLICIT = [
+    "ApoB ≥100 mg/dL (preferred marker)",
+    "LDL-C ≥130 mg/dL (used only if ApoB not measured)",
+    "Lp(a) elevated (≥125 nmol/L or ≥50 mg/dL; unit-aware)",
+    "Chronic inflammatory disease present (RA, psoriasis, SLE, IBD, HIV, OSA, NAFLD/MASLD) or hsCRP ≥2 with supportive context",
+    "Diabetes-range signal (A1c ≥6.5% or diabetes flag true)",
+    "Current smoking",
+]
+
+SUBLEVEL_DEFS = {
+    "2A": {
+        "parent_level": 2,
+        "name": "Emerging (isolated / mild)",
+        "definition": (
+            "Exactly one mild signal is present without convergence from other mild signals or near-term risk signals."
+        ),
+        "qualifying_criteria": [
+            "One (and only one) mild signal from the explicit list below",
+            "Does not meet any 2B criteria",
+        ],
+        "mild_signals_list": MILD_SIGNALS_EXPLICIT,
+        "medication_action": "Do not treat routinely. Complete missing data, run a lifestyle sprint, reassess.",
+    },
+    "2B": {
+        "parent_level": 2,
+        "name": "Emerging (converging / rising)",
+        "definition": (
+            "Mild signals are converging such that near-term risk or trajectory is less likely to be noise."
+        ),
+        "qualifying_criteria": [
+            "Two or more Level-2A mild signals present (any combination), OR",
+            "ASCVD PCE ≥7.5% (if calculated) AND plaque is unmeasured, OR",
+            "One mild signal plus key clarifiers missing (ApoB not measured or Lp(a) not measured)",
+        ],
+        "medication_action": "Treatment is reasonable and preference-sensitive after data completion; reassess after clarifiers and/or a defined lifestyle interval.",
+    },
+    "3A": {
+        "parent_level": 3,
+        "name": "Actionable biology (limited enhancers)",
+        "definition": (
+            "At least one major actionable biologic driver is present without additional accelerators beyond the driver itself."
+        ),
+        "qualifying_criteria": [
+            "Meets one major actionable biologic driver from the explicit list below",
+            "Does not meet 3B enhancer criteria",
+        ],
+        "major_drivers_list": MAJOR_ACTIONABLE_DRIVERS_EXPLICIT,
+        "medication_action": "Lipid-lowering therapy is reasonable; timing is preference-sensitive, guided by targets and trajectory.",
+    },
+    "3B": {
+        "parent_level": 3,
+        "name": "Actionable biology + accelerators (enhancers)",
+        "definition": (
+            "Actionable biology is present and at least one additional accelerator increases the likelihood that earlier treatment is beneficial."
+        ),
+        "qualifying_criteria": [
+            "Meets one major actionable biologic driver from the explicit list below, AND",
+            "At least one enhancer/accelerator is present:",
+            "  - Lp(a) elevated (≥125 nmol/L or ≥50 mg/dL), OR",
+            "  - Premature family history (first-degree premature ASCVD), OR",
+            "  - Chronic inflammatory disease present (RA/psoriasis/SLE/IBD/HIV/OSA/NAFLD/MASLD) or supportive hsCRP context, OR",
+            "  - Diabetes-range (A1c ≥6.5 or diabetes true), OR",
+            "  - Current smoking",
+        ],
+        "major_drivers_list": MAJOR_ACTIONABLE_DRIVERS_EXPLICIT,
+        "medication_action": "Therapy is generally favored unless there is a strong reason to defer. CAC is tie-breaker only if plaque is unmeasured and it would change timing or intensity.",
+    },
+}
+
+CAC_RULE_TEXT = (
+    "CAC is never recommended. It is tie-breaker only when plaque is unmeasured: "
+    "obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification. "
+    "If CAC is already known (CAC=0 or CAC positive), CAC messaging is suppressed."
+)
+
+def get_level_definition_payload(level: int, sublevel: Optional[str] = None) -> Dict[str, Any]:
+    lvl = int(level or 0)
+    base = LEVEL_DEFS.get(lvl, {})
+    payload: Dict[str, Any] = {
+        "level_name": base.get("name"),
+        "level_definition": base.get("definition"),
+        "level_typical_pattern": base.get("typical_pattern", []),
+        "level_medication_action": base.get("medication_action"),
+        "cac_rule": CAC_RULE_TEXT,
+    }
+    if sublevel:
+        s = str(sublevel).strip()
+        sd = SUBLEVEL_DEFS.get(s)
+        if sd:
+            payload.update({
+                "sublevel": s,
+                "sublevel_name": sd.get("name"),
+                "sublevel_definition": sd.get("definition"),
+                "sublevel_criteria": sd.get("qualifying_criteria", []),
+                "sublevel_medication_action": sd.get("medication_action"),
+                "mild_signals_list": sd.get("mild_signals_list"),
+                "major_drivers_list": sd.get("major_drivers_list"),
+            })
+    return payload
+
+
 def levels_legend_compact() -> List[str]:
+    """
+    UI legend lines that stay consistent with the locked definitions above.
+    """
     return [
-        "Level 1: minimal signal → reinforce basics; periodic reassess",
-        "Level 2: emerging signals → complete data; lifestyle sprint; reassess",
-        "Level 3A: actionable biology → lifestyle-first; pharmacologic reasonable if targets unmet",
-        "Level 3B: actionable biology + enhancers → pharmacologic therapy often favored; CAC optional only if it would change timing/intensity",
-        "Level 4: plaque present → treat like early disease; target-driven therapy",
-        "Level 5: very high risk / ASCVD → secondary prevention intensity; maximize tolerated therapy",
-        "Buffered binaries: hard gates at edges; narrow buffer near cutoffs to absorb noise and avoid cascades",
+        "Level 1: minimal signal → lifestyle-first; periodic reassess",
+        "Level 2A: emerging (isolated) → data completion; lifestyle sprint; reassess",
+        "Level 2B: emerging (converging) → clarify risk; treatment reasonable (preference-sensitive)",
+        "Level 3A: actionable biology → therapy reasonable; timing preference-sensitive",
+        "Level 3B: actionable biology + enhancers → therapy generally favored; CAC tie-breaker only if unmeasured",
+        "Level 4: plaque present (CAC 1–99) → treat as early disease; target-driven therapy",
+        "Level 5: very high risk (CAC ≥100 or clinical ASCVD) → secondary-prevention intensity",
+        "CAC: tie-breaker only when unmeasured; never recommended",
     ]
-# =========================
-# CHUNK 1 / 6 — END
-# =========================
+
 
 # =========================
 # CHUNK 2 / 6 — START
@@ -1946,6 +2127,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
