@@ -2051,16 +2051,33 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or "").strip().lower():
         dominant_action = True
 
+    # ---- FIX: label builder (no posture dependency) ----
+    # Uses management label when sublevels exist (2A/2B/3A/3B).
+    # Falls back safely if label helper was renamed elsewhere.
+    try:
+        label_txt = management_label(level, sublevel=sublevel)  # preferred
+    except Exception:
+        try:
+            label_txt = posture_label(level, sublevel=sublevel)   # backward-compat
+        except Exception:
+            # absolute fallback (never crash)
+            base = LEVEL_LABELS.get(level, f"Level {level}")
+            if sublevel and level in (2, 3):
+                parts = base.split("—", 1)
+                label_txt = f"Level {sublevel} — {parts[1].strip()}" if len(parts) == 2 else base
+            else:
+                label_txt = base
+
     levels_obj = {
-        "postureLevel": level,
+        "postureLevel": level,          # kept for backward compatibility
         "managementLevel": level,
         "sublevel": sublevel,
-        "label": posture_label(level, sublevel=sublevel),
+        "label": label_txt,
         "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
         "triggers": sorted(set(level_triggers or [])),
 
         "managementPlan": plan,
-        "defaultPosture": plan,
+        "defaultPosture": plan,         # kept for backward compatibility
 
         "decisionConfidence": dec_conf,
         "decisionStability": stab_band,
@@ -2257,6 +2274,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
