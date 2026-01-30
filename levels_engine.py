@@ -1287,46 +1287,114 @@ def build_anchors(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any]) ->
     }
 
 # -------------------------------------------------------------------
-# Level labels (taxonomy preserved)
+# Level labels (management taxonomy; explicit sublevels 2A/2B/3A/3B)
 # -------------------------------------------------------------------
 LEVEL_LABELS = {
     0: "Level 0 — Not assessed",
     1: "Level 1 — Minimal risk signal",
-    2: "Level 2 — Emerging risk signals",  # UI uses 2A/2B
+    2: "Level 2 — Emerging risk signals",
     3: "Level 3 — Actionable biologic risk",
     4: "Level 4 — Subclinical atherosclerosis present",
     5: "Level 5 — Very high risk / ASCVD intensity",
 }
 
-def posture_label(level: int, sublevel: Optional[str] = None) -> str:
-    base = LEVEL_LABELS.get(level, f"Level {level}")
+SUBLEVEL_LABELS = {
+    "2A": "Level 2A — Emerging (isolated / mild)",
+    "2B": "Level 2B — Emerging (converging / rising)",
+    "3A": "Level 3A — Actionable biology (limited enhancers)",
+    "3B": "Level 3B — Actionable biology + enhancers",
+}
+
+# -------------------------------------------------------------------
+# Explicit numeric cutoffs (single source of truth for 2A/2B/3A/3B)
+# -------------------------------------------------------------------
+# Mild (Level 2 candidates)
+MILD_APOB_MIN = 80.0
+MILD_APOB_MAX = 99.0
+MILD_LDL_MIN = 100.0
+MILD_LDL_MAX = 129.0
+HSCRP_MILD_CUT = 2.0  # counts as mild ONLY if NO chronic inflammatory disease present
+
+# Major actionable (Level 3 candidates)
+MAJOR_APOB_CUT = 100.0
+MAJOR_LDL_CUT = 130.0  # used ONLY if ApoB is NOT measured
+
+# PCE convergence trigger for 2B
+PCE_INTERMEDIATE_CUT = 7.5  # if PCE available and >=7.5 and plaque unmeasured, counts as converging
+
+# CAC disease definitions
+CAC_LEVEL4_MIN = 1
+CAC_LEVEL4_MAX = 99
+CAC_LEVEL5_CUT = 100
+
+# Diabetes definition used for major driver:
+# - diabetes flag true OR a1c_status == "diabetes_range" (your a1c_status uses >=6.5)
+# Smoking: p.get("smoking") True
+
+def management_label(level: int, sublevel: Optional[str] = None) -> str:
+    """
+    Human-facing label.
+    Uses explicit sublevel label when present; otherwise uses base level label.
+    """
+    base = LEVEL_LABELS.get(int(level or 0), f"Level {level}")
     if sublevel:
-        if level in (2, 3):
+        s = str(sublevel).strip().upper()
+        if s in SUBLEVEL_LABELS:
+            return SUBLEVEL_LABELS[s]
+        # fallback: preserve older behavior if unexpected sublevel appears
+        if int(level or 0) in (2, 3):
             parts = base.split("—", 1)
             if len(parts) == 2:
-                return f"Level {sublevel} — {parts[1].strip()}"
+                return f"Level {s} — {parts[1].strip()}"
     return base
 
+
 # -------------------------------------------------------------------
-# Level assignment (2A/2B + 3A/3B only)
+# Level assignment (2A/2B + 3A/3B only) — explicit logic
+# Notes:
+# - ApoB is the preferred atherogenic marker.
+# - LDL-C thresholds are used ONLY when ApoB is missing.
+# - Lp(a) uses unit-aware lpa_elevated().
+# - Inflammation major driver: chronic inflammatory disease OR inflammation flags (hsCRP≥2 or condition flags).
 # -------------------------------------------------------------------
 def _mild_signals(p: Patient) -> List[str]:
+    """
+    Mild signals (Level 2 candidates).
+    These are NOT sufficient to force Level 3 by themselves.
+
+    Explicit list:
+      - ApoB 80–99 mg/dL (if measured)
+      - LDL-C 100–129 mg/dL (ONLY if ApoB not measured)
+      - Prediabetes A1c (a1c_status == "prediabetes") [5.7–6.1 by your a1c_status thresholds]
+      - A1c 6.2–6.4 (near diabetes threshold) [a1c_status == "near_diabetes_boundary"]
+      - hsCRP ≥2 mg/L ONLY if no chronic inflammatory disease is present
+      - Premature family history (fhx == True)
+    """
     sig: List[str] = []
 
-    if p.has("apob") and 80 <= safe_float(p.get("apob")) <= 99:
-        sig.append("ApoB 80–99")
-    if p.has("ldl") and 100 <= safe_float(p.get("ldl")) <= 129:
-        sig.append("LDL 100–129")
+    # Atherogenic mild: ApoB preferred; LDL only if ApoB missing
+    if p.has("apob"):
+        ap = safe_float(p.get("apob"))
+        if MILD_APOB_MIN <= ap <= MILD_APOB_MAX:
+            sig.append(f"ApoB {int(MILD_APOB_MIN)}–{int(MILD_APOB_MAX)}")
+    else:
+        if p.has("ldl"):
+            ld = safe_float(p.get("ldl"))
+            if MILD_LDL_MIN <= ld <= MILD_LDL_MAX:
+                sig.append(f"LDL {int(MILD_LDL_MIN)}–{int(MILD_LDL_MAX)} (ApoB not measured)")
 
+    # Glycemia mild / near-boundary (uses your a1c_status)
     a1s = a1c_status(p)
     if a1s == "prediabetes":
-        sig.append("Prediabetes")
+        sig.append("Prediabetes (A1c 5.7–6.1)")
     elif a1s == "near_diabetes_boundary":
         sig.append("A1c 6.2–6.4 (near diabetes threshold)")
 
-    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2 and not has_chronic_inflammatory_disease(p):
-        sig.append("hsCRP≥2")
+    # hsCRP mild only if not chronic inflammatory disease
+    if p.has("hscrp") and safe_float(p.get("hscrp")) >= HSCRP_MILD_CUT and not has_chronic_inflammatory_disease(p):
+        sig.append("hsCRP≥2 (isolated)")
 
+    # Family history as mild enhancer only
     if p.get("fhx") is True:
         sig.append("Premature family history")
 
@@ -1334,75 +1402,137 @@ def _mild_signals(p: Patient) -> List[str]:
 
 
 def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
+    """
+    Major actionable biologic drivers (Level 3 candidates).
+
+    Explicit list:
+      - ApoB ≥100 mg/dL (preferred)
+      - LDL-C ≥130 mg/dL ONLY if ApoB not measured
+      - Lp(a) elevated (unit-aware): ≥125 nmol/L OR ≥50 mg/dL
+      - Inflammation present: chronic inflammatory disease OR hsCRP≥2 OR inflammatory condition flags
+      - Diabetes-range: a1c_status == "diabetes_range" OR diabetes flag True
+      - Current smoking: smoking flag True
+    """
     sig: List[str] = []
 
-    if p.has("apob") and safe_float(p.get("apob")) >= 100:
-        sig.append("ApoB≥100")
-    elif p.has("ldl") and safe_float(p.get("ldl")) >= 130:
-        sig.append("LDL≥130")
+    # Major atherogenic: ApoB preferred; LDL only if ApoB missing
+    if p.has("apob") and safe_float(p.get("apob")) >= MAJOR_APOB_CUT:
+        sig.append(f"ApoB≥{int(MAJOR_APOB_CUT)}")
+    elif (not p.has("apob")) and p.has("ldl") and safe_float(p.get("ldl")) >= MAJOR_LDL_CUT:
+        sig.append(f"LDL≥{int(MAJOR_LDL_CUT)} (ApoB not measured)")
 
+    # Genetics
     if lpa_elevated(p, trace):
         sig.append("Lp(a) elevated")
 
+    # Inflammation: disease OR flags (includes hsCRP≥2 in inflammation_flags)
     if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
         sig.append("Inflammation present")
 
+    # Diabetes-range
     a1s = a1c_status(p)
     if a1s == "diabetes_range" or p.get("diabetes") is True:
-        sig.append("Diabetes")
+        sig.append("Diabetes-range (A1c ≥6.5 or diabetes flag)")
 
+    # Smoking
     if p.get("smoking") is True:
         sig.append("Smoking")
 
     return sig
 
 
-def assign_level(p: Patient, plaque: Dict[str, Any], risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[int, Optional[str], List[str]]:
+def assign_level(
+    p: Patient,
+    plaque: Dict[str, Any],
+    risk10: Dict[str, Any],
+    trace: List[Dict[str, Any]],
+) -> Tuple[int, Optional[str], List[str]]:
+    """
+    Returns: (management_level, sublevel, triggers)
+
+    Hard rules:
+      - Level 5: clinical ASCVD OR CAC ≥100
+      - Level 4: CAC 1–99
+      - Level 3: major actionable biology present (3A vs 3B depends on enhancers)
+      - Level 2: mild signals present (2A vs 2B depends on convergence)
+      - Level 1: default when some data present but no mild/major signals
+    """
     triggers: List[str] = []
 
+    # Level 5: clinical ASCVD
     if p.get("ascvd") is True:
         triggers.append("Clinical ASCVD")
         add_trace(trace, "Level_override_ASCVD", True, "Level=5")
         return 5, None, triggers
 
+    # Level 4/5: CAC known
     if plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
         cac = int(plaque["cac_value"])
         triggers.append(f"CAC {cac}")
-        if cac >= 100:
+        if cac >= CAC_LEVEL5_CUT:
             add_trace(trace, "Level_CAC_100_plus", cac, "Level=5")
             return 5, None, triggers
-        add_trace(trace, "Level_CAC_1_99", cac, "Level=4")
-        return 4, None, triggers
+        # CAC 1–99 => Level 4
+        if CAC_LEVEL4_MIN <= cac <= CAC_LEVEL4_MAX:
+            add_trace(trace, "Level_CAC_1_99", cac, "Level=4")
+            return 4, None, triggers
 
+    # Level 3: major actionable biology
     hs = _high_signals(p, trace)
     if hs:
         triggers.extend(hs)
+
+        # 3B enhancers (explicit, ≥1 triggers 3B)
         enh = 0
-        if lpa_elevated_no_trace(p): enh += 1
-        if p.get("fhx") is True: enh += 1
-        if has_chronic_inflammatory_disease(p) or inflammation_flags(p): enh += 1
+        # Lp(a)
+        if lpa_elevated_no_trace(p):
+            enh += 1
+        # Premature family history
+        if p.get("fhx") is True:
+            enh += 1
+        # Inflammation disease/flags
+        if has_chronic_inflammatory_disease(p) or inflammation_flags(p):
+            enh += 1
+        # Diabetes-range
+        if a1c_status(p) == "diabetes_range" or p.get("diabetes") is True:
+            enh += 1
+        # Smoking
+        if p.get("smoking") is True:
+            enh += 1
 
         sub = "3B" if enh >= 1 else "3A"
         add_trace(trace, "Level3_sublevel", sub, "Assigned 3A/3B")
-        add_trace(trace, "Level_high_biology", hs[:4], "Level=3")
+        add_trace(trace, "Level_high_biology", hs[:6], "Level=3")
         return 3, sub, triggers
 
+    # Level 2: mild signals
     ms = _mild_signals(p)
     if ms:
         triggers.extend(ms)
+
         rp = risk10.get("risk_pct")
-        intermediate = (rp is not None and float(rp) >= 7.5)
-        converging = (len(ms) >= 2) or intermediate
+        pce_intermediate = (rp is not None and float(rp) >= PCE_INTERMEDIATE_CUT)
+
+        # “Key clarifiers missing” used as convergence rule:
+        # If only 1 mild signal but ApoB missing or Lp(a) missing => treat as converging (2B),
+        # because stability is low until clarifiers are obtained.
+        clarifiers_missing = (not p.has("apob")) or (not p.has("lpa"))
+
+        converging = (len(ms) >= 2) or pce_intermediate or (len(ms) == 1 and clarifiers_missing)
         sub = "2B" if converging else "2A"
+
         add_trace(trace, "Level2_sublevel", sub, "Assigned 2A/2B")
-        add_trace(trace, "Level_emerging_risk", ms[:4], "Level=2")
+        add_trace(trace, "Level_emerging_risk", ms[:6], "Level=2")
         return 2, sub, triggers
 
+    # Level 1: default when some data present
     if p.data:
         add_trace(trace, "Level_low_biology", None, "Level=1")
         return 1, None, triggers
 
     return 0, None, triggers
+
+
 
 # -------------------------------------------------------------------
 # Decision Confidence (label only: High/Moderate/Low)
@@ -2127,6 +2257,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
