@@ -1,7 +1,7 @@
 # app.py (Risk Continuum — v2.8 clinician-clean layout)
 # FULL, UPDATED VERSION (no "Overview" tab)
 #
-# Tabs: Report | Details | Debug
+# Tabs: Report | Decision Framework | Details | Debug
 # SmartPhrase ingest: Parse & Apply (inline)
 # Imaging moved OUTSIDE form so CAC enable/disable is live
 # Polished EMR copy box with COPY button (no downloads)
@@ -64,8 +64,9 @@ html, body, [class*="css"] {
   color: #1f2937;
 }
 
-/* --- tighten global vertical gaps --- */
-.block-container { padding-top: 1.0rem; padding-bottom: 1.0rem; }
+/* Fix Chrome top clipping */
+.block-container { padding-top: 2.25rem; padding-bottom: 1.0rem; }
+
 div[data-testid="stVerticalBlock"] { gap: 0.6rem; }
 div[data-testid="stMarkdownContainer"] p { margin: 0.25rem 0; }
 div[data-testid="stMarkdownContainer"] ul { margin: 0.25rem 0 0.25rem 1.1rem; }
@@ -78,7 +79,6 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 .header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
 .header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
 
-/* --- tighter hr spacing --- */
 .hr { margin:10px 0 10px 0; border-top:1px solid rgba(31,41,55,0.12); }
 
 .muted { color:#6b7280; font-size:0.9rem; }
@@ -96,7 +96,6 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 .ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
-/* --- base block (kept) --- */
 .block {
   border:1px solid rgba(31,41,55,0.12);
   border-radius:14px;
@@ -114,21 +113,12 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 .kvline { margin: 6px 0; line-height:1.35; }
 .kvline b { font-weight:900; }
 
-/* --- compact variant for Report tab cards (Targets/Action/Context) --- */
-.block.compact {
-  padding: 10px 12px;
-  border-radius: 12px;
-}
-.block-title.compact {
-  margin-bottom: 6px;
-  font-size: 0.80rem;
-  letter-spacing: 0.07em;
-}
+.block.compact { padding: 10px 12px; border-radius: 12px; }
+.block-title.compact { margin-bottom: 6px; font-size: 0.80rem; letter-spacing: 0.07em; }
 .kvline.compact { margin: 4px 0; line-height: 1.22; }
 .compact-caption { margin-top: 4px; color: rgba(31,41,55,0.62); font-size: 0.82rem; }
 .inline-muted { color: rgba(31,41,55,0.65); font-size: 0.86rem; }
 
-/* --- slightly tighter expander header padding --- */
 div[data-testid="stExpander"] div[role="button"] { padding-top: 0.35rem; padding-bottom: 0.35rem; }
 </style>
 """,
@@ -203,6 +193,34 @@ def extract_aspirin_line(asp: dict) -> str:
     if l.startswith("secondary prevention"):
         return "Secondary prevention (if no contraindication)"
     return raw or "—"
+
+def recommended_action_line(lvl: dict, plan_clean: str, decision_stability: str, decision_stability_note: str) -> str:
+    """
+    Single source of truth for RECOMMENDED ACTION.
+    Uses engine dominantAction if present; otherwise falls back to stability-note parsing.
+    """
+    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
+    sub = lvl.get("sublevel")
+
+    dominant = bool(lvl.get("dominantAction"))
+    if not dominant:
+        ds = (decision_stability or "").strip().lower()
+        note = (decision_stability_note or "").strip().lower()
+        dominant = (level >= 3 and ds == "high" and "dominant risk drivers" in note)
+
+    if level >= 5:
+        return plan_clean or "Continue secondary-prevention intensity lipid lowering."
+    if level == 4:
+        return plan_clean or "Initiate or intensify lipid-lowering therapy (plaque present)."
+    if dominant:
+        return "Initiate treatment now. Dominant risk drivers outweigh uncertainty."
+    if level == 3 and sub == "3B":
+        return plan_clean or "Initiate lipid-lowering therapy unless there is a strong reason to defer."
+    if level == 3:
+        return "Treatment is reasonable; timing is preference-sensitive."
+    if level <= 2:
+        return "No escalation today. Complete missing data and reassess."
+    return plan_clean or "—"
 
 # ============================================================
 # Visual: Risk Continuum bar
@@ -478,6 +496,7 @@ def emr_copy_box(title: str, text: str, height_px: int = 520):
         height=height_px,
     )
 
+
 # ============================================================
 # Parse & Apply wiring
 # ============================================================
@@ -659,6 +678,7 @@ DEFAULTS = {
     "demo_defaults_applied": False,
 }
 
+# --- initialize session state (MUST be before any widgets) ---
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
@@ -668,6 +688,7 @@ for k in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
 for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
     st.session_state.setdefault(bk, False)
 
+
 def reset_fields():
     for k, v in DEFAULTS.items():
         st.session_state[k] = v
@@ -675,6 +696,7 @@ def reset_fields():
         st.session_state[f"infl_{kk}_val"] = False
     for bk in ["bleed_gi", "bleed_nsaid", "bleed_anticoag", "bleed_disorder", "bleed_ich", "bleed_ckd"]:
         st.session_state[bk] = False
+
 
 def apply_demo_defaults():
     st.session_state.update({
@@ -707,9 +729,15 @@ def apply_demo_defaults():
     for kk in ["ra", "psoriasis", "sle", "ibd", "hiv", "osa", "nafld"]:
         st.session_state[f"infl_{kk}_val"] = False
 
+
+# --- sidebar: demo controls ---
 with st.sidebar:
     st.markdown("### Demo")
-    st.session_state["demo_defaults_on"] = st.checkbox("Use demo defaults (auto-fill)", value=st.session_state["demo_defaults_on"])
+    st.session_state["demo_defaults_on"] = st.checkbox(
+        "Use demo defaults (auto-fill)",
+        value=st.session_state["demo_defaults_on"],
+    )
+
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Apply demo"):
@@ -720,6 +748,35 @@ with st.sidebar:
             reset_fields()
             st.rerun()
 
+
+# --- sidebar: dev controls ---
+with st.sidebar:
+    st.markdown("### Dev")
+    DEV_DISABLE_CACHE = st.checkbox("Disable cache (dev)", value=True)
+    if st.button("Clear cache now"):
+        st.cache_data.clear()
+        st.rerun()
+
+# ============================================================
+# Engine call (dev-friendly caching)
+# ============================================================
+ENGINE_CACHE_SALT = (
+    str(getattr(le, "PCE_DEBUG_SENTINEL", "no_sentinel"))
+    + "|"
+    + str(VERSION.get("levels", ""))
+)
+
+def run_engine_uncached(data_json: str):
+    data_in = json.loads(data_json)
+    p = Patient(data_in)
+    return evaluate(p)
+
+@st.cache_data(ttl=300)
+def run_engine_cached(data_json: str, cache_salt: str):
+    data_in = json.loads(data_json)
+    p = Patient(data_in)
+    return evaluate(p)
+
 if st.session_state["demo_defaults_on"] and not st.session_state["demo_defaults_applied"]:
     apply_demo_defaults()
 
@@ -727,6 +784,7 @@ if st.session_state["demo_defaults_on"] and not st.session_state["demo_defaults_
 # SmartPhrase ingest
 # ============================================================
 st.subheader("SmartPhrase ingest (optional)")
+
 
 with st.expander("Paste Epic output to auto-fill fields", expanded=False):
     st.markdown(
@@ -790,7 +848,7 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.warning(st.session_state["last_missing_msg"])
 
 # ============================================================
-# Imaging (OUTSIDE the form so enable/disable is live)
+# Imaging (outside form)
 # ============================================================
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 st.subheader("Imaging")
@@ -925,35 +983,6 @@ with st.form("risk_continuum_form"):
     submitted = st.form_submit_button("Run", type="primary")
 
 # ============================================================
-# Engine call (dev-friendly caching)
-# ============================================================
-
-with st.sidebar:
-    st.markdown("### Dev")
-    DEV_DISABLE_CACHE = st.checkbox("Disable cache (dev)", value=True)
-    if st.button("Clear cache now"):
-        st.cache_data.clear()
-        st.rerun()
-
-ENGINE_CACHE_SALT = (
-    str(getattr(le, "PCE_DEBUG_SENTINEL", "no_sentinel"))
-    + "|"
-    + str(VERSION.get("levels", ""))
-)
-
-def run_engine_uncached(data_json: str):
-    data = json.loads(data_json)
-    patient = Patient(data)
-    return evaluate(patient)
-
-@st.cache_data(ttl=300)
-def run_engine_cached(data_json: str, cache_salt: str):
-    data = json.loads(data_json)
-    patient = Patient(data)
-    return evaluate(patient)
-
-
-# ============================================================
 # Run
 # ============================================================
 if not submitted:
@@ -977,7 +1006,6 @@ if req_errors:
 if st.session_state.get("egfr_val", 0) <= 0:
     st.warning("PREVENT (population model) needs eGFR > 0 to calculate. Enter eGFR to enable PREVENT output.")
 
-# Pull session values
 age = st.session_state["age_val"]
 sex = st.session_state["sex_val"]
 race = st.session_state["race_val"]
@@ -1051,7 +1079,6 @@ data_json = json.dumps(data, sort_keys=True)
 out = run_engine_uncached(data_json) if DEV_DISABLE_CACHE else run_engine_cached(data_json, ENGINE_CACHE_SALT)
 
 patient = Patient(data)
-
 note_text = scrub_terms(render_quick_text(patient, out))
 
 lvl = out.get("levels", {}) or {}
@@ -1068,6 +1095,7 @@ sub = lvl.get("sublevel")
 legend = lvl.get("legend") or FALLBACK_LEVEL_LEGEND
 
 decision_conf = scrub_terms(lvl.get("decisionConfidence") or "—")
+decision_stability, decision_stability_note = extract_decision_stability(lvl, ins)
 
 next_actions = scrub_list(out.get("nextActions", []) or [])
 drivers = scrub_list(out.get("drivers", []) or [])
@@ -1089,24 +1117,20 @@ anchors = out.get("anchors", {}) or {}
 near_anchor = scrub_terms((anchors.get("nearTerm") or {}).get("summary", "—"))
 life_anchor = scrub_terms((anchors.get("lifetime") or {}).get("summary", "—"))
 
-# ============================================================
-# Normalized display fields (single source of truth)
-# ============================================================
 plan_raw = extract_management_plan(lvl)
 plan_clean = re.sub(r"^\s*(Recommended:|Consider:|Pending more data:)\s*", "", plan_raw).strip()
 plan_clean = scrub_terms(plan_clean)
 
-decision_stability, decision_stability_note = extract_decision_stability(lvl, ins)
-
+asp_line = extract_aspirin_line(asp)
 asp_expl = scrub_terms(asp.get("explanation", ""))  # Details tab only
-asp_line = extract_aspirin_line(asp)               # Report + EMR note
 asp_status_raw = scrub_terms(asp.get("status", "Not assessed"))
 
 st.caption(f"Last calculation: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# ============================================================
-# EMR Note text (for copy box) — CLEANED (no glossary)
-# ============================================================
+def _plaque_unmeasured(ev_dict: dict) -> bool:
+    cs = str(ev_dict.get("cac_status", "")).strip().lower()
+    return ("unknown" in cs) or ("no structural" in cs) or ("unmeasured" in cs)
+
 def build_emr_note() -> str:
     lines = []
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
@@ -1136,7 +1160,7 @@ def build_emr_note() -> str:
         lines.append(f"  PREVENT note: {p_note}")
 
     lines.append("")
-    lines.append("TARGETS")
+    lines.append("TARGETS (IF TREATED)")
     if primary:
         tgt = f"- {primary[0]} {primary[1]}"
         if apob_line:
@@ -1145,9 +1169,10 @@ def build_emr_note() -> str:
     else:
         lines.append("- —")
 
+    rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
     lines.append("")
     lines.append("RECOMMENDED ACTION")
-    lines.append("No escalation today. Complete missing data and reassess.")
+    lines.append(rec_action)
 
     lines.append("")
     lines.append("MANAGEMENT PLAN")
@@ -1155,17 +1180,24 @@ def build_emr_note() -> str:
 
     lines.append("")
     lines.append("NEXT STEPS")
-    lines.append("- Coronary calcium: Do not obtain at this time.")
-    lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification (tie-breaker only).")
-    lines.append("- Aspirin: Not indicated.")
+    if _plaque_unmeasured(ev):
+        lines.append("- Coronary calcium: Do not obtain at this time.")
+        lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification (tie-breaker only).")
+    else:
+        cac_val = ev.get("cac_value")
+        if cac_val is not None:
+            lines.append(f"- Coronary calcium: Already assessed (CAC {int(cac_val)}).")
+        else:
+            lines.append("- Coronary calcium: Already assessed (no further CAC needed for decision-making).")
 
-
+    lines.append(f"- Aspirin: {asp_line}")
+    lines.append("")
     return "\n".join(lines)
 
 # ============================================================
 # Tabs
 # ============================================================
-tab_report, tab_details, tab_debug = st.tabs(["Report", "Details", "Debug"])
+tab_report, tab_framework, tab_details, tab_debug = st.tabs(["Report", "Decision Framework", "Details", "Debug"])
 
 with tab_report:
     st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
@@ -1192,124 +1224,214 @@ with tab_report:
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>",
-        unsafe_allow_html=True,
-    )
-
+    st.markdown(f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>", unsafe_allow_html=True)
     if (p_total is None and p_ascvd is None) and p_note:
-        st.markdown(
-            f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>", unsafe_allow_html=True)
 
-   # ------------------------------------------------------------
-# TIGHT ROW: Targets | Action | Clinical context
-# ------------------------------------------------------------
-st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
+    col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
 
-# --- Targets (tight) ---
-with col_t:
-    if primary:
-        lipid_targets_line = f"{primary[0]} {primary[1]}"
-        if apob_line:
-            lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+    # --- Targets (tight) ---
+    with col_t:
+        if primary:
+            lipid_targets_line = f"{primary[0]} {primary[1]}"
+            if apob_line:
+                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
 
-        anchor = guideline_anchor_note(level, clinical_ascvd)
+            anchor = guideline_anchor_note(level, clinical_ascvd)
 
-        apob_note = ""
-        if apob_line and not apob_measured:
-            apob_note = "ApoB not measured — optional add-on if discordance suspected."
+            apob_note = ""
+            if apob_line and not apob_measured:
+                apob_note = "ApoB not measured — optional add-on if discordance suspected."
 
-        st.markdown(
-            f"""
+            st.markdown(
+                f"""
 <div class="block compact">
-  <div class="block-title compact">Targets</div>
-  <div class="kvline compact"><b>Intensity:</b> {_html.escape(lipid_targets_line)}</div>
+  <div class="block-title compact">Targets (if treated)</div>
+  <div class="kvline compact"><b>Targets:</b> {_html.escape(lipid_targets_line)}</div>
   <div class="compact-caption">{_html.escape(anchor)}</div>
   {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
 </div>
 """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            """
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
 <div class="block compact">
-  <div class="block-title compact">Targets</div>
-  <div class="kvline compact"><b>Intensity:</b> —</div>
+  <div class="block-title compact">Targets (if treated)</div>
+  <div class="kvline compact"><b>Targets:</b> —</div>
 </div>
 """,
-            unsafe_allow_html=True,
-        )
+                unsafe_allow_html=True,
+            )
 
-# --- Action (tight, idiot-proof) ---
-with col_m:
-    st.markdown(
-        f"""
+    # --- Action (tight, idiot-proof) ---
+    with col_m:
+        rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
+        plaque_unmeasured = _plaque_unmeasured(ev)
+
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Action</div>
 
   <div class="kvline compact"><b>Recommended action:</b></div>
-  <div class="kvline compact">No escalation today. Complete missing data and reassess.</div>
+  <div class="kvline compact">{_html.escape(rec_action)}</div>
 
   <div class="kvline compact" style="margin-top:6px;"><b>Coronary calcium:</b></div>
-  <div class="kvline compact">Do not obtain at this time.</div>
-  <div class="kvline compact inline-muted">
-    Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification (tie-breaker only).
-  </div>
+  {("<div class='kvline compact'>Do not obtain at this time.</div>"
+    "<div class='kvline compact inline-muted'>Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification (tie-breaker only).</div>")
+    if plaque_unmeasured else
+    f"<div class='kvline compact'>Already assessed{f' (CAC {int(ev.get('cac_value'))})' if ev.get('cac_value') is not None else ''}.</div>"
+  }
 
   <div class="kvline compact" style="margin-top:6px;"><b>Aspirin:</b></div>
   <div class="kvline compact">{_html.escape(asp_line)}</div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
-
-# --- Clinical context (tight) ---
-with col_c:
-    driver_line = (
-        f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
-        if drivers else ""
-    )
-
-    phenotype_line = ""
-    if ins.get("phenotype_label"):
-        phenotype_line = (
-            f"<div class='kvline compact'><b>Phenotype:</b> "
-            f"{_html.escape(scrub_terms(ins.get('phenotype_label')))}</div>"
+            unsafe_allow_html=True,
         )
 
-    plaque_line = ""
-    if ev.get("cac_status") == "Unknown":
-        plaque_line = "<div class='kvline compact inline-muted'>Plaque unmeasured (CAC not performed)</div>"
+    # --- Clinical context (tight) ---
+    with col_c:
+        driver_line = (
+            f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
+            if drivers else ""
+        )
 
-    st.markdown(
-        f"""
+        plaque_line = ""
+        if plaque_unmeasured:
+            plaque_line = "<div class='kvline compact inline-muted'>Plaque unmeasured (CAC not performed)</div>"
+
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Clinical context</div>
   {driver_line}
-  {phenotype_line}
   {plaque_line}
   <div class="kvline compact"><b>Near-term:</b> {_html.escape(near_anchor)}</div>
   <div class="kvline compact"><b>Lifetime:</b> {_html.escape(life_anchor)}</div>
 </div>
 """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.markdown("### Clinical Report (copy/paste into EMR)")
+    st.caption("Click **Copy**, then paste into the EMR note.")
+    emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
+
+with tab_framework:
+    st.subheader("How Treatment Decisions Are Made")
+    st.markdown(
+        """
+<div class="block">
+  <div class="block-title">Validation Table</div>
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.92rem;">
+      <thead>
+        <tr style="background:#f9fafb;">
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:90px;">Level</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">Risk state</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">What’s present</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">Medication action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>1</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Minimal risk signal</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">No disease, no dominant biology</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>❌ Do not treat</b></td>
+        </tr>
+        <tr>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>2A</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Emerging (isolated)</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Single mild signal</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>❌ Do not treat routinely</b></td>
+        </tr>
+        <tr>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>2B</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Emerging (converging)</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥2 mild signals or near boundary</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>🟡 Treatment reasonable (preference-sensitive)</b></td>
+        </tr>
+        <tr>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>3</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Actionable biologic risk</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Strong atherogenic biology</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>🟠 Generally initiate</b></td>
+        </tr>
+        <tr>
+          <td style="padding:10px;"><b>4–5</b></td>
+          <td style="padding:10px; font-weight:800;">Disease / ASCVD</td>
+          <td style="padding:10px;">Subclinical plaque or clinical ASCVD</td>
+          <td style="padding:10px;"><b>🔴 Treat (indicated)</b></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:14px; padding:12px 14px; border:1px solid rgba(31,41,55,0.12); border-radius:12px; background:rgba(59,130,246,0.06);">
+    <div style="font-weight:900; margin-bottom:6px;">Coronary Calcium (CAC) — tie-breaker only</div>
+    <div>Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification.</div>
+  </div>
+</div>
+""",
         unsafe_allow_html=True,
     )
 
-st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+with tab_details:
+    st.subheader("Anchors (near-term vs lifetime)")
+    st.markdown(f"**Near-term anchor:** {near_anchor}")
+    st.markdown(f"**Lifetime anchor:** {life_anchor}")
 
-st.markdown("### Clinical Report (copy/paste into EMR)")
-st.caption("Click **Copy**, then paste into the EMR note.")
-emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    st.subheader("Decision stability (detail)")
+    st.markdown(f"**{decision_stability}**" + (f" — {decision_stability_note}" if decision_stability_note else ""))
 
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    st.subheader("Aspirin (detail)")
+    asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=5))
+    if asp_expl:
+        st.write(f"**{asp_status_raw}** — {asp_expl}" + (f" **Why:** {asp_why}" if asp_why else ""))
+    else:
+        st.write(f"**{asp_status_raw}**" + (f" — **Why:** {asp_why}" if asp_why else ""))
 
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
+    st.subheader("PREVENT (population model) — details")
+    st.caption(PREVENT_EXPLAINER)
+    if p_total is not None or p_ascvd is not None:
+        st.markdown(f"**10-year total CVD:** {p_total}%")
+        st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
+    else:
+        st.caption(p_note or "PREVENT not calculated.")
+
+    with st.expander("How Levels work (legend)", expanded=False):
+        for item in legend:
+            st.write(f"• {scrub_terms(item)}")
+
+with tab_debug:
+    st.subheader("Engine quick output (raw text)")
+    st.code(note_text, language="text")
+
+    st.subheader("Trace (audit trail)")
+    st.json(out.get("trace", []))
+
+    if show_json:
+        st.subheader("JSON (debug)")
+        st.json(out)
+
+st.caption(
+    f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | "
+    f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
+    f"{VERSION.get('prevent','')}. No storage intended."
+)
 
 
 
