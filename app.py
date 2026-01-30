@@ -1325,6 +1325,13 @@ with tab_report:
 
 with tab_framework:
     st.subheader("How Treatment Decisions Are Made")
+
+    # (Optional but recommended) show locked definitions coming from the engine
+    defs = out.get("levelDefinitions") or {}
+    if defs:
+        st.markdown("### Level definitions (locked)")
+        st.json(defs)
+
     st.markdown(
         """
 <div class="block">
@@ -1383,6 +1390,7 @@ with tab_framework:
         unsafe_allow_html=True,
     )
 
+
 with tab_details:
     st.subheader("Anchors (near-term vs lifetime)")
     st.markdown(f"**Near-term anchor:** {near_anchor}")
@@ -1415,6 +1423,7 @@ with tab_details:
     with st.expander("How Levels work (legend)", expanded=False):
         for item in legend:
             st.write(f"• {scrub_terms(item)}")
+
 
 with tab_debug:
     st.subheader("Engine quick output (raw text)")
