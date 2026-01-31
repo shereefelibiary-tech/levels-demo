@@ -1454,10 +1454,11 @@ with tab_framework:
     # Engine definition helper (fail-soft)
     # -----------------------------
     def safe_level_def(level_num: int, sublevel: str | None):
-        if get_level_definition_payload is None:
+        fn = get_level_definition_payload  # you already set this via getattr(le, ...)
+        if fn is None:
             return {}
         try:
-            return get_level_definition_payload(level_num, sublevel=sublevel)
+            return fn(level_num, sublevel=sublevel)
         except Exception:
             return {}
 
@@ -1518,7 +1519,7 @@ with tab_framework:
 <div class="block">
   <div class="block-title">Levels overview</div>
   <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.92rem;">
+    <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
       <thead>
         <tr style="background:#f9fafb;">
           <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:80px;">Level</th>
@@ -1588,14 +1589,13 @@ with tab_framework:
 
     # -----------------------------
     # Table 2: Explicit transition criteria
-    # (THIS IS THE ONLY COPY — remove duplicates)
     # -----------------------------
     st.markdown(
         """
 <div class="block">
   <div class="block-title">Level transition criteria (explicit cut-offs)</div>
   <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.92rem;">
+    <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
       <thead>
         <tr style="background:#f9fafb;">
           <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:180px;">Domain</th>
@@ -1606,7 +1606,6 @@ with tab_framework:
       </thead>
       <tbody>
 
-        <!-- Atherogenic burden -->
         <tr>
           <td rowspan="4" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Atherogenic burden</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">ApoB</td>
@@ -1629,7 +1628,6 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
         </tr>
 
-        <!-- Glycemia -->
         <tr>
           <td rowspan="3" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Glycemia</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">A1c</td>
@@ -1647,7 +1645,6 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
         </tr>
 
-        <!-- Inflammation -->
         <tr>
           <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Inflammation</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">hsCRP</td>
@@ -1660,7 +1657,6 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
         </tr>
 
-        <!-- Genetics -->
         <tr>
           <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Genetics</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Lp(a)</td>
@@ -1668,7 +1664,6 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
         </tr>
 
-        <!-- Smoking -->
         <tr>
           <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Smoking</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Current smoking</td>
@@ -1676,7 +1671,6 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
         </tr>
 
-        <!-- Family history -->
         <tr>
           <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Family history</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Premature ASCVD</td>
@@ -1689,7 +1683,6 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Enhancer → favors 3B (if Level 3 is otherwise met)</td>
         </tr>
 
-        <!-- Plaque -->
         <tr>
           <td rowspan="2" style="vertical-align:top; padding:10px;"><b>Plaque (CAC)</b></td>
           <td style="padding:10px;">CAC 1–99</td>
@@ -1709,6 +1702,24 @@ with tab_framework:
 """,
         unsafe_allow_html=True,
     )
+
+    # -----------------------------
+    # CAC callout (language update)
+    # -----------------------------
+    st.markdown(
+        """
+<div class="block" style="margin-top:14px;">
+  <div class="block-title">Coronary calcium</div>
+  <div class="kvline">
+    CAC is used <b>primarily</b> as a tie-breaker when plaque is unmeasured.
+    It is obtained when a result of CAC = 0 would support deferring therapy,
+    or when a positive score would support initiation or intensification.
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
 
     # -----------------------------
     # CAC callout (language update)
@@ -1787,6 +1798,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
