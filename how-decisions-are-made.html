@@ -4,12 +4,11 @@
     How Levels Are Specified
   </h1>
 
-  <p style="max-width:820px;color:#374151;font-size:1.05rem;margin-bottom:28px;">
-    Risk Continuum does not force binary treatment decisions.
-    Medication is initiated when biology is dominant, disease is present,
-    or uncertainty has been resolved in favor of action.
-    The table below shows how risk signals translate into treatment posture
-    across Levels 1–5.
+  <p style="max-width:860px;color:#374151;font-size:1.05rem;margin-bottom:28px;">
+    Risk Continuum assigns a <b>management level</b> based on biologic burden, plaque status,
+    and the degree of uncertainty that remains after available data are considered.
+    Treatment intensity increases only when risk signals are dominant, converging,
+    or disease is present.
   </p>
 
   <!-- Validation Table -->
@@ -18,42 +17,111 @@
       <thead>
         <tr style="background:#f9fafb;">
           <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">Level</th>
-          <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">Risk State</th>
-          <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">What’s Present</th>
-          <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">Medication Action</th>
+          <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">Risk state</th>
+          <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">What qualifies</th>
+          <th style="text-align:left;padding:10px;border-bottom:2px solid #e5e7eb;">Medication posture</th>
         </tr>
       </thead>
       <tbody>
+
+        <!-- LEVEL 1 -->
         <tr>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><b>Level 1</b></td>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Minimal risk signal</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">No disease, no dominant biology</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">❌ Do not treat</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            No established atherosclerotic disease and no dominant biologic risk driver.<br>
+            ApoB &lt;100 mg/dL (or LDL-C &lt;130 if ApoB unavailable); no diabetes-range signal,
+            no smoking, no inflammatory disease driving risk.
+          </td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            ❌ Lifestyle-first. No escalation.
+          </td>
         </tr>
+
+        <!-- LEVEL 2A -->
         <tr>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><b>Level 2A</b></td>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Emerging (isolated)</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Single mild risk signal</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">❌ Do not treat routinely</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            Exactly one mild signal without convergence, such as:
+            ApoB 80–99 mg/dL, LDL-C 100–129 mg/dL (if ApoB not measured),
+            prediabetes-range A1c, isolated hsCRP ≥2 mg/L,
+            or premature family history alone.
+          </td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            ❌ Do not treat routinely. Complete data, lifestyle sprint, reassess.
+          </td>
         </tr>
+
+        <!-- LEVEL 2B -->
         <tr>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><b>Level 2B</b></td>
           <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Emerging (converging)</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">≥2 mild signals or near boundary</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">🟡 Treatment reasonable</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            Mild signals are converging, defined by:
+            ≥2 Level-2A signals, <i>or</i> ASCVD PCE ≥7.5% with plaque unmeasured,
+            <i>or</i> one mild signal plus missing key clarifiers (ApoB or Lp(a)).
+          </td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            🟡 Treatment reasonable. Preference-sensitive after clarification.
+          </td>
         </tr>
+
+        <!-- LEVEL 3A -->
         <tr>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><b>Level 3</b></td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Actionable biologic risk</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Strong atherogenic biology</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">🟠 Generally initiate</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><b>Level 3A</b></td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Actionable biology</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            At least one major actionable biologic driver present
+            (ApoB ≥100 mg/dL, LDL-C ≥130 mg/dL if ApoB unavailable,
+            diabetes-range A1c, current smoking, inflammatory disease),
+            <b>without additional accelerators</b>.
+          </td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            🟠 Therapy reasonable. Timing preference-sensitive.
+          </td>
         </tr>
+
+        <!-- LEVEL 3B -->
         <tr>
-          <td style="padding:10px;"><b>Level 4–5</b></td>
-          <td style="padding:10px;">Disease / ASCVD</td>
-          <td style="padding:10px;">Subclinical plaque or clinical ASCVD</td>
-          <td style="padding:10px;">🔴 Treat (indicated / mandatory)</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><b>Level 3B</b></td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Actionable biology + enhancers</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            Actionable biology <b>plus ≥1 accelerator</b>:
+            elevated Lp(a), premature family history,
+            chronic inflammatory disease, diabetes-range signal,
+            or current smoking.
+          </td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            🟠 Therapy generally favored unless strong reason to defer.
+          </td>
         </tr>
+
+        <!-- LEVEL 4 -->
+        <tr>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><b>Level 4</b></td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">Subclinical atherosclerosis</td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            Atherosclerotic plaque present on imaging
+            (CAC 1–99) without clinical ASCVD.
+          </td>
+          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
+            🔴 Treat as early disease. Target-driven lipid lowering.
+          </td>
+        </tr>
+
+        <!-- LEVEL 5 -->
+        <tr>
+          <td style="padding:10px;"><b>Level 5</b></td>
+          <td style="padding:10px;">Very high risk / ASCVD</td>
+          <td style="padding:10px;">
+            Clinical ASCVD <b>or</b> high plaque burden (CAC ≥100).
+          </td>
+          <td style="padding:10px;">
+            🔴 Secondary-prevention intensity. Maximize tolerated therapy.
+          </td>
+        </tr>
+
       </tbody>
     </table>
   </div>
@@ -62,15 +130,15 @@
   <div style="margin-top:32px;padding:18px;border-left:4px solid #2563eb;background:#f8fafc;">
     <h3 style="margin-top:0;">Coronary Calcium (CAC)</h3>
     <p style="margin:0;">
-      CAC is used <b>only as a tie-breaker</b> in preference-sensitive risk zones.
-      It is obtained only if the result would delay therapy (CAC = 0)
-      or prompt initiation or intensification (CAC &gt; 0).
+      CAC is <b>never recommended routinely</b>. It is a tie-breaker only when plaque is unmeasured:
+      obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation
+      or intensification. If CAC is already known (CAC = 0 or CAC positive), CAC messaging is suppressed.
     </p>
   </div>
 
   <p style="margin-top:24px;color:#6b7280;font-size:0.9rem;">
-    This framework aligns with the intent of ACC/AHA and ESC prevention guidance
-    while making clinical uncertainty explicit and operational.
+    This specification mirrors the Risk Continuum engine logic exactly and is intended
+    for validation, transparency, and shared clinical understanding.
   </p>
 
 </section>
