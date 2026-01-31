@@ -1498,7 +1498,6 @@ with tab_framework:
 
     # -----------------------------
     # Single HTML blob
-    # (Updated: remove "systematic screening" claims; align to optional, defensible CAC usage)
     # -----------------------------
     framework_html = """
 <div class="block">
@@ -1602,7 +1601,6 @@ with tab_framework:
         </tr>
       </thead>
       <tbody>
-
         <tr>
           <td rowspan="4" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Atherogenic burden</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">ApoB</td>
@@ -1610,7 +1608,7 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
         </tr>
         <tr>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥100 mg/dL</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
         </tr>
@@ -1620,7 +1618,7 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
         </tr>
         <tr>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥130 mg/dL</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
         </tr>
@@ -1632,12 +1630,12 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
         </tr>
         <tr>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">6.2–6.4%</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal (near diabetes boundary) → favors Level 2B if present</td>
         </tr>
         <tr>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥6.5% or diabetes = true</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
         </tr>
@@ -1649,7 +1647,7 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
         </tr>
         <tr>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Chronic inflammatory disease present</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
         </tr>
@@ -1675,46 +1673,56 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A / 2B depending on convergence</td>
         </tr>
         <tr>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Present + major driver</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Enhancer → favors 3B (if Level 3 is otherwise met)</td>
         </tr>
 
         <tr>
-          <td rowspan="2" style="vertical-align:top; padding:10px;"><b>Plaque (CAC)</b></td>
-          <td style="padding:10px;">CAC 1–99</td>
-          <td style="padding:10px;">Measured</td>
-          <td style="padding:10px;">Level 4</td>
+          <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Plaque (CAC)</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC 1–99</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Measured</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 4</td>
         </tr>
         <tr>
-          <td style="padding:10px;"></td>
-          <td style="padding:10px;">CAC ≥100 or clinical ASCVD</td>
-          <td style="padding:10px;">Level 5</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC ≥100 or clinical ASCVD</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 5</td>
         </tr>
-
       </tbody>
     </table>
   </div>
 </div>
 
+<div class="hr"></div>
+
 <div class="block" style="margin-top:14px;">
-  <div class="block-title">Coronary calcium: defensible use</div>
+  <div class="block-title">Coronary calcium: evidence-informed use in risk assessment</div>
 
   <div class="kvline">
-    CAC is used as a <b>risk-clarification</b> tool when plaque is unmeasured and the prevention decision is
-    <b>preference-sensitive</b> or <b>uncertain</b>.
+    CAC is a valuable <b>risk-refinement tool</b> that can help guide treatment decisions when plaque is unmeasured and clinical uncertainty exists.
   </div>
-
-  <div class="kvline" style="margin-top:10px;"><b>Defensible indications (typical):</b></div>
+  
+  <div class="kvline" style="margin-top:10px;">
+    <b>Evidence-based rationale:</b> CAC is the strongest independent predictor of cardiovascular events. <span style="background-color:#fff3cd; padding:2px 4px; border-radius:3px;"><b>CAC=0 is associated with very low near-term event rates</b></span>, while any CAC >0 indicates subclinical atherosclerosis.
+  </div>
+  
+  <div class="kvline" style="margin-top:10px;"><b>Guideline-aligned indications:</b></div>
   <ul style="margin:6px 0 0 18px;">
-    <li>Borderline/intermediate near-term risk where the result could change timing or intensity</li>
-    <li>Discordant signals (enhancers/biomarkers vs estimated risk)</li>
-    <li>Patient hesitancy where objective plaque assessment may improve adherence</li>
+    <li>Intermediate-risk patients where treatment decisions are uncertain</li>
+    <li>Borderline risk where CAC could reclassify risk and inform therapy decisions</li>
+    <li>When patient preference or hesitancy suggests shared decision-making would benefit from objective plaque assessment</li>
   </ul>
-
+  
   <div class="kvline" style="margin-top:10px; padding:10px; background-color:#f8f9fa; border-left:4px solid #007bff;">
-    <b>Engine rule:</b> CAC is <b>never recommended</b>. It is shown as <b>Optional</b> only when the result
-    is expected to change management or improve confidence in deferring vs intensifying therapy.
+    <b>Clinical approach:</b> CAC is <b>considered</b> when the result could meaningfully change management. 
+    The radiation dose (0.5-1.5 mSv) is comparable to mammography. Current guidelines support selective use 
+    in intermediate-risk adults where risk assessment remains uncertain after traditional evaluation.
+  </div>
+  
+  <div class="kvline" style="margin-top:10px;">
+    <b>Role in decision-making:</b> CAC can be a <b>helpful adjunct</b> to traditional risk assessment, 
+    providing objective evidence of atherosclerosis that may support treatment decisions.
   </div>
 </div>
 """
@@ -1791,6 +1799,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
