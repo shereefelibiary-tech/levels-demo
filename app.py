@@ -1404,12 +1404,19 @@ with tab_report:
 # ------------------------------------------------------------
 with tab_framework:
     st.subheader("How Levels Are Specified")
-    st.caption("Levels are defined by biology, plaque status, and trajectory — not by forced treatment rules.")
+    st.caption(
+        "Levels are assigned based on biologic signal strength, plaque status, and convergence of risk — "
+        "not by forced treatment rules."
+    )
 
+    # ============================================================
+    # LEVEL OVERVIEW (HIGH-LEVEL)
+    # ============================================================
     st.markdown(
         """
 <div class="block">
   <div class="block-title">Levels overview</div>
+
   <div style="overflow-x:auto;">
     <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.92rem;">
       <thead>
@@ -1424,19 +1431,19 @@ with tab_framework:
         <tr>
           <td><b>1</b></td>
           <td>Minimal risk signal</td>
-          <td>No disease, no dominant biologic driver</td>
+          <td>No disease and no dominant biologic driver</td>
           <td>❌ Do not treat</td>
         </tr>
         <tr>
           <td><b>2A</b></td>
           <td>Emerging (isolated)</td>
-          <td>Single mild signal</td>
+          <td>Exactly one mild signal</td>
           <td>❌ Do not treat routinely</td>
         </tr>
         <tr>
           <td><b>2B</b></td>
           <td>Emerging (converging)</td>
-          <td>≥2 mild signals or near boundary</td>
+          <td>≥2 mild signals or near-boundary risk</td>
           <td>🟡 Treatment reasonable (preference-sensitive)</td>
         </tr>
         <tr>
@@ -1465,6 +1472,140 @@ with tab_framework:
         </tr>
       </tbody>
     </table>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+    # ============================================================
+    # DETAILED TRANSITION CRITERIA (ENGINE CUT-OFFS)
+    # ============================================================
+    st.markdown(
+        """
+<div class="block">
+  <div class="block-title">Level transition criteria (explicit cut-offs)</div>
+
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.9rem;">
+      <thead>
+        <tr style="background:#f9fafb;">
+          <th style="text-align:left;padding:10px;border-bottom:2px solid rgba(31,41,55,0.12);width:160px;">Domain</th>
+          <th style="text-align:left;padding:10px;border-bottom:2px solid rgba(31,41,55,0.12);width:180px;">Marker</th>
+          <th style="text-align:left;padding:10px;border-bottom:2px solid rgba(31,41,55,0.12);">Cut-off / condition</th>
+          <th style="text-align:left;padding:10px;border-bottom:2px solid rgba(31,41,55,0.12);width:200px;">Level effect</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td rowspan="4"><b>Atherogenic burden</b></td>
+          <td>ApoB</td>
+          <td>80–99 mg/dL</td>
+          <td>Mild signal → eligible for Level 2A</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>≥100 mg/dL</td>
+          <td>Major driver → Level 3</td>
+        </tr>
+        <tr>
+          <td>LDL-C<br/><span class="inline-muted">(if ApoB not measured)</span></td>
+          <td>100–129 mg/dL</td>
+          <td>Mild signal → eligible for Level 2A</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>≥130 mg/dL</td>
+          <td>Major driver → Level 3</td>
+        </tr>
+
+        <tr>
+          <td rowspan="3"><b>Glycemia</b></td>
+          <td>A1c</td>
+          <td>5.7–6.1%</td>
+          <td>Mild signal → Level 2A / 2B</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>6.2–6.4%</td>
+          <td>Mild signal (near diabetes boundary) → Level 2B</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>≥6.5% or diabetes = true</td>
+          <td>Major driver → Level 3</td>
+        </tr>
+
+        <tr>
+          <td rowspan="2"><b>Inflammation</b></td>
+          <td>hsCRP</td>
+          <td>≥2 mg/L alone</td>
+          <td>Mild signal → Level 2A</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>≥2 mg/L + inflammatory disease</td>
+          <td>Major driver → Level 3</td>
+        </tr>
+
+        <tr>
+          <td><b>Genetics</b></td>
+          <td>Lp(a)</td>
+          <td>≥125 nmol/L or ≥50 mg/dL</td>
+          <td>Major driver → Level 3</td>
+        </tr>
+
+        <tr>
+          <td><b>Smoking</b></td>
+          <td>Current smoking</td>
+          <td>Yes</td>
+          <td>Major driver → Level 3</td>
+        </tr>
+
+        <tr>
+          <td rowspan="2"><b>Family history</b></td>
+          <td>Premature ASCVD</td>
+          <td>Present alone</td>
+          <td>Mild signal → Level 2A</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>Present + major driver</td>
+          <td>Enhancer → Level 3B</td>
+        </tr>
+
+        <tr>
+          <td rowspan="2"><b>Plaque (CAC)</b></td>
+          <td>CAC 1–99</td>
+          <td>Measured</td>
+          <td>Level 4</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>CAC ≥100 or clinical ASCVD</td>
+          <td>Measured</td>
+          <td>Level 5</td>
+        </tr>
+
+      </tbody>
+    </table>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+<div class="block" style="margin-top:14px;">
+  <div class="block-title">Coronary calcium (CAC)</div>
+  <div class="kvline">
+    CAC is never required. It is used only as a tie-breaker when plaque is unmeasured:
+    obtain CAC only if a score of 0 would delay therapy or a positive score would prompt
+    initiation or intensification.
   </div>
 </div>
 """,
@@ -1530,6 +1671,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
