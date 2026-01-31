@@ -1354,6 +1354,25 @@ with tab_report:
         )
         plaque_unmeasured = _plaque_unmeasured(ev)
 
+        # Precompute CAC suffix safely (avoids nested f-string quoting bugs)
+        cac_suffix = ""
+        if not plaque_unmeasured:
+            try:
+                if ev.get("cac_value") is not None:
+                    cac_suffix = f" (CAC {int(ev.get('cac_value'))})"
+            except Exception:
+                cac_suffix = ""
+
+        cac_block = (
+            "<div class='kvline compact'>Do not obtain at this time.</div>"
+            "<div class='kvline compact inline-muted'>"
+            "Obtain CAC only if a score of 0 would delay therapy or a positive score "
+            "would prompt initiation or intensification (tie-breaker only)."
+            "</div>"
+            if plaque_unmeasured
+            else f"<div class='kvline compact'>Already assessed{_html.escape(cac_suffix)}.</div>"
+        )
+
         st.markdown(
             f"""
 <div class="block compact">
@@ -1363,16 +1382,7 @@ with tab_report:
   <div class="kvline compact">{_html.escape(rec_action)}</div>
 
   <div class="kvline compact" style="margin-top:6px;"><b>Coronary calcium:</b></div>
-  {
-    "<div class='kvline compact'>Do not obtain at this time.</div>"
-    "<div class='kvline compact inline-muted'>"
-    "Obtain CAC only if a score of 0 would delay therapy or a positive score "
-    "would prompt initiation or intensification (tie-breaker only)."
-    "</div>"
-    if plaque_unmeasured else
-    f"<div class='kvline compact'>Already assessed"
-    f"{f' (CAC {int(ev.get('cac_value'))})' if ev.get('cac_value') is not None else ''}.</div>"
-  }
+  {cac_block}
 
   <div class="kvline compact" style="margin-top:6px;"><b>Aspirin:</b></div>
   <div class="kvline compact">{_html.escape(asp_line)}</div>
@@ -1380,6 +1390,7 @@ with tab_report:
 """,
             unsafe_allow_html=True,
         )
+
 
     # Context
     with col_c:
@@ -1729,6 +1740,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
