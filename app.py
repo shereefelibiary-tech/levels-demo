@@ -21,6 +21,36 @@ import streamlit.components.v1 as components
 import levels_engine as le
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
+# ============================================================
+# Guardrails + scrubbing (must be defined before first use)
+# ============================================================
+PHI_PATTERNS = [
+    r"\b\d{3}-\d{2}-\d{4}\b",
+    r"\b\d{2}/\d{2}/\d{4}\b",
+    r"\b\d{4}-\d{2}-\d{2}\b",
+    r"\bMRN\b|\bMedical Record\b",
+    r"@",
+    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
+]
+
+def contains_phi(s: str) -> bool:
+    if not s:
+        return False
+    return any(re.search(pat, s, re.IGNORECASE) for pat in PHI_PATTERNS)
+
+def scrub_terms(s: str) -> str:
+    if not s:
+        return s
+    s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
+    s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
+    return s
+
+def scrub_list(xs):
+    if not xs:
+        return xs
+    return [scrub_terms(str(x)) for x in xs]
 
 get_level_definition_payload = getattr(le, "get_level_definition_payload", None)
 
@@ -73,6 +103,7 @@ PREVENT_EXPLAINER = (
 # Page + styling
 # ============================================================
 st.set_page_config(page_title="Risk Continuum", layout="wide")
+st.write("app.py loaded OK — scrub_terms defined:", "scrub_terms" in globals())
 
 st.markdown(
     """
@@ -1912,6 +1943,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
