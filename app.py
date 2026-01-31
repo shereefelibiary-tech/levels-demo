@@ -118,13 +118,41 @@ html, body, [class*="css"] {
   color: #1f2937;
 }
 
+/* ============================================================
+   Global typography system (single source of truth)
+   ============================================================ */
+:root {
+  --font-family-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+                       "Helvetica Neue", Arial, sans-serif;
+  --font-size-body: 0.94rem;
+  --font-size-small: 0.86rem;
+  --font-size-caption: 0.82rem;
+  --line-height-body: 1.35;
+}
+
+/* Force consistent font/size/line-height across Streamlit + HTML */
+html, body,
+[class*="css"],
+p, li, span, div, label {
+  font-family: var(--font-family-main) !important;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  color: #1f2937;
+}
+
+/* Headings: subtle hierarchy */
+h1, h2, h3, h4 {
+  font-family: var(--font-family-main) !important;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
 /* Ensure components.html (iframe content) matches app */
 .components-html,
 .components-html * {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
-               "Helvetica Neue", Arial, sans-serif !important;
+  font-family: var(--font-family-main) !important;
   color: #1f2937;
-  line-height: 1.35;
+  line-height: var(--line-height-body);
 }
 
 /* ============================================================
@@ -187,6 +215,8 @@ div[data-testid="stMarkdownContainer"] li {
   border-radius: 14px;
   background: #fff;
   padding: 14px 16px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 
 /* Reduce vertical gaps between adjacent blocks */
@@ -198,14 +228,14 @@ div[data-testid="stMarkdownContainer"] li {
   font-variant-caps: all-small-caps;
   letter-spacing: 0.08em;
   font-weight: 900;
-  font-size: 0.85rem;
+  font-size: 0.80rem;
   color: #4b5563;
   margin-bottom: 8px;
 }
 
 .kvline {
   margin: 6px 0;
-  line-height: 1.35;
+  line-height: var(--line-height-body);
 }
 .kvline b {
   font-weight: 900;
@@ -215,10 +245,11 @@ div[data-testid="stMarkdownContainer"] li {
 .block.compact {
   padding: 10px 12px;
   border-radius: 12px;
+  font-size: var(--font-size-small);
 }
 .block-title.compact {
   margin-bottom: 6px;
-  font-size: 0.80rem;
+  font-size: 0.78rem;
   letter-spacing: 0.07em;
 }
 .kvline.compact {
@@ -229,12 +260,12 @@ div[data-testid="stMarkdownContainer"] li {
 .compact-caption {
   margin-top: 4px;
   color: rgba(31,41,55,0.62);
-  font-size: 0.82rem;
+  font-size: var(--font-size-caption);
 }
 
 .inline-muted {
   color: rgba(31,41,55,0.65);
-  font-size: 0.86rem;
+  font-size: var(--font-size-caption);
 }
 
 /* ============================================================
@@ -266,16 +297,17 @@ div[data-testid="stMarkdownContainer"] li {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.92rem;
+  font-size: var(--font-size-body);
 }
 
 /* Force consistent typography inside iframe tables */
 .components-html table,
 .components-html th,
-.components-html td {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
-               "Helvetica Neue", Arial, sans-serif !important;
-  font-size: 0.92rem;
+.components-html td,
+table th,
+table td {
+  font-family: var(--font-family-main) !important;
+  font-size: var(--font-size-body);
   line-height: 1.25;
   color: #1f2937;
 }
@@ -363,7 +395,6 @@ def extract_aspirin_line(asp: dict) -> str:
     if l.startswith("secondary prevention"):
         return "Secondary prevention (if no contraindication)"
     return raw or "—"
-
 
 # -----------------------------
 # RECOMMENDED ACTION (decision-only, no redundancy)
@@ -1953,6 +1984,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
