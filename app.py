@@ -1240,7 +1240,8 @@ data_json = json.dumps(data, sort_keys=True)
 out = run_engine_uncached(data_json) if DEV_DISABLE_CACHE else run_engine_cached(data_json, ENGINE_CACHE_SALT)
 
 patient = Patient(data)
-note_text = scrub_terms(render_quick_text(patient, out))
+note_text = render_quick_text(patient, out)
+note_text = scrub_terms(note_text)
 
 lvl = out.get("levels", {}) or {}
 ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
@@ -1896,6 +1897,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
