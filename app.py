@@ -107,26 +107,28 @@ st.markdown(
     """
 <style>
 
-/* ===============================
+/* ============================================================
    BASE APP TYPOGRAPHY (SAFE)
-   =============================== */
+   ============================================================ */
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
 
-/* IMPORTANT:
-   Do NOT apply font-family to all descendants (.stApp *).
-   That breaks icon fonts and causes 'keyboard_double_arrow_right' text leaks. */
+/* Apply font to app root only (DO NOT use .stApp *) */
 .stApp {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
 
-/* Apply font only to normal text elements (keeps icons intact) */
-.stApp :is(p, div, span, label, li, ul, ol, h1, h2, h3, h4, h5, h6) {
+/* Apply font only to safe text elements
+   (NO div/span — those contain icon glyphs) */
+.stApp :is(
+  p, label, li, ul, ol,
+  h1, h2, h3, h4, h5, h6
+) {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
@@ -140,9 +142,9 @@ html, body {
   font-family: "Material Icons", "Material Symbols Outlined", sans-serif !important;
 }
 
-/* ===============================
+/* ============================================================
    LAYOUT + SPACING
-   =============================== */
+   ============================================================ */
 .block-container {
   padding-top: 2.25rem;
   padding-bottom: 1.0rem;
@@ -167,92 +169,102 @@ div[data-testid="stMarkdownContainer"] li {
   border-top: 1px solid rgba(31,41,55,0.12);
 }
 
-/* ===============================
-   HEADER CARD (restores “Risk Continuum” title look)
-   =============================== */
+/* ============================================================
+   HEADER CARD
+   ============================================================ */
 .header-card {
   background:#fff;
   border:1px solid rgba(31,41,55,0.12);
   border-radius:14px;
   padding:16px 18px;
-  margin-bottom:10px;
+  margin-bottom:12px;
 }
-.header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
-.header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
 
-/* ===============================
+.header-title {
+  font-size:1.15rem;
+  font-weight:800;
+  margin:0 0 4px 0;
+}
+
+.header-sub {
+  color: rgba(31,41,55,0.60);
+  font-size:0.9rem;
+  margin:0;
+}
+
+/* ============================================================
    CARDS / BLOCKS
-   =============================== */
+   ============================================================ */
 .block {
-  border: 1px solid rgba(31,41,55,0.12);
-  border-radius: 14px;
-  background: #fff;
-  padding: 14px 16px;
-  font-size: 0.94rem;
-  line-height: 1.35;
+  border:1px solid rgba(31,41,55,0.12);
+  border-radius:14px;
+  background:#fff;
+  padding:14px 16px;
+  font-size:0.94rem;
+  line-height:1.35;
 }
 
 .block + .block {
-  margin-top: 8px;
+  margin-top:8px;
 }
 
 .block-title {
-  font-variant-caps: all-small-caps;
-  letter-spacing: 0.08em;
-  font-weight: 900;
-  font-size: 0.85rem;
-  color: #4b5563;
-  margin-bottom: 8px;
+  font-variant-caps:all-small-caps;
+  letter-spacing:0.08em;
+  font-weight:900;
+  font-size:0.85rem;
+  color:#4b5563;
+  margin-bottom:8px;
 }
 
 .kvline {
-  margin: 6px 0;
-  line-height: 1.35;
+  margin:6px 0;
+  line-height:1.35;
 }
 .kvline b {
-  font-weight: 900;
+  font-weight:900;
 }
 
-/* Compact cards */
+/* Compact blocks */
 .block.compact {
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-size: 0.90rem;
-  line-height: 1.28;
+  padding:10px 12px;
+  border-radius:12px;
+  font-size:0.90rem;
+  line-height:1.28;
 }
 
 .block-title.compact {
-  font-size: 0.80rem;
-  margin-bottom: 6px;
+  font-size:0.80rem;
+  margin-bottom:6px;
 }
 
 .kvline.compact {
-  margin: 4px 0;
-  line-height: 1.22;
+  margin:4px 0;
+  line-height:1.22;
 }
 
 .compact-caption {
-  margin-top: 4px;
+  margin-top:4px;
   color: rgba(31,41,55,0.62);
-  font-size: 0.82rem;
+  font-size:0.82rem;
 }
 
 .inline-muted {
   color: rgba(31,41,55,0.65);
-  font-size: 0.86rem;
+  font-size:0.86rem;
 }
 
-/* ===============================
+/* ============================================================
    BADGES
-   =============================== */
+   ============================================================ */
 .badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(31,41,55,0.15);
-  background: #fff;
-  font-size: 0.82rem;
-  margin-left: 6px;
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid rgba(31,41,55,0.15);
+  background:#fff;
+  font-size:0.82rem;
+  margin-left:6px;
 }
 
 .ok {
@@ -265,103 +277,93 @@ div[data-testid="stMarkdownContainer"] li {
   background: rgba(245,158,11,0.10);
 }
 
-/* ===============================
+/* ============================================================
    TABLES (SAFE)
-   =============================== */
+   ============================================================ */
 table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.92rem;
-  line-height: 1.25;
+  width:100%;
+  border-collapse:collapse;
+  font-size:0.92rem;
+  line-height:1.25;
 }
 
 table th,
 table td {
-  padding: 6px 10px;
-  border-bottom: 1px solid rgba(31,41,55,0.12);
-  text-align: left;
-  vertical-align: top;
+  padding:6px 10px;
+  border-bottom:1px solid rgba(31,41,55,0.12);
+  text-align:left;
+  vertical-align:top;
 }
 
 table th {
-  background: #f9fafb;
-  font-weight: 700;
-  border-bottom: 2px solid rgba(31,41,55,0.18);
+  background:#f9fafb;
+  font-weight:700;
+  border-bottom:2px solid rgba(31,41,55,0.18);
 }
 
 table tr:last-child td {
-  border-bottom: none;
+  border-bottom:none;
 }
 
-/* Iframe tables (Decision Framework) */
+/* Decision Framework (iframe tables) */
 .components-html table,
 .components-html th,
 .components-html td {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif !important;
-  font-size: 0.92rem !important;
-  line-height: 1.25 !important;
-  color: #1f2937 !important;
+  font-size:0.92rem !important;
+  line-height:1.25 !important;
+  color:#1f2937 !important;
 }
 
 .components-html {
-  margin-top: 4px !important;
-  margin-bottom: 4px !important;
+  margin-top:4px !important;
+  margin-bottom:4px !important;
 }
 .components-html + .components-html {
-  margin-top: 6px !important;
+  margin-top:6px !important;
 }
 
-/* ===============================
+/* ============================================================
    EXPANDERS
-   =============================== */
+   ============================================================ */
 div[data-testid="stExpander"] div[role="button"] {
-  padding-top: 0.35rem;
-  padding-bottom: 0.35rem;
+  padding-top:0.35rem;
+  padding-bottom:0.35rem;
 }
 
-/* ===============================
-   INPUT WIDGET FIXES
-   =============================== */
+/* ============================================================
+   INPUT WIDGET FIXES (NO OVERLAP)
+   ============================================================ */
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
-  font-size: 0.94rem !important;
-  line-height: 1.25 !important;
-  padding: 0.45rem 0.55rem !important;
+  font-size:0.94rem !important;
+  line-height:1.25 !important;
+  padding:0.45rem 0.55rem !important;
 }
 
-/* BaseWeb container height so placeholder/value never overlap */
 div[data-baseweb="input"],
 div[data-baseweb="textarea"] {
-  min-height: 2.5rem !important;
+  min-height:2.5rem !important;
 }
 
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
-  height: 2.5rem !important;
+  height:2.5rem !important;
 }
 
-div[data-baseweb="input"] input::placeholder,
-div[data-baseweb="textarea"] textarea::placeholder {
-  line-height: 1.25 !important;
-  opacity: 0.55;
-}
-
-/* Align number input buttons */
 div[data-baseweb="input"] > div {
-  align-items: center !important;
+  align-items:center !important;
 }
 
-/* Selectbox */
 div[data-baseweb="select"] > div {
-  font-size: 0.94rem !important;
-  line-height: 1.25 !important;
+  font-size:0.94rem !important;
+  line-height:1.25 !important;
 }
 
-/* Radios / checkboxes */
 div[data-testid="stRadio"] label,
 div[data-testid="stCheckbox"] label {
-  line-height: 1.25 !important;
+  line-height:1.25 !important;
 }
 
 </style>
@@ -369,7 +371,9 @@ div[data-testid="stCheckbox"] label {
     unsafe_allow_html=True,
 )
 
-# --- Header card (this is where “Risk Continuum” + version comes from) ---
+# ============================================================
+# Header card (title + version)
+# ============================================================
 st.markdown(
     f"""
 <div class="header-card">
@@ -2113,6 +2117,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
