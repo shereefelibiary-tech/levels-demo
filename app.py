@@ -1451,8 +1451,9 @@ with tab_framework:
     # -----------------------------
     # Engine definition helper (fail-soft)
     # -----------------------------
-    def safe_level_def(level_num: int, sublevel: str | None):
-        fn = get_level_definition_payload  # set via getattr(le, "get_level_definition_payload", None)
+    def safe_level_def(level_num: int, sublevel: str | None = None):
+        # Try to get the function from the local engine if available
+        fn = getattr(le, "get_level_definition_payload", None)
         if not callable(fn):
             return {}
         try:
@@ -1486,7 +1487,7 @@ with tab_framework:
     # -----------------------------
     framework_html = """
 <div class="block">
-  <div class="block-title">What is a “major biologic driver”?</div>
+  <div class="block-title">What is a "major biologic driver"?</div>
 
   <div class="kvline">
     A <b>major biologic driver</b> is a risk signal that is sufficient, on its own, to justify
@@ -1682,22 +1683,35 @@ with tab_framework:
 </div>
 
 <div class="block" style="margin-top:14px;">
-  <div class="block-title">Coronary calcium</div>
+  <div class="block-title">Coronary calcium: Why systematic screening is justified</div>
   <div class="kvline">
-    CAC is used <b>primarily</b> as a tie-breaker when plaque is unmeasured.
-    It is obtained when a result of CAC = 0 would support deferring therapy,
-    or when a positive score would support initiation or intensification.
+    <b>Evidence-driven rationale:</b> CAC is the strongest independent predictor of cardiovascular events, outperforming all risk scores. <span style="background-color:#fff3cd; padding:2px 4px; border-radius:3px;"><b>CAC=0 confers a "warranty period" of 5+ years</b></span> with near-zero event rates, while any CAC >0 identifies subclinical disease requiring aggressive management.
+  </div>
+  
+  <div class="kvline" style="margin-top:10px;">
+    <b>Systematic approach:</b> CAC should be obtained <b>routinely</b> in adults ≥40 with any risk signal (Level 2+) to:
+  </div>
+  <ul style="margin:6px 0 0 18px;">
+    <li><b>Defer therapy</b> when CAC=0 provides confidence in delayed intervention</li>
+    <li><b>Initiate therapy</b> when any CAC >0 provides definitive evidence of atherosclerosis</li>
+    <li><b>Guide intensity</b> based on plaque burden (CAC 1-99 vs ≥100)</li>
+  </ul>
+  
+  <div class="kvline" style="margin-top:10px; padding:10px; background-color:#f8f9fa; border-left:4px solid #007bff;">
+    <b>Recommendation:</b> Consider CAC screening <b>by default</b> in all Level 2-3 patients when treatment decisions are uncertain. 
+    The radiation dose (0.5-1.5 mSv) is comparable to mammography, and cost-effectiveness data support its use at earlier 
+    ages than traditionally recommended, particularly in intermediate-risk groups where clinical uncertainty is highest.
+  </div>
+  
+  <div class="kvline" style="margin-top:10px;">
+    <b>Practice implications:</b> This evidence-based aggressive stance transforms CAC from a "tie-breaker" to a 
+    <b>foundational decision-making tool</b> that directly determines therapy initiation, intensification, or deferral.
   </div>
 </div>
-st.markdown(
-    f"""
-</tr>
-...
-</div>
-""",
-    unsafe_allow_html=True,
-)
+"""
 
+    # Render the HTML
+    st.markdown(framework_html, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
 # DETAILS TAB
@@ -1758,6 +1772,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
