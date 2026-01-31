@@ -98,7 +98,6 @@ PREVENT_EXPLAINER = (
     "PREVENT estimates 10-year population event risk (%); total CVD includes ASCVD plus heart failure "
     "and complements plaque/biology-based risk assessment."
 )
-
 # ============================================================
 # Page + styling
 # ============================================================
@@ -117,11 +116,28 @@ html, body {
   color: #1f2937;
 }
 
-/* Apply font without breaking Streamlit sizing */
-.stApp, .stApp * {
+/* IMPORTANT:
+   Do NOT apply font-family to all descendants (.stApp *).
+   That breaks icon fonts and causes 'keyboard_double_arrow_right' text leaks. */
+.stApp {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
+}
+
+/* Apply font only to normal text elements (keeps icons intact) */
+.stApp :is(p, div, span, label, li, ul, ol, h1, h2, h3, h4, h5, h6) {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+               "Helvetica Neue", Arial, sans-serif;
+  color: #1f2937;
+}
+
+/* Preserve Material icon fonts explicitly */
+.material-icons,
+.material-symbols-outlined,
+[class*="material-icons"],
+[class*="material-symbols"] {
+  font-family: "Material Icons", "Material Symbols Outlined", sans-serif !important;
 }
 
 /* ===============================
@@ -150,6 +166,19 @@ div[data-testid="stMarkdownContainer"] li {
   margin: 10px 0;
   border-top: 1px solid rgba(31,41,55,0.12);
 }
+
+/* ===============================
+   HEADER CARD (restores “Risk Continuum” title look)
+   =============================== */
+.header-card {
+  background:#fff;
+  border:1px solid rgba(31,41,55,0.12);
+  border-radius:14px;
+  padding:16px 18px;
+  margin-bottom:10px;
+}
+.header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
+.header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
 
 /* ===============================
    CARDS / BLOCKS
@@ -294,50 +323,22 @@ div[data-testid="stExpander"] div[role="button"] {
 /* ===============================
    INPUT WIDGET FIXES
    =============================== */
-input,
-textarea,
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
   font-size: 0.94rem !important;
   line-height: 1.25 !important;
-  padding: 0.4rem !important;
+  padding: 0.45rem 0.55rem !important;
 }
 
-div[data-baseweb="input"] > div {
-  align-items: center !important;
-}
-
-div[data-baseweb="select"] > div {
-  font-size: 0.94rem !important;
-  line-height: 1.25 !important;
-}
-
-label,
-div[data-testid="stRadio"] label,
-div[data-testid="stCheckbox"] label {
-  line-height: 1.25 !important;
-}
-
-section[data-testid="stSidebar"] input,
-section[data-testid="stSidebar"] textarea {
-  font-size: 0.94rem !important;
-  line-height: 1.25 !important;
-}
-
-/* ===============================
-   FINAL FIX: BaseWeb input height (prevents placeholder overlap)
-   =============================== */
+/* BaseWeb container height so placeholder/value never overlap */
 div[data-baseweb="input"],
 div[data-baseweb="textarea"] {
-  min-height: 2.4rem !important;
+  min-height: 2.5rem !important;
 }
 
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
-  height: 2.4rem !important;
-  line-height: 1.25 !important;
-  padding-top: 0.45rem !important;
-  padding-bottom: 0.45rem !important;
+  height: 2.5rem !important;
 }
 
 div[data-baseweb="input"] input::placeholder,
@@ -346,11 +347,42 @@ div[data-baseweb="textarea"] textarea::placeholder {
   opacity: 0.55;
 }
 
+/* Align number input buttons */
+div[data-baseweb="input"] > div {
+  align-items: center !important;
+}
+
+/* Selectbox */
+div[data-baseweb="select"] > div {
+  font-size: 0.94rem !important;
+  line-height: 1.25 !important;
+}
+
+/* Radios / checkboxes */
+div[data-testid="stRadio"] label,
+div[data-testid="stCheckbox"] label {
+  line-height: 1.25 !important;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
 )
 
+# --- Header card (this is where “Risk Continuum” + version comes from) ---
+st.markdown(
+    f"""
+<div class="header-card">
+  <div class="header-title">{SYSTEM_NAME} {VERSION.get("levels","")}</div>
+  <p class="header-sub">
+    De-identified Demo • SmartPhrase paste → auto-fill • Levels 1–5 (+ sublevels)
+  </p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+st.info("De-identified use only. Do not enter patient identifiers.")
 
 
 # ============================================================
@@ -2081,6 +2113,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
