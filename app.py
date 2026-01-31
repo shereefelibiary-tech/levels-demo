@@ -1405,16 +1405,18 @@ with tab_report:
 with tab_framework:
     st.subheader("How Levels Are Specified")
     st.caption(
-        "Levels are assigned based on biologic signal strength, plaque status, and convergence of risk — not by forced treatment rules."
+        "Levels are assigned based on biologic signal strength, plaque status, and convergence of risk — "
+        "not by forced treatment rules."
     )
 
     # -----------------------------
-    # Major driver explainer (explicit)
+    # Block: Major biologic driver definition
     # -----------------------------
     st.markdown(
         """
 <div class="block">
   <div class="block-title">What is a “major biologic driver”?</div>
+
   <div class="kvline">
     A <b>major biologic driver</b> is a risk signal that is sufficient, on its own, to justify
     <b>Level 3 (Actionable biologic risk)</b> even when plaque is unmeasured.
@@ -1431,12 +1433,15 @@ with tab_framework:
   </ul>
 
   <div class="kvline" style="margin-top:10px;">
-    Signals below these thresholds are <b>not</b> major drivers and require convergence or enhancers to advance beyond Level 2.
+    Signals below these thresholds are <b>not</b> major drivers and generally require convergence or enhancers
+    to advance beyond Level 2.
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     # -----------------------------
     # Table 1: Levels overview
@@ -1512,6 +1517,8 @@ with tab_framework:
         unsafe_allow_html=True,
     )
 
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
     # -----------------------------
     # Table 2: Explicit transition criteria
     # -----------------------------
@@ -1524,8 +1531,8 @@ with tab_framework:
       <thead>
         <tr style="background:#f9fafb;">
           <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:180px;">Domain</th>
-          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:220px;">Marker</th>
-          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:220px;">Cut-off / condition</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Marker</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Cut-off / condition</th>
           <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">Level effect</th>
         </tr>
       </thead>
@@ -1541,7 +1548,7 @@ with tab_framework:
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥100 mg/dL</td>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer/accelerator present)</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
         </tr>
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">LDL-C<br/><span class="inline-muted">(if ApoB not measured)</span></td>
@@ -1551,7 +1558,7 @@ with tab_framework:
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥130 mg/dL</td>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer/accelerator present)</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
         </tr>
 
         <!-- Glycemia -->
@@ -1581,7 +1588,7 @@ with tab_framework:
         </tr>
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"></td>
-          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥2 mg/L + inflammatory disease</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Chronic inflammatory disease present</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
         </tr>
 
@@ -1635,22 +1642,22 @@ with tab_framework:
         unsafe_allow_html=True,
     )
 
-    # CAC callout (updated wording)
+    # -----------------------------
+    # CAC callout (language update)
+    # -----------------------------
     st.markdown(
         """
 <div class="block" style="margin-top:14px;">
-  <div class="block-title">Coronary calcium (CAC)</div>
+  <div class="block-title">Coronary calcium</div>
   <div class="kvline">
-    CAC is used <b>primarily as a tie-breaker</b> when plaque status is unknown and the decision to treat is preference-sensitive.
-    It is most helpful when a score of 0 would reasonably defer therapy,
+    CAC is used <b>primarily</b> as a tie-breaker when plaque is unmeasured.
+    It is obtained when a result of CAC = 0 would support deferring therapy,
     or when a positive score would support initiation or intensification.
-    If CAC has already been measured, repeat testing is generally not needed for decision-making.
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
-
 
 # ------------------------------------------------------------
 # DETAILS TAB
@@ -1711,6 +1718,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
