@@ -1689,9 +1689,14 @@ with tab_framework:
     or when a positive score would support initiation or intensification.
   </div>
 </div>
+st.markdown(
+    f"""
+</tr>
+...
+</div>
 """,
-        unsafe_allow_html=True,
-    )
+    unsafe_allow_html=True,
+)
 
 
 # ------------------------------------------------------------
@@ -1753,6 +1758,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
