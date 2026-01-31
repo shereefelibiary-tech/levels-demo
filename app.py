@@ -1415,6 +1415,16 @@ def build_emr_note() -> str:
 tab_report, tab_framework, tab_details, tab_debug = st.tabs(
     ["Report", "Decision Framework", "Details", "Debug"]
 )
+if not submitted:
+    with tab_report:
+        st.info("Enter values above and click Run to generate the report.")
+    with tab_framework:
+        st.info("Decision framework will appear after running the analysis.")
+    with tab_details:
+        st.info("Details will appear after running the analysis.")
+    with tab_debug:
+        st.info("Debug output will appear after running the analysis.")
+    st.stop()
 
 # ------------------------------------------------------------
 # REPORT TAB
@@ -1943,6 +1953,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
