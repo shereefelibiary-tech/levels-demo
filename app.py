@@ -20,7 +20,10 @@ import streamlit.components.v1 as components
 
 import levels_engine as le
 from smartphrase_ingest.parser import parse_smartphrase
-from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why, get_level_definition_payload
+from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
+
+get_level_definition_payload = getattr(le, "get_level_definition_payload", None)
+
 
 
 # ============================================================
@@ -1726,6 +1729,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
