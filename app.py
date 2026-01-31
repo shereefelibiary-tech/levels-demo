@@ -238,11 +238,22 @@ table {
   font-size: 0.92rem;
 }
 
+/* Force consistent typography inside iframe tables */
+.components-html table,
+.components-html th,
+.components-html td {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+               "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  color: #1f2937;
+}
+
 /* Tight but readable row height */
 table th,
 table td {
-  padding-top: 8px !important;
-  padding-bottom: 8px !important;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
   padding-left: 10px;
   padding-right: 10px;
   text-align: left;
@@ -253,7 +264,7 @@ table td {
 /* Table headers */
 table th {
   background: #f9fafb;
-  font-weight: 600;
+  font-weight: 700;
   border-bottom: 2px solid rgba(31,41,55,0.18);
 }
 
@@ -264,8 +275,11 @@ table tr:last-child td {
 
 /* Reduce iframe wrapper spacing around tables */
 .components-html {
+  margin-top: 4px !important;
+  margin-bottom: 4px !important;
+}
+.components-html + .components-html {
   margin-top: 6px !important;
-  margin-bottom: 6px !important;
 }
 
 /* ============================================================
@@ -280,37 +294,6 @@ div[data-testid="stExpander"] div[role="button"] {
 """,
     unsafe_allow_html=True,
 )
-
-# ============================================================
-# Guardrails + scrubbing
-# ============================================================
-PHI_PATTERNS = [
-    r"\b\d{3}-\d{2}-\d{4}\b",
-    r"\b\d{2}/\d{2}/\d{4}\b",
-    r"\b\d{4}-\d{2}-\d{2}\b",
-    r"\bMRN\b|\bMedical Record\b",
-    r"@",
-    r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b",
-]
-
-def contains_phi(s: str) -> bool:
-    if not s:
-        return False
-    return any(re.search(pat, s, re.IGNORECASE) for pat in PHI_PATTERNS)
-
-def scrub_terms(s: str) -> str:
-    if not s:
-        return s
-    s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
-    s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
-    return s
-
-def scrub_list(xs):
-    if not xs:
-        return xs
-    return [scrub_terms(str(x)) for x in xs]
 
 # ============================================================
 # Normalized extractors (single source of truth)
@@ -1913,6 +1896,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
