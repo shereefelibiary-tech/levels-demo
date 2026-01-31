@@ -1208,15 +1208,22 @@ def build_emr_note() -> str:
     else:
         lines.append("- —")
 
+    # --- Recommended Action: decision-only ---
     rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
     lines.append("")
     lines.append("RECOMMENDED ACTION")
     lines.append(rec_action)
 
-    lines.append("")
-    lines.append("MANAGEMENT PLAN")
-    lines.append(plan_clean or "—")
+    # --- Management Plan: suppress for Level 1–2 (no redundancy) ---
+    level_int = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
+    show_plan = level_int >= 3
 
+    if show_plan:
+        lines.append("")
+        lines.append("MANAGEMENT PLAN")
+        lines.append(plan_clean or "—")
+
+    # --- Next Steps ---
     lines.append("")
     lines.append("NEXT STEPS")
     if _plaque_unmeasured(ev):
@@ -1232,6 +1239,7 @@ def build_emr_note() -> str:
     lines.append(f"- Aspirin: {asp_line}")
     lines.append("")
     return "\n".join(lines)
+
 
 # ============================================================
 # Tabs
@@ -1718,6 +1726,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
