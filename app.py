@@ -1463,7 +1463,6 @@ with tab_framework:
         "Levels are assigned based on biologic signal strength, plaque status, and convergence of risk — "
         "not by forced treatment rules."
     )
-
     # -----------------------------
     # Engine definition helper (fail-soft)
     # -----------------------------
@@ -1480,7 +1479,6 @@ with tab_framework:
                 return {}
         except Exception:
             return {}
-
     # -----------------------------
     # This patient (pulled from engine)
     # -----------------------------
@@ -1493,23 +1491,21 @@ with tab_framework:
         st.write(desc)
     else:
         st.info("Engine definitions not available (get_level_definition_payload not found).")
-
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
     # -----------------------------
     # Render the framework content in sections to ensure proper HTML rendering
     # -----------------------------
-    
+   
     # First section: Major biologic driver
     st.markdown("""
     <div class="block">
       <div class="block-title">What is a "major biologic driver"?</div>
-      
+     
       <div class="kvline">
         A <b>major biologic driver</b> is a risk signal that is sufficient, on its own, to justify
         <b>Level 3 (Actionable biologic risk)</b> even when plaque is unmeasured.
       </div>
-      
+     
       <div class="kvline" style="margin-top:10px;"><b>Major drivers (explicit):</b></div>
       <ul style="margin:6px 0 0 18px;">
         <li><b>ApoB ≥ 100 mg/dL</b> (preferred atherogenic marker)</li>
@@ -1519,28 +1515,28 @@ with tab_framework:
         <li><b>Chronic inflammatory disease</b> (RA, psoriasis, SLE, IBD, HIV, OSA, NAFLD/MASLD)</li>
         <li><b>Current cigarette smoking</b></li>
       </ul>
-      
+     
       <div class="kvline" style="margin-top:10px;">
         Signals below these thresholds are <b>not</b> major drivers and generally require convergence or enhancers
         to advance beyond Level 2.
       </div>
     </div>
     """, unsafe_allow_html=True)
-    
+   
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    
+   
     # Second section: Levels overview table
     st.markdown("""
     <div class="block">
       <div class="block-title">Levels overview</div>
       <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.92rem; border:1px solid rgba(31,41,55,0.12);">
           <thead>
             <tr style="background:#f9fafb;">
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:80px;">Level</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:260px;">Risk state</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">What qualifies</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:260px;">Medication posture</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Level</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Risk state</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">What qualifies</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Medication posture</th>
             </tr>
           </thead>
           <tbody>
@@ -1581,31 +1577,31 @@ with tab_framework:
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🔴 Treat (target-driven)</td>
             </tr>
             <tr>
-              <td style="padding:10px;"><b>5</b></td>
-              <td style="padding:10px; font-weight:800;">Very high risk / ASCVD intensity</td>
-              <td style="padding:10px;">CAC ≥100 or clinical ASCVD</td>
-              <td style="padding:10px;">🔴 Treat (secondary prevention)</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>5</b></td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Very high risk / ASCVD intensity</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC ≥100 or clinical ASCVD</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🔴 Treat (secondary prevention)</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
     """, unsafe_allow_html=True)
-    
+   
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    
+   
     # Third section: Level transition criteria table
     st.markdown("""
     <div class="block">
       <div class="block-title">Level transition criteria (explicit cut-offs)</div>
       <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:0.92rem;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.92rem; border:1px solid rgba(31,41,55,0.12);">
           <thead>
             <tr style="background:#f9fafb;">
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:180px;">Domain</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Marker</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Cut-off / condition</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">Level effect</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Domain</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Marker</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Cut-off / condition</th>
+              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Level effect</th>
             </tr>
           </thead>
           <tbody>
@@ -1616,7 +1612,7 @@ with tab_framework:
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥100 mg/dL</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
             </tr>
@@ -1626,11 +1622,11 @@ with tab_framework:
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥130 mg/dL</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
             </tr>
-            
+
             <tr>
               <td rowspan="3" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Glycemia</b></td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">A1c</td>
@@ -1638,16 +1634,16 @@ with tab_framework:
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">6.2–6.4%</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal (near diabetes boundary) → favors Level 2B if present</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥6.5% or diabetes = true</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
             </tr>
-            
+
             <tr>
               <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Inflammation</b></td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">hsCRP</td>
@@ -1655,25 +1651,25 @@ with tab_framework:
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Chronic inflammatory disease present</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
             </tr>
-            
+
             <tr>
               <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Genetics</b></td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Lp(a)</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥125 nmol/L or ≥50 mg/dL</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
             </tr>
-            
+
             <tr>
               <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Smoking</b></td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Current smoking</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Yes</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
             </tr>
-            
+
             <tr>
               <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Family history</b></td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Premature ASCVD</td>
@@ -1681,11 +1677,11 @@ with tab_framework:
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A / 2B depending on convergence</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Present + major driver</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Enhancer → favors 3B (if Level 3 is otherwise met)</td>
             </tr>
-            
+
             <tr>
               <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Plaque (CAC)</b></td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC 1–99</td>
@@ -1693,7 +1689,7 @@ with tab_framework:
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 4</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">&nbsp;</td>
+              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC ≥100 or clinical ASCVD</td>
               <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 5</td>
             </tr>
@@ -1702,42 +1698,41 @@ with tab_framework:
       </div>
     </div>
     """, unsafe_allow_html=True)
-    
+   
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    
+   
     # Fourth section: CAC information
     st.markdown("""
     <div class="block" style="margin-top:14px;">
       <div class="block-title">Coronary calcium: evidence-informed use in risk assessment</div>
-      
+     
       <div class="kvline">
         CAC is a valuable <b>risk-refinement tool</b> that can help guide treatment decisions when plaque is unmeasured and clinical uncertainty exists.
       </div>
-      
+     
       <div class="kvline" style="margin-top:10px;">
         <b>Evidence-based rationale:</b> CAC is the strongest independent predictor of cardiovascular events. <span style="background-color:#fff3cd; padding:2px 4px; border-radius:3px;"><b>CAC=0 is associated with very low near-term event rates</b></span>, while any CAC >0 indicates subclinical atherosclerosis.
       </div>
-      
+     
       <div class="kvline" style="margin-top:10px;"><b>Guideline-aligned indications:</b></div>
       <ul style="margin:6px 0 0 18px;">
         <li>Intermediate-risk patients where treatment decisions are uncertain</li>
         <li>Borderline risk where CAC could reclassify risk and inform therapy decisions</li>
         <li>When patient preference or hesitancy suggests shared decision-making would benefit from objective plaque assessment</li>
       </ul>
-      
+     
       <div class="kvline" style="margin-top:10px; padding:10px; background-color:#f8f9fa; border-left:4px solid #007bff;">
-        <b>Clinical approach:</b> CAC is <b>considered</b> when the result could meaningfully change management. 
-        The radiation dose (0.5-1.5 mSv) is comparable to mammography. Current guidelines support selective use 
+        <b>Clinical approach:</b> CAC is <b>considered</b> when the result could meaningfully change management.
+        The radiation dose (0.5-1.5 mSv) is comparable to mammography. Current guidelines support selective use
         in intermediate-risk adults where risk assessment remains uncertain after traditional evaluation.
       </div>
-      
+     
       <div class="kvline" style="margin-top:10px;">
-        <b>Role in decision-making:</b> CAC can be a <b>helpful adjunct</b> to traditional risk assessment, 
+        <b>Role in decision-making:</b> CAC can be a <b>helpful adjunct</b> to traditional risk assessment,
         providing objective evidence of atherosclerosis that may support treatment decisions.
       </div>
     </div>
     """, unsafe_allow_html=True)
-
 # ------------------------------------------------------------
 # DETAILS TAB
 # ------------------------------------------------------------
@@ -1808,6 +1803,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
