@@ -324,10 +324,33 @@ section[data-testid="stSidebar"] textarea {
   line-height: 1.25 !important;
 }
 
+/* ===============================
+   FINAL FIX: BaseWeb input height (prevents placeholder overlap)
+   =============================== */
+div[data-baseweb="input"],
+div[data-baseweb="textarea"] {
+  min-height: 2.4rem !important;
+}
+
+div[data-baseweb="input"] input,
+div[data-baseweb="textarea"] textarea {
+  height: 2.4rem !important;
+  line-height: 1.25 !important;
+  padding-top: 0.45rem !important;
+  padding-bottom: 0.45rem !important;
+}
+
+div[data-baseweb="input"] input::placeholder,
+div[data-baseweb="textarea"] textarea::placeholder {
+  line-height: 1.25 !important;
+  opacity: 0.55;
+}
+
 </style>
 """,
     unsafe_allow_html=True,
 )
+
 
 
 # ============================================================
@@ -2058,6 +2081,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
