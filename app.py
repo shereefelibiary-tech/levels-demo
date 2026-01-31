@@ -130,7 +130,8 @@ html, body, [class*="css"] {
   --line-height-body: 1.35;
 }
 
-/* Force consistent font/size/line-height across Streamlit + HTML */
+/* Force consistent font/size/line-height across Streamlit + HTML
+   NOTE: this is intentionally broad; input widgets are fixed below. */
 html, body,
 [class*="css"],
 p, li, span, div, label {
@@ -171,21 +172,12 @@ div[data-testid="stVerticalBlock"] {
 }
 
 /* Tighten markdown defaults */
-div[data-testid="stMarkdownContainer"] p {
-  margin: 0.25rem 0;
-}
-div[data-testid="stMarkdownContainer"] ul {
-  margin: 0.25rem 0 0.25rem 1.1rem;
-}
-div[data-testid="stMarkdownContainer"] li {
-  margin: 0.10rem 0;
-}
+div[data-testid="stMarkdownContainer"] p { margin: 0.25rem 0; }
+div[data-testid="stMarkdownContainer"] ul { margin: 0.25rem 0 0.25rem 1.1rem; }
+div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 
 /* Horizontal rule */
-.hr {
-  margin: 10px 0;
-  border-top: 1px solid rgba(31,41,55,0.12);
-}
+.hr { margin: 10px 0; border-top: 1px solid rgba(31,41,55,0.12); }
 
 /* ============================================================
    Cards / blocks
@@ -220,9 +212,7 @@ div[data-testid="stMarkdownContainer"] li {
 }
 
 /* Reduce vertical gaps between adjacent blocks */
-.block + .block {
-  margin-top: 8px;
-}
+.block + .block { margin-top: 8px; }
 
 .block-title {
   font-variant-caps: all-small-caps;
@@ -233,13 +223,8 @@ div[data-testid="stMarkdownContainer"] li {
   margin-bottom: 8px;
 }
 
-.kvline {
-  margin: 6px 0;
-  line-height: var(--line-height-body);
-}
-.kvline b {
-  font-weight: 900;
-}
+.kvline { margin: 6px 0; line-height: var(--line-height-body); }
+.kvline b { font-weight: 900; }
 
 /* Compact variant */
 .block.compact {
@@ -252,17 +237,13 @@ div[data-testid="stMarkdownContainer"] li {
   font-size: 0.78rem;
   letter-spacing: 0.07em;
 }
-.kvline.compact {
-  margin: 4px 0;
-  line-height: 1.22;
-}
+.kvline.compact { margin: 4px 0; line-height: 1.22; }
 
 .compact-caption {
   margin-top: 4px;
   color: rgba(31,41,55,0.62);
   font-size: var(--font-size-caption);
 }
-
 .inline-muted {
   color: rgba(31,41,55,0.65);
   font-size: var(--font-size-caption);
@@ -280,20 +261,12 @@ div[data-testid="stMarkdownContainer"] li {
   font-size: 0.82rem;
   margin-left: 6px;
 }
-.ok {
-  border-color: rgba(16,185,129,0.35);
-  background: rgba(16,185,129,0.08);
-}
-.miss {
-  border-color: rgba(245,158,11,0.35);
-  background: rgba(245,158,11,0.10);
-}
+.ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
+.miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
 /* ============================================================
    Tables (Decision Framework + general)
    ============================================================ */
-
-/* Normalize table look everywhere */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -332,18 +305,11 @@ table th {
 }
 
 /* Remove last-row border */
-table tr:last-child td {
-  border-bottom: none;
-}
+table tr:last-child td { border-bottom: none; }
 
 /* Reduce iframe wrapper spacing around tables */
-.components-html {
-  margin-top: 4px !important;
-  margin-bottom: 4px !important;
-}
-.components-html + .components-html {
-  margin-top: 6px !important;
-}
+.components-html { margin-top: 4px !important; margin-bottom: 4px !important; }
+.components-html + .components-html { margin-top: 6px !important; }
 
 /* ============================================================
    Expanders
@@ -351,6 +317,44 @@ table tr:last-child td {
 div[data-testid="stExpander"] div[role="button"] {
   padding-top: 0.35rem;
   padding-bottom: 0.35rem;
+}
+
+/* ============================================================
+   FIX: Streamlit input widgets (prevent text overlap)
+   ============================================================ */
+input,
+textarea,
+div[data-baseweb="input"] input,
+div[data-baseweb="textarea"] textarea {
+  font-size: var(--font-size-body) !important;
+  line-height: 1.25 !important;
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.4rem !important;
+}
+
+/* Fix number input +/- buttons alignment */
+div[data-baseweb="input"] > div {
+  align-items: center !important;
+}
+
+/* Selectbox / multiselect */
+div[data-baseweb="select"] > div {
+  font-size: var(--font-size-body) !important;
+  line-height: 1.25 !important;
+}
+
+/* Radio / checkbox labels */
+label,
+div[data-testid="stRadio"] label,
+div[data-testid="stCheckbox"] label {
+  line-height: 1.25 !important;
+}
+
+/* Sidebar inputs */
+section[data-testid="stSidebar"] input,
+section[data-testid="stSidebar"] textarea {
+  font-size: var(--font-size-body) !important;
+  line-height: 1.25 !important;
 }
 
 </style>
@@ -1984,6 +1988,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
