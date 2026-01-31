@@ -1482,10 +1482,9 @@ with tab_framework:
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     # -----------------------------
-    # Block: Major biologic driver definition
+    # Single HTML blob (prevents stray <tr> rendering)
     # -----------------------------
-    st.markdown(
-        """
+    framework_html = """
 <div class="block">
   <div class="block-title">What is a “major biologic driver”?</div>
 
@@ -1509,17 +1508,9 @@ with tab_framework:
     to advance beyond Level 2.
   </div>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+<div class="hr"></div>
 
-    # -----------------------------
-    # Table 1: Levels overview
-    # -----------------------------
-    st.markdown(
-        """
 <div class="block">
   <div class="block-title">Levels overview</div>
   <div style="overflow-x:auto;">
@@ -1539,42 +1530,36 @@ with tab_framework:
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">No disease and no dominant biologic driver on available data</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">❌ Do not treat</td>
         </tr>
-
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>2A</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Emerging (isolated)</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Exactly one mild signal (see criteria table)</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">❌ Do not treat routinely</td>
         </tr>
-
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>2B</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Emerging (converging)</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥2 mild signals, or borderline/intermediate near-term risk with plaque unmeasured</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🟡 Treatment reasonable (preference-sensitive)</td>
         </tr>
-
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>3A</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Actionable biology</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥1 major biologic driver, without additional accelerators</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🟠 Treatment reasonable</td>
         </tr>
-
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>3B</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Actionable biology + enhancers</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver + ≥1 accelerator/enhancer</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🟠 Treatment generally favored</td>
         </tr>
-
         <tr>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>4</b></td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Subclinical atherosclerosis</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC 1–99</td>
           <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🔴 Treat (target-driven)</td>
         </tr>
-
         <tr>
           <td style="padding:10px;"><b>5</b></td>
           <td style="padding:10px; font-weight:800;">Very high risk / ASCVD intensity</td>
@@ -1585,17 +1570,9 @@ with tab_framework:
     </table>
   </div>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+<div class="hr"></div>
 
-    # -----------------------------
-    # Table 2: Explicit transition criteria
-    # -----------------------------
-    st.markdown(
-        """
 <div class="block">
   <div class="block-title">Level transition criteria (explicit cut-offs)</div>
   <div style="overflow-x:auto;">
@@ -1703,12 +1680,7 @@ with tab_framework:
     </table>
   </div>
 </div>
-""",
-        unsafe_allow_html=True,
-    )
 
-    st.markdown(
-        """
 <div class="block" style="margin-top:14px;">
   <div class="block-title">Coronary calcium</div>
   <div class="kvline">
@@ -1720,6 +1692,9 @@ with tab_framework:
 """,
         unsafe_allow_html=True,
     )
+
+::contentReference[oaicite:0]{index=0}
+
 
 # ------------------------------------------------------------
 # DETAILS TAB
@@ -1780,6 +1755,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
