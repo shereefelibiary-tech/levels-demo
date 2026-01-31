@@ -1257,7 +1257,6 @@ def build_emr_note() -> str:
     lines.append("")
     return "\n".join(lines)
 
-
 # ============================================================
 # Tabs
 # ============================================================
@@ -1366,26 +1365,44 @@ with tab_report:
         rec_action = recommended_action_line(
             lvl, plan_clean, decision_stability, decision_stability_note
         )
-        plaque_unmeasured = _plaque_unmeasured(ev)
 
-        # Precompute CAC suffix safely (avoids nested f-string quoting bugs)
-        cac_suffix = ""
-        if not plaque_unmeasured:
+        # ---- CAC decision-support (engine-driven; no hardcoded CAC text) ----
+        cac_support = (out.get("insights") or {}).get("cac_decision_support") or {}
+        cac_val = ev.get("cac_value")
+
+        if cac_val is not None:
             try:
-                if ev.get("cac_value") is not None:
-                    cac_suffix = f" (CAC {int(ev.get('cac_value'))})"
+                cac_block = f"<div class='kvline compact'>Already assessed (CAC {int(cac_val)}).</div>"
             except Exception:
-                cac_suffix = ""
+                cac_block = "<div class='kvline compact'>Already assessed.</div>"
+        else:
+            stt = (cac_support.get("status") or "").strip().lower()
+            rat = _html.escape(cac_support.get("rationale") or "")
+            msg = _html.escape(cac_support.get("message") or "")
+            tag = _html.escape(cac_support.get("tag") or "")
 
-        cac_block = (
-            "<div class='kvline compact'>Do not obtain at this time.</div>"
-            "<div class='kvline compact inline-muted'>"
-            "Obtain CAC only if a score of 0 would delay therapy or a positive score "
-            "would prompt initiation or intensification (tie-breaker only)."
-            "</div>"
-            if plaque_unmeasured
-            else f"<div class='kvline compact'>Already assessed{_html.escape(cac_suffix)}.</div>"
-        )
+            if stt == "optional":
+                cac_block = (
+                    "<div class='kvline compact'>Optional (risk clarification).</div>"
+                    + (f"<div class='kvline compact inline-muted'>{rat}</div>" if rat else "")
+                    + (f"<div class='kvline compact inline-muted'>{msg}</div>" if msg else "")
+                    + (f"<div class='kvline compact inline-muted'>Tag: {tag}</div>" if tag else "")
+                )
+            elif stt == "deferred":
+                cac_block = (
+                    "<div class='kvline compact'>Deferred.</div>"
+                    + (f"<div class='kvline compact inline-muted'>{rat}</div>" if rat else "")
+                    + (f"<div class='kvline compact inline-muted'>{msg}</div>" if msg else "")
+                    + (f"<div class='kvline compact inline-muted'>Tag: {tag}</div>" if tag else "")
+                )
+            else:
+                # suppressed/unknown
+                cac_block = (
+                    "<div class='kvline compact'>Do not obtain at this time.</div>"
+                    + (f"<div class='kvline compact inline-muted'>{rat}</div>" if rat else "")
+                    + (f"<div class='kvline compact inline-muted'>{msg}</div>" if msg else "")
+                    + (f"<div class='kvline compact inline-muted'>Tag: {tag}</div>" if tag else "")
+                )
 
         st.markdown(
             f"""
@@ -1406,7 +1423,6 @@ with tab_report:
         )
 
     # Context
-    # (guard: make sure plaque_unmeasured exists in this scope)
     plaque_unmeasured = _plaque_unmeasured(ev)
 
     with col_c:
@@ -1452,14 +1468,12 @@ with tab_framework:
     # Engine definition helper (fail-soft)
     # -----------------------------
     def safe_level_def(level_num: int, sublevel: str | None = None):
-        # Try to get the function from the local engine if available
         fn = getattr(le, "get_level_definition_payload", None)
         if not callable(fn):
             return {}
         try:
             return fn(level_num, sublevel=sublevel)
         except TypeError:
-            # tolerate alternate signature: fn(level, sublevel)
             try:
                 return fn(level_num, sublevel)
             except Exception:
@@ -1483,7 +1497,8 @@ with tab_framework:
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     # -----------------------------
-    # Single HTML blob (prevents stray <tr> rendering)
+    # Single HTML blob
+    # (Updated: remove "systematic screening" claims; align to optional, defensible CAC usage)
     # -----------------------------
     framework_html = """
 <div class="block">
@@ -1683,34 +1698,27 @@ with tab_framework:
 </div>
 
 <div class="block" style="margin-top:14px;">
-  <div class="block-title">Coronary calcium: Why systematic screening is justified</div>
+  <div class="block-title">Coronary calcium: defensible use</div>
+
   <div class="kvline">
-    <b>Evidence-driven rationale:</b> CAC is the strongest independent predictor of cardiovascular events, outperforming all risk scores. <span style="background-color:#fff3cd; padding:2px 4px; border-radius:3px;"><b>CAC=0 confers a "warranty period" of 5+ years</b></span> with near-zero event rates, while any CAC >0 identifies subclinical disease requiring aggressive management.
+    CAC is used as a <b>risk-clarification</b> tool when plaque is unmeasured and the prevention decision is
+    <b>preference-sensitive</b> or <b>uncertain</b>.
   </div>
-  
-  <div class="kvline" style="margin-top:10px;">
-    <b>Systematic approach:</b> CAC should be obtained <b>routinely</b> in adults ≥40 with any risk signal (Level 2+) to:
-  </div>
+
+  <div class="kvline" style="margin-top:10px;"><b>Defensible indications (typical):</b></div>
   <ul style="margin:6px 0 0 18px;">
-    <li><b>Defer therapy</b> when CAC=0 provides confidence in delayed intervention</li>
-    <li><b>Initiate therapy</b> when any CAC >0 provides definitive evidence of atherosclerosis</li>
-    <li><b>Guide intensity</b> based on plaque burden (CAC 1-99 vs ≥100)</li>
+    <li>Borderline/intermediate near-term risk where the result could change timing or intensity</li>
+    <li>Discordant signals (enhancers/biomarkers vs estimated risk)</li>
+    <li>Patient hesitancy where objective plaque assessment may improve adherence</li>
   </ul>
-  
+
   <div class="kvline" style="margin-top:10px; padding:10px; background-color:#f8f9fa; border-left:4px solid #007bff;">
-    <b>Recommendation:</b> Consider CAC screening <b>by default</b> in all Level 2-3 patients when treatment decisions are uncertain. 
-    The radiation dose (0.5-1.5 mSv) is comparable to mammography, and cost-effectiveness data support its use at earlier 
-    ages than traditionally recommended, particularly in intermediate-risk groups where clinical uncertainty is highest.
-  </div>
-  
-  <div class="kvline" style="margin-top:10px;">
-    <b>Practice implications:</b> This evidence-based aggressive stance transforms CAC from a "tie-breaker" to a 
-    <b>foundational decision-making tool</b> that directly determines therapy initiation, intensification, or deferral.
+    <b>Engine rule:</b> CAC is <b>never recommended</b>. It is shown as <b>Optional</b> only when the result
+    is expected to change management or improve confidence in deferring vs intensifying therapy.
   </div>
 </div>
 """
 
-    # Render the HTML
     st.markdown(framework_html, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
@@ -1720,6 +1728,17 @@ with tab_details:
     st.subheader("Anchors (near-term vs lifetime)")
     st.markdown(f"**Near-term anchor:** {near_anchor}")
     st.markdown(f"**Lifetime anchor:** {life_anchor}")
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("Coronary calcium (engine rationale)")
+    cs = (out.get("insights") or {}).get("cac_decision_support") or {}
+    st.write(f"**Status:** {(cs.get('status') or '—')}")
+    if cs.get("rationale"):
+        st.write(f"**Rationale:** {scrub_terms(cs.get('rationale'))}")
+    if cs.get("message"):
+        st.write(f"**Use:** {scrub_terms(cs.get('message'))}")
+    if cs.get("tag"):
+        st.caption(f"Tag: {cs.get('tag')}")
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Decision stability (detail)")
@@ -1772,6 +1791,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
