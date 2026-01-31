@@ -1693,8 +1693,6 @@ with tab_framework:
         unsafe_allow_html=True,
     )
 
-::contentReference[oaicite:0]{index=0}
-
 
 # ------------------------------------------------------------
 # DETAILS TAB
@@ -1755,6 +1753,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
