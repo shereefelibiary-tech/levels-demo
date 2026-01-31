@@ -300,6 +300,20 @@ div[data-testid="stExpander"] div[role="button"] {
 # ============================================================
 import re
 
+def scrub_terms(s: str) -> str:
+    if not s:
+        return s
+    s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
+    s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
+    return s
+
+def scrub_list(xs):
+    if not xs:
+        return xs
+    return [scrub_terms(str(x)) for x in xs]
+
 def extract_management_plan(levels: dict) -> str:
     return str((levels.get("managementPlan") or levels.get("defaultPosture") or "")).strip()
 
@@ -318,6 +332,7 @@ def extract_aspirin_line(asp: dict) -> str:
     if l.startswith("secondary prevention"):
         return "Secondary prevention (if no contraindication)"
     return raw or "—"
+
 
 # -----------------------------
 # RECOMMENDED ACTION (decision-only, no redundancy)
@@ -1897,6 +1912,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
