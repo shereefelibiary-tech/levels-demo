@@ -77,91 +77,204 @@ st.set_page_config(page_title="Risk Continuum", layout="wide")
 st.markdown(
     """
 <style>
-/* Ensure consistent font & spacing inside components.html() */
-.components-html, 
+
+/* ============================================================
+   Global typography + color
+   ============================================================ */
+html, body, [class*="css"] {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+               "Helvetica Neue", Arial, sans-serif;
+  color: #1f2937;
+}
+
+/* Ensure components.html (iframe content) matches app */
+.components-html,
 .components-html * {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+               "Helvetica Neue", Arial, sans-serif !important;
   color: #1f2937;
   line-height: 1.35;
 }
 
-html, body, [class*="css"] {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
-  color: #1f2937;
-}
-/* Fix Chrome top clipping */
-.block-container { padding-top: 2.25rem; padding-bottom: 1.0rem; }
-div[data-testid="stVerticalBlock"] { gap: 0.6rem; }
-div[data-testid="stMarkdownContainer"] p { margin: 0.25rem 0; }
-div[data-testid="stMarkdownContainer"] ul { margin: 0.25rem 0 0.25rem 1.1rem; }
-div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
-.header-card {
-  background:#fff; border:1px solid rgba(31,41,55,0.12);
-  border-radius:14px; padding:16px 18px; margin-bottom:10px;
-}
-.header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
-.header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
-.hr { margin:10px 0 10px 0; border-top:1px solid rgba(31,41,55,0.12); }
-.muted { color:#6b7280; font-size:0.9rem; }
-.small-help { color: rgba(31,41,55,0.70); font-size:0.88rem; }
-.badge {
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  border:1px solid rgba(31,41,55,0.15);
-  background:#fff;
-  font-size:0.82rem;
-  margin-left:6px;
-}
-.ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
-.miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
-.block {
-  border:1px solid rgba(31,41,55,0.12);
-  border-radius:14px;
-  background:#fff;
-  padding:14px 16px;
-}
-.block-title {
-  font-variant-caps:all-small-caps;
-  letter-spacing:0.08em;
-  font-weight:900;
-  font-size:0.85rem;
-  color:#4b5563;
-  margin-bottom:8px;
-}
-.kvline { margin: 6px 0; line-height:1.35; }
-.kvline b { font-weight:900; }
-.block.compact { padding: 10px 12px; border-radius: 12px; }
-.block-title.compact { margin-bottom: 6px; font-size: 0.80rem; letter-spacing: 0.07em; }
-.kvline.compact { margin: 4px 0; line-height: 1.22; }
-.compact-caption { margin-top: 4px; color: rgba(31,41,55,0.62); font-size: 0.82rem; }
-.inline-muted { color: rgba(31,41,55,0.65); font-size: 0.86rem; }
-div[data-testid="stExpander"] div[role="button"] { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+/* ============================================================
+   Layout + spacing normalization
+   ============================================================ */
 
-/* ──────────────────────────────────────────────── */
-/* NEW: Table styling for Decision Framework tab     */
-.custom-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.92rem;
-    border: 1px solid rgba(31,41,55,0.12);
+/* Fix Chrome top clipping */
+.block-container {
+  padding-top: 2.25rem;
+  padding-bottom: 1.0rem;
 }
-.custom-table th,
-.custom-table td {
-    padding: 10px;
-    text-align: left;
-    border-bottom: 1px solid rgba(31,41,55,0.12);
-    vertical-align: top;
+
+/* Reduce Streamlit vertical stacking gaps */
+div[data-testid="stVerticalBlock"] {
+  gap: 0.6rem;
 }
-.custom-table th {
-    background: #f9fafb;
-    font-weight: 600;
-    border-bottom: 2px solid rgba(31,41,55,0.18);
+
+/* Tighten markdown defaults */
+div[data-testid="stMarkdownContainer"] p {
+  margin: 0.25rem 0;
 }
-.custom-table tr:last-child td {
-    border-bottom: none;
+div[data-testid="stMarkdownContainer"] ul {
+  margin: 0.25rem 0 0.25rem 1.1rem;
 }
-/* ──────────────────────────────────────────────── */
+div[data-testid="stMarkdownContainer"] li {
+  margin: 0.10rem 0;
+}
+
+/* Horizontal rule */
+.hr {
+  margin: 10px 0;
+  border-top: 1px solid rgba(31,41,55,0.12);
+}
+
+/* ============================================================
+   Cards / blocks
+   ============================================================ */
+.header-card {
+  background: #fff;
+  border: 1px solid rgba(31,41,55,0.12);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 10px;
+}
+
+.header-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  margin: 0 0 4px 0;
+}
+
+.header-sub {
+  color: rgba(31,41,55,0.60);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.block {
+  border: 1px solid rgba(31,41,55,0.12);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px 16px;
+}
+
+/* Reduce vertical gaps between adjacent blocks */
+.block + .block {
+  margin-top: 8px;
+}
+
+.block-title {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.08em;
+  font-weight: 900;
+  font-size: 0.85rem;
+  color: #4b5563;
+  margin-bottom: 8px;
+}
+
+.kvline {
+  margin: 6px 0;
+  line-height: 1.35;
+}
+.kvline b {
+  font-weight: 900;
+}
+
+/* Compact variant */
+.block.compact {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+.block-title.compact {
+  margin-bottom: 6px;
+  font-size: 0.80rem;
+  letter-spacing: 0.07em;
+}
+.kvline.compact {
+  margin: 4px 0;
+  line-height: 1.22;
+}
+
+.compact-caption {
+  margin-top: 4px;
+  color: rgba(31,41,55,0.62);
+  font-size: 0.82rem;
+}
+
+.inline-muted {
+  color: rgba(31,41,55,0.65);
+  font-size: 0.86rem;
+}
+
+/* ============================================================
+   Badges
+   ============================================================ */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(31,41,55,0.15);
+  background: #fff;
+  font-size: 0.82rem;
+  margin-left: 6px;
+}
+.ok {
+  border-color: rgba(16,185,129,0.35);
+  background: rgba(16,185,129,0.08);
+}
+.miss {
+  border-color: rgba(245,158,11,0.35);
+  background: rgba(245,158,11,0.10);
+}
+
+/* ============================================================
+   Tables (Decision Framework + general)
+   ============================================================ */
+
+/* Normalize table look everywhere */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+/* Tight but readable row height */
+table th,
+table td {
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+  padding-left: 10px;
+  padding-right: 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(31,41,55,0.12);
+}
+
+/* Table headers */
+table th {
+  background: #f9fafb;
+  font-weight: 600;
+  border-bottom: 2px solid rgba(31,41,55,0.18);
+}
+
+/* Remove last-row border */
+table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Reduce iframe wrapper spacing around tables */
+.components-html {
+  margin-top: 6px !important;
+  margin-bottom: 6px !important;
+}
+
+/* ============================================================
+   Expanders
+   ============================================================ */
+div[data-testid="stExpander"] div[role="button"] {
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
 
 </style>
 """,
@@ -1800,6 +1913,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
