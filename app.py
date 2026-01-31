@@ -77,6 +77,14 @@ st.set_page_config(page_title="Risk Continuum", layout="wide")
 st.markdown(
     """
 <style>
+/* Ensure consistent font & spacing inside components.html() */
+.components-html, 
+.components-html * {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif !important;
+  color: #1f2937;
+  line-height: 1.35;
+}
+
 html, body, [class*="css"] {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
@@ -1792,6 +1800,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
