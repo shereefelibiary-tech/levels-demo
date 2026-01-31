@@ -24,6 +24,20 @@ from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_w
 
 get_level_definition_payload = getattr(le, "get_level_definition_payload", None)
 
+def safe_level_def(level_num: int, sublevel: str | None = None) -> dict:
+    fn = get_level_definition_payload
+    if not callable(fn):
+        return {}
+    try:
+        return fn(level_num, sublevel=sublevel)
+    except TypeError:
+        # if engine uses a different signature
+        try:
+            return fn(level_num, sublevel)
+        except Exception:
+            return {}
+    except Exception:
+        return {}
 
 
 # ============================================================
@@ -1391,8 +1405,10 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-
     # Context
+    # (guard: make sure plaque_unmeasured exists in this scope)
+    plaque_unmeasured = _plaque_unmeasured(ev)
+
     with col_c:
         driver_line = (
             f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
@@ -1400,7 +1416,8 @@ with tab_report:
         )
         plaque_line = (
             "<div class='kvline compact inline-muted'>Plaque unmeasured (CAC not performed)</div>"
-            if plaque_unmeasured else ""
+            if plaque_unmeasured
+            else ""
         )
 
         st.markdown(
@@ -1421,6 +1438,8 @@ with tab_report:
     st.caption("Click **Copy**, then paste into the EMR note.")
     emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
 
+
+
 # ------------------------------------------------------------
 # DECISION FRAMEWORK TAB
 # ------------------------------------------------------------
@@ -1430,6 +1449,16 @@ with tab_framework:
         "Levels are assigned based on biologic signal strength, plaque status, and convergence of risk — "
         "not by forced treatment rules."
     )
+
+    st.markdown("### This patient")
+    this_def = safe_level_def(level, sub) if "safe_level_def" in globals() else {}
+    if this_def:
+        title = this_def.get("sublevel_name") or this_def.get("level_name") or "—"
+        desc = this_def.get("sublevel_definition") or this_def.get("level_definition") or "—"
+        st.markdown(f"**Assigned:** Level {level}" + (f" ({sub})" if sub else "") + f" — {title}")
+        st.write(desc)
+    else:
+        st.info("Engine definitions not available (get_level_definition_payload not found).")
 
     # -----------------------------
     # Block: Major biologic driver definition
@@ -1538,6 +1567,50 @@ with tab_framework:
 """,
         unsafe_allow_html=True,
     )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+    # -----------------------------
+    # Table 2: Explicit transition criteria
+    # -----------------------------
+    st.markdown(
+        """
+<div class="block">
+  <div class="block-title">Level transition criteria (explicit cut-offs)</div>
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.92rem;">
+      <thead>
+        <tr style="background:#f9fafb;">
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:180px;">Domain</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Marker</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Cut-off / condition</th>
+          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">Level effect</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- (your criteria rows unchanged here) -->
+      </tbody>
+    </table>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+<div class="block" style="margin-top:14px;">
+  <div class="block-title">Coronary calcium</div>
+  <div class="kvline">
+    CAC is used <b>primarily</b> as a tie-breaker when plaque is unmeasured.
+    It is obtained when a result of CAC = 0 would support deferring therapy,
+    or when a positive score would support initiation or intensification.
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
@@ -1740,6 +1813,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
