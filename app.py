@@ -108,157 +108,219 @@ st.markdown(
     """
 <style>
 
-/* ================= SAFE GLOBAL BASE ================= */
-:root { --rc-body: 0.94rem; }
-
+/* ===============================
+   BASE APP TYPOGRAPHY (SAFE)
+   =============================== */
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
 
+/* Apply font without breaking Streamlit sizing */
 .stApp, .stApp * {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
 
-/* Layout */
-.block-container { padding-top: 2.25rem; padding-bottom: 1.0rem; }
-div[data-testid="stVerticalBlock"] { gap: 0.6rem; }
-
-div[data-testid="stMarkdownContainer"] p { margin: 0.25rem 0; }
-div[data-testid="stMarkdownContainer"] ul { margin: 0.25rem 0 0.25rem 1.1rem; }
-div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
-
-.hr { margin:10px 0; border-top:1px solid rgba(31,41,55,0.12); }
-
-/* ================= CARDS ================= */
-.block {
-  border:1px solid rgba(31,41,55,0.12);
-  border-radius:14px;
-  background:#fff;
-  padding:14px 16px;
-  font-size: var(--rc-body);
-  line-height:1.35;
+/* ===============================
+   LAYOUT + SPACING
+   =============================== */
+.block-container {
+  padding-top: 2.25rem;
+  padding-bottom: 1.0rem;
 }
-.block + .block { margin-top:8px; }
+
+div[data-testid="stVerticalBlock"] {
+  gap: 0.6rem;
+}
+
+div[data-testid="stMarkdownContainer"] p {
+  margin: 0.25rem 0;
+}
+div[data-testid="stMarkdownContainer"] ul {
+  margin: 0.25rem 0 0.25rem 1.1rem;
+}
+div[data-testid="stMarkdownContainer"] li {
+  margin: 0.10rem 0;
+}
+
+.hr {
+  margin: 10px 0;
+  border-top: 1px solid rgba(31,41,55,0.12);
+}
+
+/* ===============================
+   CARDS / BLOCKS
+   =============================== */
+.block {
+  border: 1px solid rgba(31,41,55,0.12);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px 16px;
+  font-size: 0.94rem;
+  line-height: 1.35;
+}
+
+.block + .block {
+  margin-top: 8px;
+}
 
 .block-title {
-  font-variant-caps:all-small-caps;
-  letter-spacing:0.08em;
-  font-weight:900;
-  font-size:0.85rem;
-  color:#4b5563;
-  margin-bottom:8px;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.08em;
+  font-weight: 900;
+  font-size: 0.85rem;
+  color: #4b5563;
+  margin-bottom: 8px;
 }
 
-.kvline { margin:6px 0; line-height:1.35; }
-.kvline b { font-weight:900; }
+.kvline {
+  margin: 6px 0;
+  line-height: 1.35;
+}
+.kvline b {
+  font-weight: 900;
+}
 
+/* Compact cards */
 .block.compact {
-  padding:10px 12px;
-  border-radius:12px;
-  font-size:0.90rem;
-  line-height:1.28;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 0.90rem;
+  line-height: 1.28;
 }
-.block-title.compact { font-size:0.80rem; margin-bottom:6px; }
 
-/* ================= TABLES ================= */
+.block-title.compact {
+  font-size: 0.80rem;
+  margin-bottom: 6px;
+}
+
+.kvline.compact {
+  margin: 4px 0;
+  line-height: 1.22;
+}
+
+.compact-caption {
+  margin-top: 4px;
+  color: rgba(31,41,55,0.62);
+  font-size: 0.82rem;
+}
+
+.inline-muted {
+  color: rgba(31,41,55,0.65);
+  font-size: 0.86rem;
+}
+
+/* ===============================
+   BADGES
+   =============================== */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(31,41,55,0.15);
+  background: #fff;
+  font-size: 0.82rem;
+  margin-left: 6px;
+}
+
+.ok {
+  border-color: rgba(16,185,129,0.35);
+  background: rgba(16,185,129,0.08);
+}
+
+.miss {
+  border-color: rgba(245,158,11,0.35);
+  background: rgba(245,158,11,0.10);
+}
+
+/* ===============================
+   TABLES (SAFE)
+   =============================== */
 table {
-  width:100%;
-  border-collapse:collapse;
-  font-size:0.92rem;
-  line-height:1.25;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.25;
 }
-table th, table td {
-  padding:6px 10px;
-  border-bottom:1px solid rgba(31,41,55,0.12);
-  text-align:left;
-  vertical-align:top;
-}
-table th {
-  background:#f9fafb;
-  font-weight:700;
-  border-bottom:2px solid rgba(31,41,55,0.18);
-}
-table tr:last-child td { border-bottom:none; }
 
-/* iframe tables */
+table th,
+table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(31,41,55,0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+table th {
+  background: #f9fafb;
+  font-weight: 700;
+  border-bottom: 2px solid rgba(31,41,55,0.18);
+}
+
+table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Iframe tables (Decision Framework) */
 .components-html table,
 .components-html th,
 .components-html td {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif !important;
-  font-size:0.92rem !important;
-  line-height:1.25 !important;
+  font-size: 0.92rem !important;
+  line-height: 1.25 !important;
+  color: #1f2937 !important;
 }
 
-/* ================= INPUT FIXES ================= */
-input,
-textarea,
-div[data-baseweb="input"] input,
-div[data-baseweb="textarea"] textarea {
-  font-size: var(--rc-body) !important;
-  line-height:1.25 !important;
-  padding:0.4rem !important;
+.components-html {
+  margin-top: 4px !important;
+  margin-bottom: 4px !important;
+}
+.components-html + .components-html {
+  margin-top: 6px !important;
 }
 
-div[data-baseweb="input"] > div { align-items:center !important; }
-div[data-baseweb="select"] > div {
-  font-size: var(--rc-body) !important;
-  line-height:1.25 !important;
-}
-
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
-
-/* ============================================================
-   Expanders
-   ============================================================ */
+/* ===============================
+   EXPANDERS
+   =============================== */
 div[data-testid="stExpander"] div[role="button"] {
   padding-top: 0.35rem;
   padding-bottom: 0.35rem;
 }
 
-/* ============================================================
-   FIX: Streamlit input widgets (prevent text overlap)
-   ============================================================ */
+/* ===============================
+   INPUT WIDGET FIXES
+   =============================== */
 input,
 textarea,
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
-  font-size: var(--font-size-body) !important;
+  font-size: 0.94rem !important;
   line-height: 1.25 !important;
-  padding-top: 0.4rem !important;
-  padding-bottom: 0.4rem !important;
+  padding: 0.4rem !important;
 }
 
-/* Fix number input +/- buttons alignment */
 div[data-baseweb="input"] > div {
   align-items: center !important;
 }
 
-/* Selectbox / multiselect */
 div[data-baseweb="select"] > div {
-  font-size: var(--font-size-body) !important;
+  font-size: 0.94rem !important;
   line-height: 1.25 !important;
 }
 
-/* Radio / checkbox labels */
 label,
 div[data-testid="stRadio"] label,
 div[data-testid="stCheckbox"] label {
   line-height: 1.25 !important;
 }
 
-/* Sidebar inputs */
 section[data-testid="stSidebar"] input,
 section[data-testid="stSidebar"] textarea {
-  font-size: var(--font-size-body) !important;
+  font-size: 0.94rem !important;
   line-height: 1.25 !important;
 }
 
@@ -266,6 +328,7 @@ section[data-testid="stSidebar"] textarea {
 """,
     unsafe_allow_html=True,
 )
+
 
 # ============================================================
 # Normalized extractors (single source of truth)
@@ -1995,6 +2058,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
