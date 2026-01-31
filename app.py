@@ -1530,57 +1530,57 @@ with tab_framework:
     <div class="block">
       <div class="block-title">Levels overview</div>
       <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:0.92rem; border:1px solid rgba(31,41,55,0.12);">
+        <table class="custom-table">
           <thead>
-            <tr style="background:#f9fafb;">
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Level</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Risk state</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">What qualifies</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Medication posture</th>
+            <tr>
+              <th>Level</th>
+              <th>Risk state</th>
+              <th>What qualifies</th>
+              <th>Medication posture</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>1</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Minimal risk signal</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">No disease and no dominant biologic driver on available data</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">❌ Do not treat</td>
+              <td><b>1</b></td>
+              <td style="font-weight:800;">Minimal risk signal</td>
+              <td>No disease and no dominant biologic driver on available data</td>
+              <td>❌ Do not treat</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>2A</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Emerging (isolated)</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Exactly one mild signal (see criteria table)</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">❌ Do not treat routinely</td>
+              <td><b>2A</b></td>
+              <td style="font-weight:800;">Emerging (isolated)</td>
+              <td>Exactly one mild signal (see criteria table)</td>
+              <td>❌ Do not treat routinely</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>2B</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Emerging (converging)</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥2 mild signals, or borderline/intermediate near-term risk with plaque unmeasured</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🟡 Treatment reasonable (preference-sensitive)</td>
+              <td><b>2B</b></td>
+              <td style="font-weight:800;">Emerging (converging)</td>
+              <td>≥2 mild signals, or borderline/intermediate near-term risk with plaque unmeasured</td>
+              <td>🟡 Treatment reasonable (preference-sensitive)</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>3A</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Actionable biology</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥1 major biologic driver, without additional accelerators</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🟠 Treatment reasonable</td>
+              <td><b>3A</b></td>
+              <td style="font-weight:800;">Actionable biology</td>
+              <td>≥1 major biologic driver, without additional accelerators</td>
+              <td>🟠 Treatment reasonable</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>3B</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Actionable biology + enhancers</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver + ≥1 accelerator/enhancer</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🟠 Treatment generally favored</td>
+              <td><b>3B</b></td>
+              <td style="font-weight:800;">Actionable biology + enhancers</td>
+              <td>Major driver + ≥1 accelerator/enhancer</td>
+              <td>🟠 Treatment generally favored</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>4</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Subclinical atherosclerosis</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC 1–99</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🔴 Treat (target-driven)</td>
+              <td><b>4</b></td>
+              <td style="font-weight:800;">Subclinical atherosclerosis</td>
+              <td>CAC 1–99</td>
+              <td>🔴 Treat (target-driven)</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>5</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12); font-weight:800;">Very high risk / ASCVD intensity</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC ≥100 or clinical ASCVD</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">🔴 Treat (secondary prevention)</td>
+              <td><b>5</b></td>
+              <td style="font-weight:800;">Very high risk / ASCVD intensity</td>
+              <td>CAC ≥100 or clinical ASCVD</td>
+              <td>🔴 Treat (secondary prevention)</td>
             </tr>
           </tbody>
         </table>
@@ -1595,103 +1595,103 @@ with tab_framework:
     <div class="block">
       <div class="block-title">Level transition criteria (explicit cut-offs)</div>
       <div style="overflow-x:auto;">
-        <table style="width:100%; border-collapse:collapse; font-size:0.92rem; border:1px solid rgba(31,41,55,0.12);">
+        <table class="custom-table">
           <thead>
-            <tr style="background:#f9fafb;">
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Domain</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Marker</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Cut-off / condition</th>
-              <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Level effect</th>
+            <tr>
+              <th>Domain</th>
+              <th>Marker</th>
+              <th>Cut-off / condition</th>
+              <th>Level effect</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td rowspan="4" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Atherogenic burden</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">ApoB</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">80–99 mg/dL</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
+              <td rowspan="4"><b>Atherogenic burden</b></td>
+              <td>ApoB</td>
+              <td>80–99 mg/dL</td>
+              <td>Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥100 mg/dL</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
+              <td> </td>
+              <td>≥100 mg/dL</td>
+              <td>Major driver → Level 3 (3A unless enhancer present)</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">LDL-C<br/><span class="inline-muted">(if ApoB not measured)</span></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">100–129 mg/dL</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
+              <td>LDL-C<br/><span class="inline-muted">(if ApoB not measured)</span></td>
+              <td>100–129 mg/dL</td>
+              <td>Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥130 mg/dL</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
-            </tr>
-
-            <tr>
-              <td rowspan="3" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Glycemia</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">A1c</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">5.7–6.1%</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
-            </tr>
-            <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">6.2–6.4%</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal (near diabetes boundary) → favors Level 2B if present</td>
-            </tr>
-            <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥6.5% or diabetes = true</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
+              <td> </td>
+              <td>≥130 mg/dL</td>
+              <td>Major driver → Level 3 (3A unless enhancer present)</td>
             </tr>
 
             <tr>
-              <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Inflammation</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">hsCRP</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥2 mg/L alone</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
+              <td rowspan="3"><b>Glycemia</b></td>
+              <td>A1c</td>
+              <td>5.7–6.1%</td>
+              <td>Mild signal → Level 2A / 2B depending on convergence</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Chronic inflammatory disease present</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
+              <td> </td>
+              <td>6.2–6.4%</td>
+              <td>Mild signal (near diabetes boundary) → favors Level 2B if present</td>
             </tr>
-
             <tr>
-              <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Genetics</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Lp(a)</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥125 nmol/L or ≥50 mg/dL</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
+              <td> </td>
+              <td>≥6.5% or diabetes = true</td>
+              <td>Major driver → Level 3</td>
             </tr>
 
             <tr>
-              <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Smoking</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Current smoking</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Yes</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
+              <td rowspan="2"><b>Inflammation</b></td>
+              <td>hsCRP</td>
+              <td>≥2 mg/L alone</td>
+              <td>Mild signal → Level 2A / 2B depending on convergence</td>
+            </tr>
+            <tr>
+              <td> </td>
+              <td>Chronic inflammatory disease present</td>
+              <td>Major driver → Level 3</td>
             </tr>
 
             <tr>
-              <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Family history</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Premature ASCVD</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Present alone</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A / 2B depending on convergence</td>
-            </tr>
-            <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Present + major driver</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Enhancer → favors 3B (if Level 3 is otherwise met)</td>
+              <td><b>Genetics</b></td>
+              <td>Lp(a)</td>
+              <td>≥125 nmol/L or ≥50 mg/dL</td>
+              <td>Major driver → Level 3</td>
             </tr>
 
             <tr>
-              <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Plaque (CAC)</b></td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC 1–99</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Measured</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 4</td>
+              <td><b>Smoking</b></td>
+              <td>Current smoking</td>
+              <td>Yes</td>
+              <td>Major driver → Level 3</td>
+            </tr>
+
+            <tr>
+              <td rowspan="2"><b>Family history</b></td>
+              <td>Premature ASCVD</td>
+              <td>Present alone</td>
+              <td>Mild signal → eligible for Level 2A / 2B depending on convergence</td>
             </tr>
             <tr>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC ≥100 or clinical ASCVD</td>
-              <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 5</td>
+              <td> </td>
+              <td>Present + major driver</td>
+              <td>Enhancer → favors 3B (if Level 3 is otherwise met)</td>
+            </tr>
+
+            <tr>
+              <td rowspan="2"><b>Plaque (CAC)</b></td>
+              <td>CAC 1–99</td>
+              <td>Measured</td>
+              <td>Level 4</td>
+            </tr>
+            <tr>
+              <td> </td>
+              <td>CAC ≥100 or clinical ASCVD</td>
+              <td>Level 5</td>
             </tr>
           </tbody>
         </table>
@@ -1803,6 +1803,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
