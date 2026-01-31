@@ -103,191 +103,106 @@ PREVENT_EXPLAINER = (
 # Page + styling
 # ============================================================
 st.set_page_config(page_title="Risk Continuum", layout="wide")
-st.write("app.py loaded OK — scrub_terms defined:", "scrub_terms" in globals())
+# (remove debug line; it shifts layout and looks like a missing title)
+# st.write("app.py loaded OK — scrub_terms defined:", "scrub_terms" in globals())
 
 st.markdown(
     """
 <style>
 
 /* ============================================================
-   Global typography + color
+   SAFE global font (do NOT force font-size on all div/span/label)
    ============================================================ */
-html, body, [class*="css"] {
+html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
 
-/* ============================================================
-   Global typography system (single source of truth)
-   ============================================================ */
-:root {
-  --font-family-main: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
-                       "Helvetica Neue", Arial, sans-serif;
-  --font-size-body: 0.94rem;
-  --font-size-small: 0.86rem;
-  --font-size-caption: 0.82rem;
-  --line-height-body: 1.35;
-}
-
-/* Force consistent font/size/line-height across Streamlit + HTML
-   NOTE: this is intentionally broad; input widgets are fixed below. */
-html, body,
-[class*="css"],
-p, li, span, div, label {
-  font-family: var(--font-family-main) !important;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-body);
+/* Apply font to app without clobbering widget sizing */
+.stApp, .stApp * {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+               "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
-
-/* Headings: subtle hierarchy */
-h1, h2, h3, h4 {
-  font-family: var(--font-family-main) !important;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
-
-/* Ensure components.html (iframe content) matches app */
-.components-html,
-.components-html * {
-  font-family: var(--font-family-main) !important;
-  color: #1f2937;
-  line-height: var(--line-height-body);
-}
-
-/* ============================================================
-   Layout + spacing normalization
-   ============================================================ */
 
 /* Fix Chrome top clipping */
-.block-container {
-  padding-top: 2.25rem;
-  padding-bottom: 1.0rem;
-}
+.block-container { padding-top: 2.25rem; padding-bottom: 1.0rem; }
 
-/* Reduce Streamlit vertical stacking gaps */
-div[data-testid="stVerticalBlock"] {
-  gap: 0.6rem;
-}
-
-/* Tighten markdown defaults */
+/* Streamlit spacing */
+div[data-testid="stVerticalBlock"] { gap: 0.6rem; }
 div[data-testid="stMarkdownContainer"] p { margin: 0.25rem 0; }
 div[data-testid="stMarkdownContainer"] ul { margin: 0.25rem 0 0.25rem 1.1rem; }
 div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 
 /* Horizontal rule */
-.hr { margin: 10px 0; border-top: 1px solid rgba(31,41,55,0.12); }
+.hr { margin:10px 0; border-top:1px solid rgba(31,41,55,0.12); }
 
 /* ============================================================
-   Cards / blocks
+   Cards / blocks (explicit sizing only here)
    ============================================================ */
 .header-card {
-  background: #fff;
-  border: 1px solid rgba(31,41,55,0.12);
-  border-radius: 14px;
-  padding: 16px 18px;
-  margin-bottom: 10px;
+  background:#fff; border:1px solid rgba(31,41,55,0.12);
+  border-radius:14px; padding:16px 18px; margin-bottom:10px;
 }
-
-.header-title {
-  font-size: 1.15rem;
-  font-weight: 800;
-  margin: 0 0 4px 0;
-}
-
-.header-sub {
-  color: rgba(31,41,55,0.60);
-  font-size: 0.9rem;
-  margin: 0;
-}
+.header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
+.header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
 
 .block {
-  border: 1px solid rgba(31,41,55,0.12);
-  border-radius: 14px;
-  background: #fff;
-  padding: 14px 16px;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-body);
+  border:1px solid rgba(31,41,55,0.12);
+  border-radius:14px;
+  background:#fff;
+  padding:14px 16px;
+  font-size:0.94rem;
+  line-height:1.35;
 }
-
-/* Reduce vertical gaps between adjacent blocks */
 .block + .block { margin-top: 8px; }
 
 .block-title {
-  font-variant-caps: all-small-caps;
-  letter-spacing: 0.08em;
-  font-weight: 900;
-  font-size: 0.80rem;
-  color: #4b5563;
-  margin-bottom: 8px;
+  font-variant-caps:all-small-caps;
+  letter-spacing:0.08em;
+  font-weight:900;
+  font-size:0.85rem;
+  color:#4b5563;
+  margin-bottom:8px;
 }
 
-.kvline { margin: 6px 0; line-height: var(--line-height-body); }
-.kvline b { font-weight: 900; }
+.kvline { margin: 6px 0; line-height:1.35; }
+.kvline b { font-weight:900; }
 
-/* Compact variant */
-.block.compact {
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-size: var(--font-size-small);
-}
-.block-title.compact {
-  margin-bottom: 6px;
-  font-size: 0.78rem;
-  letter-spacing: 0.07em;
-}
+.block.compact { padding: 10px 12px; border-radius: 12px; font-size:0.90rem; line-height:1.28; }
+.block-title.compact { margin-bottom: 6px; font-size: 0.80rem; letter-spacing: 0.07em; }
 .kvline.compact { margin: 4px 0; line-height: 1.22; }
 
-.compact-caption {
-  margin-top: 4px;
-  color: rgba(31,41,55,0.62);
-  font-size: var(--font-size-caption);
-}
-.inline-muted {
-  color: rgba(31,41,55,0.65);
-  font-size: var(--font-size-caption);
-}
+.compact-caption { margin-top: 4px; color: rgba(31,41,55,0.62); font-size: 0.82rem; }
+.inline-muted { color: rgba(31,41,55,0.65); font-size: 0.86rem; }
 
-/* ============================================================
-   Badges
-   ============================================================ */
+/* Badges */
 .badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(31,41,55,0.15);
-  background: #fff;
-  font-size: 0.82rem;
-  margin-left: 6px;
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  border:1px solid rgba(31,41,55,0.15);
+  background:#fff;
+  font-size:0.82rem;
+  margin-left:6px;
 }
 .ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
 .miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
 
+/* Expanders */
+div[data-testid="stExpander"] div[role="button"] { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+
 /* ============================================================
-   Tables (Decision Framework + general)
+   Tables: normalize only tables (safe)
    ============================================================ */
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--font-size-body);
-}
-
-/* Force consistent typography inside iframe tables */
-.components-html table,
-.components-html th,
-.components-html td,
-table th,
-table td {
-  font-family: var(--font-family-main) !important;
-  font-size: var(--font-size-body);
+  font-size: 0.92rem;
   line-height: 1.25;
-  color: #1f2937;
 }
-
-/* Tight but readable row height */
-table th,
-table td {
+table th, table td {
   padding-top: 6px !important;
   padding-bottom: 6px !important;
   padding-left: 10px;
@@ -296,20 +211,33 @@ table td {
   vertical-align: top;
   border-bottom: 1px solid rgba(31,41,55,0.12);
 }
-
-/* Table headers */
 table th {
   background: #f9fafb;
   font-weight: 700;
   border-bottom: 2px solid rgba(31,41,55,0.18);
 }
-
-/* Remove last-row border */
 table tr:last-child td { border-bottom: none; }
 
-/* Reduce iframe wrapper spacing around tables */
+/* components.html (iframe) tables: enforce same font + size */
+.components-html table,
+.components-html th,
+.components-html td {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+               "Helvetica Neue", Arial, sans-serif !important;
+  font-size: 0.92rem !important;
+  line-height: 1.25 !important;
+  color: #1f2937 !important;
+}
+
+/* Reduce iframe wrapper spacing */
 .components-html { margin-top: 4px !important; margin-bottom: 4px !important; }
 .components-html + .components-html { margin-top: 6px !important; }
+
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 
 /* ============================================================
    Expanders
@@ -1988,6 +1916,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
