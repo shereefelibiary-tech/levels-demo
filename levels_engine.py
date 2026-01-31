@@ -1918,29 +1918,26 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
         actions.append("Above target on current therapy → assess adherence/tolerance and optimize lipid-lowering intensity.")
         return actions
 
-   # 6) CAC language ONLY when plaque is unmeasured, driven by cac_decision_support()
-cac_support = (out.get("insights") or {}).get("cac_decision_support") or {}
-if cac is None and cac_support:
-    st = (cac_support.get("status") or "").strip().lower()
-    msg = (cac_support.get("message") or "").strip()
-    rat = (cac_support.get("rationale") or "").strip()
+    # 6) CAC language ONLY when plaque is unmeasured, driven by cac_decision_support()
+    cac_support = (out.get("insights") or {}).get("cac_decision_support") or {}
+    if cac is None and cac_support:
+        st = (cac_support.get("status") or "").strip().lower()
+        msg = (cac_support.get("message") or "").strip()
+        rat = (cac_support.get("rationale") or "").strip()
 
-    # Keep it short and EMR-safe
-    if st == "optional":
-        actions.append("Coronary calcium: Optional.")
-        if rat:
-            actions.append(rat)
-        if msg:
-            actions.append(msg)
-        return actions
+        if st == "optional":
+            actions.append("Coronary calcium: Optional.")
+            if rat:
+                actions.append(rat)
+            if msg:
+                actions.append(msg)
+            return actions
 
-    # If deferred/suppressed, keep your prior conservative language
-    if st in ("deferred", "suppressed"):
-        actions.append("Coronary calcium: Do not obtain at this time.")
-        if msg:
-            actions.append(msg)
-        return actions
-
+        if st in ("deferred", "suppressed"):
+            actions.append("Coronary calcium: Do not obtain at this time.")
+            if msg:
+                actions.append(msg)
+            return actions
 
     # 7) Low near-term risk
     if zone == "hard_no":
@@ -1949,6 +1946,7 @@ if cac is None and cac_support:
 
     actions.append("No immediate escalation indicated; reassess with interval follow-up.")
     return actions
+
 
 # -------------------------------------------------------------------
 # Aspirin module
@@ -2338,6 +2336,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
