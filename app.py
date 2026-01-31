@@ -1450,8 +1450,22 @@ with tab_framework:
         "not by forced treatment rules."
     )
 
+    # -----------------------------
+    # Engine definition helper (fail-soft)
+    # -----------------------------
+    def safe_level_def(level_num: int, sublevel: str | None):
+        if get_level_definition_payload is None:
+            return {}
+        try:
+            return get_level_definition_payload(level_num, sublevel=sublevel)
+        except Exception:
+            return {}
+
+    # -----------------------------
+    # This patient (pulled from engine)
+    # -----------------------------
     st.markdown("### This patient")
-    this_def = safe_level_def(level, sub) if "safe_level_def" in globals() else {}
+    this_def = safe_level_def(level, sub)
     if this_def:
         title = this_def.get("sublevel_name") or this_def.get("level_name") or "—"
         desc = this_def.get("sublevel_definition") or this_def.get("level_definition") or "—"
@@ -1459,6 +1473,8 @@ with tab_framework:
         st.write(desc)
     else:
         st.info("Engine definitions not available (get_level_definition_payload not found).")
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     # -----------------------------
     # Block: Major biologic driver definition
@@ -1572,50 +1588,7 @@ with tab_framework:
 
     # -----------------------------
     # Table 2: Explicit transition criteria
-    # -----------------------------
-    st.markdown(
-        """
-<div class="block">
-  <div class="block-title">Level transition criteria (explicit cut-offs)</div>
-  <div style="overflow-x:auto;">
-    <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.92rem;">
-      <thead>
-        <tr style="background:#f9fafb;">
-          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:180px;">Domain</th>
-          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Marker</th>
-          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12); width:240px;">Cut-off / condition</th>
-          <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.12);">Level effect</th>
-        </tr>
-      </thead>
-      <tbody>
-        <!-- (your criteria rows unchanged here) -->
-      </tbody>
-    </table>
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-<div class="block" style="margin-top:14px;">
-  <div class="block-title">Coronary calcium</div>
-  <div class="kvline">
-    CAC is used <b>primarily</b> as a tie-breaker when plaque is unmeasured.
-    It is obtained when a result of CAC = 0 would support deferring therapy,
-    or when a positive score would support initiation or intensification.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
-    # -----------------------------
-    # Table 2: Explicit transition criteria
+    # (THIS IS THE ONLY COPY — remove duplicates)
     # -----------------------------
     st.markdown(
         """
@@ -1754,6 +1727,7 @@ with tab_framework:
         unsafe_allow_html=True,
     )
 
+
 # ------------------------------------------------------------
 # DETAILS TAB
 # ------------------------------------------------------------
@@ -1813,6 +1787,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
