@@ -1438,8 +1438,6 @@ with tab_report:
     st.caption("Click **Copy**, then paste into the EMR note.")
     emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
 
-
-
 # ------------------------------------------------------------
 # DECISION FRAMEWORK TAB
 # ------------------------------------------------------------
@@ -1454,11 +1452,17 @@ with tab_framework:
     # Engine definition helper (fail-soft)
     # -----------------------------
     def safe_level_def(level_num: int, sublevel: str | None):
-        fn = get_level_definition_payload  # you already set this via getattr(le, ...)
-        if fn is None:
+        fn = get_level_definition_payload  # set via getattr(le, "get_level_definition_payload", None)
+        if not callable(fn):
             return {}
         try:
             return fn(level_num, sublevel=sublevel)
+        except TypeError:
+            # tolerate alternate signature: fn(level, sublevel)
+            try:
+                return fn(level_num, sublevel)
+            except Exception:
+                return {}
         except Exception:
             return {}
 
@@ -1703,9 +1707,6 @@ with tab_framework:
         unsafe_allow_html=True,
     )
 
-    # -----------------------------
-    # CAC callout (language update)
-    # -----------------------------
     st.markdown(
         """
 <div class="block" style="margin-top:14px;">
@@ -1720,24 +1721,7 @@ with tab_framework:
         unsafe_allow_html=True,
     )
 
-
-    # -----------------------------
-    # CAC callout (language update)
-    # -----------------------------
-    st.markdown(
-        """
-<div class="block" style="margin-top:14px;">
-  <div class="block-title">Coronary calcium</div>
-  <div class="kvline">
-    CAC is used <b>primarily</b> as a tie-breaker when plaque is unmeasured.
-    It is obtained when a result of CAC = 0 would support deferring therapy,
-    or when a positive score would support initiation or intensification.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
+::contentReference[oaicite:0]{index=0}
 
 # ------------------------------------------------------------
 # DETAILS TAB
@@ -1798,6 +1782,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
