@@ -1362,7 +1362,7 @@ with tab_report:
     emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
 
 with tab_framework:
-    st.subheader("How Treatment Decisions Are Made")
+    st.subheader("How Levels Are Specified")
 
     # (Optional but recommended) show locked definitions coming from the engine
     defs = out.get("levelDefinitions") or {}
@@ -1479,6 +1479,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
