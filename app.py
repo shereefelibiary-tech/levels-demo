@@ -103,60 +103,46 @@ PREVENT_EXPLAINER = (
 # Page + styling
 # ============================================================
 st.set_page_config(page_title="Risk Continuum", layout="wide")
-# (remove debug line; it shifts layout and looks like a missing title)
-# st.write("app.py loaded OK — scrub_terms defined:", "scrub_terms" in globals())
 
 st.markdown(
     """
 <style>
 
-/* ============================================================
-   SAFE global font (do NOT force font-size on all div/span/label)
-   ============================================================ */
+/* ================= SAFE GLOBAL BASE ================= */
+:root { --rc-body: 0.94rem; }
+
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
 
-/* Apply font to app without clobbering widget sizing */
 .stApp, .stApp * {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
   color: #1f2937;
 }
 
-/* Fix Chrome top clipping */
+/* Layout */
 .block-container { padding-top: 2.25rem; padding-bottom: 1.0rem; }
-
-/* Streamlit spacing */
 div[data-testid="stVerticalBlock"] { gap: 0.6rem; }
+
 div[data-testid="stMarkdownContainer"] p { margin: 0.25rem 0; }
 div[data-testid="stMarkdownContainer"] ul { margin: 0.25rem 0 0.25rem 1.1rem; }
 div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 
-/* Horizontal rule */
 .hr { margin:10px 0; border-top:1px solid rgba(31,41,55,0.12); }
 
-/* ============================================================
-   Cards / blocks (explicit sizing only here)
-   ============================================================ */
-.header-card {
-  background:#fff; border:1px solid rgba(31,41,55,0.12);
-  border-radius:14px; padding:16px 18px; margin-bottom:10px;
-}
-.header-title { font-size:1.15rem; font-weight:800; margin:0 0 4px 0; }
-.header-sub { color: rgba(31,41,55,0.60); font-size:0.9rem; margin:0; }
-
+/* ================= CARDS ================= */
 .block {
   border:1px solid rgba(31,41,55,0.12);
   border-radius:14px;
   background:#fff;
   padding:14px 16px;
-  font-size:0.94rem;
+  font-size: var(--rc-body);
   line-height:1.35;
 }
-.block + .block { margin-top: 8px; }
+.block + .block { margin-top:8px; }
 
 .block-title {
   font-variant-caps:all-small-caps;
@@ -167,71 +153,62 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
   margin-bottom:8px;
 }
 
-.kvline { margin: 6px 0; line-height:1.35; }
+.kvline { margin:6px 0; line-height:1.35; }
 .kvline b { font-weight:900; }
 
-.block.compact { padding: 10px 12px; border-radius: 12px; font-size:0.90rem; line-height:1.28; }
-.block-title.compact { margin-bottom: 6px; font-size: 0.80rem; letter-spacing: 0.07em; }
-.kvline.compact { margin: 4px 0; line-height: 1.22; }
-
-.compact-caption { margin-top: 4px; color: rgba(31,41,55,0.62); font-size: 0.82rem; }
-.inline-muted { color: rgba(31,41,55,0.65); font-size: 0.86rem; }
-
-/* Badges */
-.badge {
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  border:1px solid rgba(31,41,55,0.15);
-  background:#fff;
-  font-size:0.82rem;
-  margin-left:6px;
+.block.compact {
+  padding:10px 12px;
+  border-radius:12px;
+  font-size:0.90rem;
+  line-height:1.28;
 }
-.ok { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.08); }
-.miss { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.10); }
+.block-title.compact { font-size:0.80rem; margin-bottom:6px; }
 
-/* Expanders */
-div[data-testid="stExpander"] div[role="button"] { padding-top: 0.35rem; padding-bottom: 0.35rem; }
-
-/* ============================================================
-   Tables: normalize only tables (safe)
-   ============================================================ */
+/* ================= TABLES ================= */
 table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.92rem;
-  line-height: 1.25;
+  width:100%;
+  border-collapse:collapse;
+  font-size:0.92rem;
+  line-height:1.25;
 }
 table th, table td {
-  padding-top: 6px !important;
-  padding-bottom: 6px !important;
-  padding-left: 10px;
-  padding-right: 10px;
-  text-align: left;
-  vertical-align: top;
-  border-bottom: 1px solid rgba(31,41,55,0.12);
+  padding:6px 10px;
+  border-bottom:1px solid rgba(31,41,55,0.12);
+  text-align:left;
+  vertical-align:top;
 }
 table th {
-  background: #f9fafb;
-  font-weight: 700;
-  border-bottom: 2px solid rgba(31,41,55,0.18);
+  background:#f9fafb;
+  font-weight:700;
+  border-bottom:2px solid rgba(31,41,55,0.18);
 }
-table tr:last-child td { border-bottom: none; }
+table tr:last-child td { border-bottom:none; }
 
-/* components.html (iframe) tables: enforce same font + size */
+/* iframe tables */
 .components-html table,
 .components-html th,
 .components-html td {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif !important;
-  font-size: 0.92rem !important;
-  line-height: 1.25 !important;
-  color: #1f2937 !important;
+  font-size:0.92rem !important;
+  line-height:1.25 !important;
 }
 
-/* Reduce iframe wrapper spacing */
-.components-html { margin-top: 4px !important; margin-bottom: 4px !important; }
-.components-html + .components-html { margin-top: 6px !important; }
+/* ================= INPUT FIXES ================= */
+input,
+textarea,
+div[data-baseweb="input"] input,
+div[data-baseweb="textarea"] textarea {
+  font-size: var(--rc-body) !important;
+  line-height:1.25 !important;
+  padding:0.4rem !important;
+}
+
+div[data-baseweb="input"] > div { align-items:center !important; }
+div[data-baseweb="select"] > div {
+  font-size: var(--rc-body) !important;
+  line-height:1.25 !important;
+}
 
 </style>
 """,
@@ -2018,6 +1995,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
