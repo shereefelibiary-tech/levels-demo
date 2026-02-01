@@ -1508,6 +1508,9 @@ def build_emr_note() -> str:
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
     lines.append("-" * 64)
 
+    # -----------------------------
+    # Snapshot
+    # -----------------------------
     lines.append(
         f"Level: {level}"
         + (f" ({sub})" if sub else "")
@@ -1522,11 +1525,13 @@ def build_emr_note() -> str:
         + (f" — {decision_stability_note}" if decision_stability_note else "")
     )
 
+    # -----------------------------
+    # Key metrics (kept concise)
+    # -----------------------------
     lines.append("")
     lines.append("KEY METRICS")
     lines.append(f"- Risk Signal Score: {rs.get('score','—')}/100 ({rs.get('band','—')})")
     lines.append(f"- ASCVD PCE (10y): {pce_line} {pce_cat}".strip())
-
     lines.append(
         f"- PREVENT (10y, population model): "
         f"total CVD {p_total if p_total is not None else '—'}%; "
@@ -1535,6 +1540,9 @@ def build_emr_note() -> str:
     if (p_total is None and p_ascvd is None) and p_note:
         lines.append(f"  PREVENT note: {p_note}")
 
+    # -----------------------------
+    # Targets (reference only)
+    # -----------------------------
     lines.append("")
     lines.append("TARGETS (IF TREATED)")
     if primary:
@@ -1545,25 +1553,47 @@ def build_emr_note() -> str:
     else:
         lines.append("- —")
 
-    # --- Recommended Action (decision-only) ---
+    # -----------------------------
+    # PLAN (single place: what to do + why)
+    # -----------------------------
+    lines.append("")
+    lines.append("PLAN (WHAT TO DO NEXT)")
+
+    # WHY: top drivers (engine-derived), plus stability context
+    why = (lvl.get("triggers") or [])[:3]
+    if why:
+        lines.append("Why:")
+        for w in why:
+            ww = scrub_terms(str(w)).strip()
+            if ww:
+                lines.append(f"- {ww}")
+
+    # WHAT: action lines (single list)
+    # 1) Recommended action (single sentence)
     rec_action = recommended_action_line(
         lvl, plan_clean, decision_stability, decision_stability_note
     )
-    lines.append("")
-    lines.append("RECOMMENDED ACTION")
-    lines.append(f"- {rec_action}")
-
-    # --- Management Plan (suppress for Level 1–2) ---
-    level_int = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
-    if level_int >= 3:
+    if rec_action:
         lines.append("")
-        lines.append("MANAGEMENT PLAN")
-        lines.append(plan_clean or "—")
+        lines.append("What to do:")
+        lines.append(f"- {rec_action}")
 
-    # --- Next Steps (canonical, shared with UI) ---
-    lines.append("")
-    lines.append("NEXT STEPS")
+    # 2) Action details from engine nextActions (already cleaned/standardized by compose_actions)
+    # Keep it short (3–6 lines max)
+    act = out.get("nextActions") or []
+    act_clean = []
+    for a in act:
+        aa = scrub_terms(str(a)).strip()
+        if aa:
+            act_clean.append(aa)
+    if act_clean:
+        for a in act_clean[:6]:
+            # avoid double periods
+            if a.endswith(".."):
+                a = a[:-1]
+            lines.append(f"- {a}")
 
+    # 3) Canonical CAC + aspirin (consistent with UI; no contradictions)
     cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
     cac_head = (cac_copy.get("headline") or "").strip()
     cac_det = (cac_copy.get("detail") or "").strip()
@@ -1578,10 +1608,10 @@ def build_emr_note() -> str:
 
     asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
     asp_head = (asp_copy.get("headline") or f"Aspirin: {asp_line}").strip()
-    lines.append(f"- {asp_head}")
+    if asp_head:
+        lines.append(f"- {asp_head}")
 
     lines.append("")
-
     return "\n".join(lines)
 
 # ============================================================
@@ -2278,6 +2308,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
