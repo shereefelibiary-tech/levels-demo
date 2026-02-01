@@ -1779,6 +1779,90 @@ with tab_report:
     st.markdown("### Clinical Report (copy/paste into EMR)")
     st.caption("Click **Copy**, then paste into the EMR note.")
     emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
+# ============================================================
+# Decision Framework — convergence + causality helpers
+# ============================================================
+
+def _in_range(v, lo=None, hi=None):
+    if v is None:
+        return False
+    try:
+        v = float(v)
+    except Exception:
+        return False
+    if lo is not None and v < lo:
+        return False
+    if hi is not None and v > hi:
+        return False
+    return True
+
+# ---- normalized patient values (single source of truth) ----
+apob_v = data.get("apob")
+ldl_v  = data.get("ldl")
+a1c_v  = data.get("a1c")
+hscrp_v = data.get("hscrp")
+lpa_v  = data.get("lpa")
+lpa_unit_v = data.get("lpa_unit")
+smoker_v = bool(data.get("smoking"))
+diabetes_v = bool(data.get("diabetes"))
+
+# ---- ApoB / LDL precedence ----
+apob_mild  = _in_range(apob_v, 80, 99)
+apob_major = _in_range(apob_v, 100, None)
+
+use_ldl = apob_v is None and ldl_v is not None
+ldl_mild  = use_ldl and _in_range(ldl_v, 100, 129)
+ldl_major = use_ldl and _in_range(ldl_v, 130, None)
+
+# ---- Glycemia ----
+a1c_mild1 = _in_range(a1c_v, 5.7, 6.1)
+a1c_mild2 = _in_range(a1c_v, 6.2, 6.4)
+a1c_major = diabetes_v or _in_range(a1c_v, 6.5, None)
+
+# ---- Inflammation ----
+hscrp_mild = _in_range(hscrp_v, 2.0, None)
+
+# ---- Genetics (unit-aware) ----
+lpa_major = (
+    (lpa_unit_v == "nmol/L" and _in_range(lpa_v, 125, None)) or
+    (lpa_unit_v == "mg/dL"  and _in_range(lpa_v, 50, None))
+)
+
+# ---- Smoking ----
+smoking_major = smoker_v
+
+# ============================================================
+# Convergence + causality determination
+# ============================================================
+
+# Mild signals (Level 2A/2B territory)
+mild_signals = [
+    apob_mild,
+    ldl_mild,
+    a1c_mild1 or a1c_mild2,
+    hscrp_mild,
+]
+
+mild_count = sum(bool(x) for x in mild_signals)
+has_convergence = mild_count >= 2
+
+# Major drivers (Level ≥3 territory)
+major_drivers = [
+    apob_major,
+    ldl_major,
+    a1c_major,
+    lpa_major,
+    smoking_major,
+]
+
+major_count = sum(bool(x) for x in major_drivers)
+
+# Did this patient reach Level ≥3?
+level3_or_higher = level >= 3
+
+# Which rows *caused* Level 3?
+CAUSES_LEVEL_3 = level3_or_higher and major_count > 0
+CAUSES_LEVEL_2 = (level == 2 and has_convergence)
 
 # ------------------------------------------------------------
 # DECISION FRAMEWORK TAB
@@ -1925,108 +2009,187 @@ with tab_framework:
 
     # Third section: Level transition criteria table
     components.html(
-        """
-<div style="overflow-x:auto;">
-  <table style="width:100%; border-collapse:collapse; font-size:0.92rem; border:1px solid rgba(31,41,55,0.12);">
-    <thead>
-      <tr style="background:#f9fafb;">
-        <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Domain</th>
-        <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Marker</th>
-        <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Cut-off / condition</th>
-        <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Level effect</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td rowspan="4" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Atherogenic burden</b></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">ApoB</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">80–99 mg/dL</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥100 mg/dL</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">LDL-C<br/><span class="inline-muted">(if ApoB not measured)</span></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">100–129 mg/dL</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A (isolated) or 2B (if converging)</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥130 mg/dL</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3 (3A unless enhancer present)</td>
-      </tr>
-      <tr>
-        <td rowspan="3" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Glycemia</b></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">A1c</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">5.7–6.1%</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">6.2–6.4%</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal (near diabetes boundary) → favors Level 2B if present</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥6.5% or diabetes = true</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
-      </tr>
-      <tr>
-        <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Inflammation</b></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">hsCRP</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥2 mg/L alone</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → Level 2A / 2B depending on convergence</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Chronic inflammatory disease present</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
-      </tr>
-      <tr>
-        <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Genetics</b></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Lp(a)</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">≥125 nmol/L or ≥50 mg/dL</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
-      </tr>
-      <tr>
-        <td style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Smoking</b></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Current smoking</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Yes</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Major driver → Level 3</td>
-      </tr>
-      <tr>
-        <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Family history</b></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Premature ASCVD</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Present alone</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Mild signal → eligible for Level 2A / 2B depending on convergence</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Present + major driver</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Enhancer → favors 3B (if Level 3 is otherwise met)</td>
-      </tr>
-      <tr>
-        <td rowspan="2" style="vertical-align:top; padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>Plaque (CAC)</b></td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC 1–99</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Measured</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 4</td>
-      </tr>
-      <tr>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"> </td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">CAC ≥100 or clinical ASCVD</td>
-        <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Level 5</td>
-      </tr>
-    </tbody>
-  </table>
+f"""
+<div class="rc-wrap">
+<style>
+  .rc-wrap {{ overflow-x:auto; }}
+
+  table.rc-table {{
+    width:100%;
+    border-collapse:collapse;
+    font-size:0.92rem;
+    border:1px solid rgba(31,41,55,0.12);
+  }}
+
+  .rc-table th {{
+    text-align:left;
+    padding:10px;
+    border-bottom:2px solid rgba(31,41,55,0.18);
+    background:#f9fafb;
+    font-weight:700;
+  }}
+
+  .rc-table td {{
+    padding:10px;
+    border-bottom:1px solid rgba(31,41,55,0.12);
+    vertical-align:top;
+  }}
+
+  /* Primary active row (patient falls here) */
+  .rc-active td {{
+    background: rgba(59,130,246,0.08) !important;
+  }}
+  .rc-active td:first-child {{
+    box-shadow: inset 4px 0 0 rgba(59,130,246,0.85);
+  }}
+
+  /* Converging signal (very light) */
+  .rc-converge td {{
+    background: rgba(59,130,246,0.035) !important;
+  }}
+  .rc-converge td:first-child {{
+    box-shadow: inset 2px 0 0 rgba(59,130,246,0.45);
+  }}
+
+  /* Causal driver (why Level ≥3 happened) */
+  .rc-cause td {{
+    background: rgba(245,158,11,0.10) !important;
+  }}
+  .rc-cause td:first-child {{
+    box-shadow: inset 4px 0 0 rgba(245,158,11,0.75);
+  }}
+
+  .rc-tag {{
+    display:inline-block;
+    font-size:12px;
+    padding:3px 8px;
+    border-radius:999px;
+    border:1px solid rgba(0,0,0,0.12);
+    margin-left:6px;
+  }}
+  .rc-mild {{
+    background: rgba(100,116,139,0.08);
+    border-color: rgba(100,116,139,0.28);
+  }}
+  .rc-major {{
+    background: rgba(245,158,11,0.12);
+    border-color: rgba(245,158,11,0.35);
+  }}
+  .rc-cause-tag {{
+    background: rgba(245,158,11,0.20);
+    border-color: rgba(245,158,11,0.60);
+    font-weight:700;
+  }}
+</style>
+
+<table class="rc-table">
+<thead>
+<tr>
+  <th>Domain</th>
+  <th>Marker</th>
+  <th>Cut-off / condition</th>
+  <th>Level effect</th>
+</tr>
+</thead>
+
+<tbody>
+
+<tr class="{ 'rc-cause' if (apob_major and CAUSES_LEVEL_3) else 'rc-active' if apob_mild else 'rc-converge' if (apob_mild and has_convergence) else '' }">
+  <td rowspan="4"><b>Atherogenic burden</b></td>
+  <td>ApoB</td>
+  <td>80–99 mg/dL</td>
+  <td>
+    Mild signal <span class="rc-tag rc-mild">mild</span>
+    { "<span class='rc-tag rc-cause-tag'>converging</span>" if apob_mild and has_convergence else "" }
+  </td>
+</tr>
+
+<tr class="{ 'rc-cause' if (apob_major and CAUSES_LEVEL_3) else '' }">
+  <td></td>
+  <td>≥100 mg/dL</td>
+  <td>
+    Major driver <span class="rc-tag rc-major">major</span>
+    { "<span class='rc-tag rc-cause-tag'>caused Level 3</span>" if apob_major and CAUSES_LEVEL_3 else "" }
+  </td>
+</tr>
+
+<tr class="{ 'rc-cause' if (ldl_major and CAUSES_LEVEL_3) else 'rc-active' if ldl_mild else '' }">
+  <td>LDL-C<br/><span class="inline-muted">(if ApoB not measured)</span></td>
+  <td>100–129 mg/dL</td>
+  <td>Mild signal <span class="rc-tag rc-mild">mild</span></td>
+</tr>
+
+<tr class="{ 'rc-cause' if (ldl_major and CAUSES_LEVEL_3) else '' }">
+  <td></td>
+  <td>≥130 mg/dL</td>
+  <td>
+    Major driver <span class="rc-tag rc-major">major</span>
+    { "<span class='rc-tag rc-cause-tag'>caused Level 3</span>" if ldl_major and CAUSES_LEVEL_3 else "" }
+  </td>
+</tr>
+
+<tr class="{ 'rc-cause' if (a1c_major and CAUSES_LEVEL_3) else 'rc-active' if (a1c_mild1 or a1c_mild2) else 'rc-converge' if has_convergence else '' }">
+  <td rowspan="3"><b>Glycemia</b></td>
+  <td>A1c</td>
+  <td>5.7–6.1%</td>
+  <td>Mild signal <span class="rc-tag rc-mild">mild</span></td>
+</tr>
+
+<tr class="{ 'rc-active' if a1c_mild2 else '' }">
+  <td></td>
+  <td>6.2–6.4%</td>
+  <td>Mild signal (near boundary)</td>
+</tr>
+
+<tr class="{ 'rc-cause' if (a1c_major and CAUSES_LEVEL_3) else '' }">
+  <td></td>
+  <td>≥6.5% or diabetes = true</td>
+  <td>
+    Major driver <span class="rc-tag rc-major">major</span>
+    { "<span class='rc-tag rc-cause-tag'>caused Level 3</span>" if a1c_major and CAUSES_LEVEL_3 else "" }
+  </td>
+</tr>
+
+<tr class="{ 'rc-active' if hscrp_mild else 'rc-converge' if has_convergence else '' }">
+  <td rowspan="2"><b>Inflammation</b></td>
+  <td>hsCRP</td>
+  <td>≥2 mg/L alone</td>
+  <td>Mild signal <span class="rc-tag rc-mild">mild</span></td>
+</tr>
+
+<tr>
+  <td></td>
+  <td>Chronic inflammatory disease</td>
+  <td>Major driver <span class="rc-tag rc-major">major</span></td>
+</tr>
+
+<tr class="{ 'rc-cause' if (lpa_major and CAUSES_LEVEL_3) else '' }">
+  <td><b>Genetics</b></td>
+  <td>Lp(a)</td>
+  <td>≥125 nmol/L or ≥50 mg/dL</td>
+  <td>
+    Major driver <span class="rc-tag rc-major">major</span>
+    { "<span class='rc-tag rc-cause-tag'>caused Level 3</span>" if lpa_major and CAUSES_LEVEL_3 else "" }
+  </td>
+</tr>
+
+<tr class="{ 'rc-cause' if (smoking_major and CAUSES_LEVEL_3) else '' }">
+  <td><b>Smoking</b></td>
+  <td>Current smoking</td>
+  <td>Yes</td>
+  <td>
+    Major driver <span class="rc-tag rc-major">major</span>
+    { "<span class='rc-tag rc-cause-tag'>caused Level 3</span>" if smoking_major and CAUSES_LEVEL_3 else "" }
+  </td>
+</tr>
+
+</tbody>
+</table>
 </div>
 """,
-        height=760,
-    )
+height=760,
+)
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     # Fourth section: CAC information
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
@@ -2137,6 +2300,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
