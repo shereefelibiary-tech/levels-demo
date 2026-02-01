@@ -390,7 +390,7 @@ st.info("De-identified use only. Do not enter patient identifiers.")
 
 
 # ============================================================
-# Normalized extractors (single source of truth)
+# Normalized extractors + action helpers (single source of truth)
 # ============================================================
 import re
 
@@ -457,7 +457,12 @@ def _clean_action_candidate(s: str) -> str:
         return ""
     return s
 
-def recommended_action_line(lvl: dict, plan_clean: str, decision_stability: str, decision_stability_note: str) -> str:
+def recommended_action_line(
+    lvl: dict,
+    plan_clean: str,
+    decision_stability: str,
+    decision_stability_note: str
+) -> str:
     """
     Single source of truth for RECOMMENDED ACTION.
 
@@ -491,107 +496,6 @@ def recommended_action_line(lvl: dict, plan_clean: str, decision_stability: str,
         return "No escalation today."
     return plan_action or "—"
 
-# ============================================================
-# Normalized extractors (single source of truth)
-# ============================================================
-import re
-
-def scrub_terms(s: str) -> str:
-    if not s:
-        return s
-    s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
-    s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
-    return s
-
-def scrub_list(xs):
-    if not xs:
-        return xs
-    return [scrub_terms(str(x)) for x in xs]
-
-def extract_management_plan(levels: dict) -> str:
-    return str((levels.get("managementPlan") or levels.get("defaultPosture") or "")).strip()
-
-def extract_decision_stability(levels: dict, insights: dict):
-    band = levels.get("decisionStability") or insights.get("decision_stability") or "—"
-    note = levels.get("decisionStabilityNote") or insights.get("decision_stability_note") or ""
-    return scrub_terms(band), scrub_terms(note)
-
-def extract_aspirin_line(asp: dict) -> str:
-    raw = scrub_terms(asp.get("status", "Not assessed"))
-    l = raw.lower()
-    if l.startswith("avoid"):
-        return "Not indicated"
-    if l.startswith("consider"):
-        return "Consider (shared decision)"
-    if l.startswith("secondary prevention"):
-        return "Secondary prevention (if no contraindication)"
-    return raw or "—"
-
-# -----------------------------
-# RECOMMENDED ACTION (decision-only, no redundancy)
-# -----------------------------
-_ACTION_FORBIDDEN = [
-    # plan / follow-up / tasks (must NOT appear in recommended action)
-    "reassess", "follow up", "follow-up", "next", "then", "after", "until",
-    "complete missing data", "missing data", "data completion", "obtain", "order",
-    "consider", "schedule", "monitor", "labs", "check", "repeat",
-    # specific next-step content
-    "cac", "calcium", "aspirin",
-]
-
-def _one_sentence(s: str) -> str:
-    s = (s or "").strip()
-    s = re.sub(r"\s+", " ", s)
-    # clause-ish punctuation that often introduces redundancy
-    s = s.replace("—", " ").replace(";", ".").replace(":", " ")
-    # take first sentence-ish chunk
-    s = re.split(r"[.!?]\s+", s, maxsplit=1)[0].strip()
-    if not s.endswith("."):
-        s += "."
-    return s
-
-def _clean_action_candidate(s: str) -> str:
-    s = _one_sentence(s)
-    low = s.lower()
-    if any(b in low for b in _ACTION_FORBIDDEN):
-        return ""
-    return s
-
-def recommended_action_line(lvl: dict, plan_clean: str, decision_stability: str, decision_stability_note: str) -> str:
-    """
-    Single source of truth for RECOMMENDED ACTION.
-
-    HARD CONTRACT (no redundancy):
-    - Exactly one sentence.
-    - Decision today only (no 'reassess', 'obtain', 'complete missing data', CAC/aspirin/labs).
-    - If plan_clean violates the contract, it is ignored.
-    """
-    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
-    sub = lvl.get("sublevel")
-
-    dominant = bool(lvl.get("dominantAction"))
-    if not dominant:
-        ds = (decision_stability or "").strip().lower()
-        note = (decision_stability_note or "").strip().lower()
-        dominant = (level >= 3 and ds == "high" and "dominant risk drivers" in note)
-
-    plan_action = _clean_action_candidate(plan_clean)
-
-    if level >= 5:
-        return plan_action or "Continue secondary-prevention intensity lipid-lowering."
-    if level == 4:
-        return plan_action or "Initiate or intensify lipid-lowering therapy (plaque present)."
-    if dominant:
-        return "Initiate treatment now."
-    if level == 3 and sub == "3B":
-        return plan_action or "Initiate lipid-lowering therapy."
-    if level == 3:
-        return "Treatment is reasonable."
-    if level <= 2:
-        return "No escalation today."
-    return plan_action or "—"
 
 # ============================================================
 # Visual: Risk Continuum bar
@@ -2286,6 +2190,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
