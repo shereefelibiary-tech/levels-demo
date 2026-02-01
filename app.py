@@ -1502,6 +1502,8 @@ def build_emr_note() -> str:
 tab_report, tab_framework, tab_details, tab_debug = st.tabs(
     ["Report", "Decision Framework", "Details", "Debug"]
 )
+
+# If user hasn't run the analysis yet, show placeholders and stop
 if not submitted:
     with tab_report:
         st.info("Enter values above and click Run to generate the report.")
@@ -1517,12 +1519,15 @@ if not submitted:
 # REPORT TAB
 # ------------------------------------------------------------
 with tab_report:
+    # Risk continuum bar
     st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
+    # Stability line
     stab_line = f"{decision_stability}" + (
         f" — {decision_stability_note}" if decision_stability_note else ""
     )
 
+    # Snapshot card
     st.markdown(
         f"""
 <div class="block">
@@ -1558,6 +1563,7 @@ with tab_report:
         unsafe_allow_html=True,
     )
 
+    # PREVENT explainer + fallback note
     st.markdown(
         f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>",
         unsafe_allow_html=True,
@@ -2197,6 +2203,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
