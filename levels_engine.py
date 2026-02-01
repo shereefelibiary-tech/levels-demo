@@ -2530,13 +2530,13 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     if _cclass:
         _clar = (_clar + " " + _cclass).strip()
 
-       cac_copy = canonical_cac_copy(p, plaque, cac_support)
+    cac_copy = canonical_cac_copy(p, plaque, cac_support)
 
     insights = {
         "cac_decision_support": cac_support,  # keep for Details/Debug
         "structural_clarification": _clar if _clar else None,
 
-        # Canonical CAC language (UI + EMR should use this)
+        # Canonical CAC + aspirin language (UI + EMR should use this)
         "cac_copy": cac_copy,
         "aspirin_copy": asp_copy,
 
@@ -2553,8 +2553,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
         "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
-
-
 
     out = {
         "version": VERSION,
@@ -2595,6 +2593,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
+
 
 # -------------------------------------------------------------------
 # Canonical EMR output (locked style) — direct: WHY → WHAT
@@ -2695,6 +2694,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
