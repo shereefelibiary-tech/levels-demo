@@ -2039,7 +2039,8 @@ def plan_sentence(
 # -------------------------------------------------------------------
 def _action_line(title: str, verb_phrase: str, detail: Optional[str] = None) -> List[str]:
     """
-    Returns 1–2 lines, already in a clinician-friendly 'Action:' style.
+    Returns 1–2 lines in a clinician-facing 'Action' style.
+    Used by compose_actions() only.
     """
     lines = [f"{title}: {verb_phrase}."]
     if detail:
@@ -2053,21 +2054,37 @@ def canonical_cac_copy(
     cac_support: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Canonical CAC language used by BOTH UI and EMR.
-    Intentionally ignores cac_support.status wording (optional/deferred/suppressed).
+    Canonical coronary calcium language used by BOTH UI and EMR.
+
+    Design rules:
+    - Never uses: optional / deferred / consider / tie-breaker
+    - Treats CAC as a disease-finding test
+    - Explicitly supports referral when burden is high
+    - Ignores cac_support.status wording entirely
     """
+
+    # CAC already assessed (including ASCVD)
     if p.get("ascvd") is True or plaque.get("plaque_present") in (True, False):
         cac_val = plaque.get("cac_value")
+
         if isinstance(cac_val, int):
             headline = f"Coronary calcium: Already assessed (CAC {cac_val})."
         else:
             headline = "Coronary calcium: Already assessed."
+
         referral = None
         if isinstance(cac_val, int):
             if cac_val >= 1000:
-                referral = "Cardiology referral: Indicated for further evaluation given marked coronary calcium burden."
+                referral = (
+                    "Cardiology referral: Indicated for further evaluation "
+                    "given marked coronary calcium burden."
+                )
             elif cac_val >= 400:
-                referral = "Cardiology referral: Appropriate for further evaluation given high coronary calcium burden."
+                referral = (
+                    "Cardiology referral: Appropriate for further evaluation "
+                    "given high coronary calcium burden."
+                )
+
         return {
             "status": "assessed",
             "headline": headline,
@@ -2075,11 +2092,53 @@ def canonical_cac_copy(
             "referral": referral,
         }
 
+    # CAC not yet obtained
     return {
         "status": "unmeasured",
         "headline": "Coronary calcium: Reasonable to obtain.",
-        "detail": "Useful to define disease burden or if results would change treatment intensity or downstream evaluation.",
+        "detail": (
+            "Useful to define disease burden or if results would change treatment "
+            "intensity or downstream evaluation."
+        ),
         "referral": None,
+    }
+
+
+def canonical_aspirin_copy(asp: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Canonical aspirin language used by BOTH UI and EMR.
+
+    Keeps wording short, consistent, and non-hedged.
+    """
+    raw = str((asp or {}).get("status") or "").strip().lower()
+
+    if raw.startswith("secondary prevention"):
+        return {
+            "headline": "Aspirin: Indicated (secondary prevention).",
+            "detail": None,
+        }
+
+    if raw.startswith("avoid"):
+        return {
+            "headline": "Aspirin: Avoid.",
+            "detail": None,
+        }
+
+    if raw.startswith("consider"):
+        return {
+            "headline": "Aspirin: Reasonable (shared decision).",
+            "detail": None,
+        }
+
+    if raw in ("", "not assessed"):
+        return {
+            "headline": "Aspirin: Not assessed.",
+            "detail": None,
+        }
+
+    return {
+        "headline": "Aspirin: Not indicated.",
+        "detail": None,
     }
 
 
@@ -2374,6 +2433,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     cac_support = cac_decision_support(p, plaque, risk10, level, trace)
     asp = aspirin_advice(p, risk10, plaque, trace)
+    asp_copy = canonical_aspirin_copy(asp)
 
     drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
@@ -2478,6 +2538,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
         # Canonical CAC language (UI + EMR should use this)
         "cac_copy": cac_copy,
+        "aspirin_copy": asp_copy,
 
         # Secondary insight (engine-gated)
         "risk_driver_pattern": risk_driver,
@@ -2634,6 +2695,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
