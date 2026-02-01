@@ -1574,6 +1574,412 @@ with tab_report:
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
             unsafe_allow_html=True,
         )
+# ============================================================
+# Compact criteria table (drop-in helper) — Report tab
+# - tight spacing, matches .block.compact typography
+# - highlights patient range cell(s) with a pill "ring"
+# - highlights domain row subtly if any condition in that domain is met
+# - NO components.html; uses st.markdown(unsafe_allow_html=True)
+# ============================================================
+
+def render_criteria_table_compact(
+    *,
+    apob_v,
+    ldl_v,
+    a1c_v,
+    hscrp_v,
+    lpa_v,
+    lpa_unit_v,
+    smoker_v,
+    diabetes_v,
+) -> str:
+    """
+    Returns HTML for a compact 'Where this patient falls' criteria table.
+
+    Inputs are the same normalized variables you already compute:
+      apob_v, ldl_v, a1c_v, hscrp_v, lpa_v, lpa_unit_v, smoker_v, diabetes_v
+    """
+
+    def _fmt_num(x, decimals=0):
+        if x is None:
+            return "—"
+        try:
+            fx = float(x)
+        except Exception:
+            return "—"
+        if decimals <= 0:
+            return str(int(round(fx)))
+        return f"{fx:.{decimals}f}"
+
+    def _in_range(v, lo=None, hi=None):
+        if v is None:
+            return False
+        try:
+            v = float(v)
+        except Exception:
+            return False
+        if lo is not None and v < lo:
+            return False
+        if hi is not None and v > hi:
+            return False
+        return True
+
+    # ---- ApoB / LDL precedence ----
+    apob_measured = apob_v is not None
+    use_ldl = (not apob_measured) and (ldl_v is not None)
+
+    apob_mild = apob_measured and _in_range(apob_v, 80, 99)
+    apob_major = apob_measured and _in_range(apob_v, 100, None)
+
+    ldl_mild = use_ldl and _in_range(ldl_v, 100, 129)
+    ldl_major = use_ldl and _in_range(ldl_v, 130, None)
+
+    # ---- Glycemia ----
+    a1c_mild1 = _in_range(a1c_v, 5.7, 6.1)
+    a1c_mild2 = _in_range(a1c_v, 6.2, 6.4)
+    a1c_major = bool(diabetes_v) or _in_range(a1c_v, 6.5, None)
+
+    # ---- Inflammation ----
+    hscrp_mild = _in_range(hscrp_v, 2.0, None)
+
+    # ---- Lp(a) ----
+    lpa_major = False
+    if lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"):
+        if lpa_unit_v == "nmol/L":
+            lpa_major = _in_range(lpa_v, 125, None)
+        else:
+            lpa_major = _in_range(lpa_v, 50, None)
+
+    # ---- Smoking ----
+    smoking_major = bool(smoker_v)
+
+    # ---- Domain row emphasis (subtle) ----
+    dom_athero = bool(apob_mild or apob_major or ldl_mild or ldl_major)
+    dom_gly = bool(a1c_mild1 or a1c_mild2 or a1c_major)
+    dom_infl = bool(hscrp_mild)
+    dom_gen = bool(lpa_major)
+    dom_smoke = bool(smoking_major)
+
+    def _cell(text, *, ring=False, muted=False, tag=None):
+        cls = "rc2-cell"
+        if muted:
+            cls += " rc2-muted"
+        if ring:
+            cls += " rc2-ring"
+        tag_html = ""
+        if tag:
+            tag_html = f"<span class='rc2-tag'>{tag}</span>"
+        return f"<div class='{cls}'>{text}{tag_html}</div>"
+
+    # Build row blocks (each "row" is really a compact grid row)
+    # Columns: Marker | Cutoff | Patient value | Effect
+    # We keep it narrow: 4 columns, very small padding
+    rows = []
+
+    # Atherogenic burden domain header
+    def _domain_header(name, active=False, right_note=""):
+        a = " rc2-domain-active" if active else ""
+        rn = f"<div class='rc2-domain-note'>{right_note}</div>" if right_note else "<div></div>"
+        return f"""
+<div class="rc2-domain{a}">
+  <div class="rc2-domain-title">{name}</div>
+  {rn}
+</div>
+"""
+
+    # ApoB rows
+    if apob_measured:
+        apob_val_txt = f"{_fmt_num(apob_v)} mg/dL"
+        rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("ApoB")}
+  {_cell("80–99 mg/dL")}
+  {_cell(apob_val_txt, ring=apob_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥100 mg/dL")}
+  {_cell(apob_val_txt, ring=apob_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+        )
+    else:
+        # ApoB not measured — show muted placeholder
+        rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("ApoB")}
+  {_cell("—")}
+  {_cell("—", muted=True)}
+  {_cell("Not measured", muted=True)}
+</div>
+"""
+        )
+
+    # LDL rows (only “in force” if ApoB not measured; otherwise show muted)
+    ldl_val_txt = f"{_fmt_num(ldl_v)} mg/dL" if ldl_v is not None else "—"
+    if use_ldl:
+        rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("LDL-C")}
+  {_cell("100–129 mg/dL")}
+  {_cell(ldl_val_txt, ring=ldl_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥130 mg/dL")}
+  {_cell(ldl_val_txt, ring=ldl_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+        )
+    else:
+        rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("LDL-C")}
+  {_cell("—")}
+  {_cell(ldl_val_txt, muted=True)}
+  {_cell("Used only if ApoB not measured", muted=True)}
+</div>
+"""
+        )
+
+    athero_block = _domain_header(
+        "Atherogenic burden",
+        active=dom_athero,
+        right_note=("ApoB preferred" if apob_measured else "LDL used (ApoB not measured)"),
+    ) + "\n".join(rows)
+
+    # Glycemia block
+    gly_rows = []
+    a1c_txt = f"{_fmt_num(a1c_v, decimals=1)} %" if a1c_v is not None else "—"
+    gly_rows.append(
+        f"""
+<div class="rc2-row">
+  {_cell("A1c")}
+  {_cell("5.7–6.1%")}
+  {_cell(a1c_txt, ring=a1c_mild1)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("6.2–6.4%")}
+  {_cell(a1c_txt, ring=a1c_mild2)}
+  {_cell("Near boundary", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥6.5% or diabetes = true")}
+  {_cell(a1c_txt, ring=a1c_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+    )
+    gly_block = _domain_header("Glycemia", active=dom_gly) + "\n".join(gly_rows)
+
+    # Inflammation block
+    infl_rows = []
+    hscrp_txt = f"{_fmt_num(hscrp_v, decimals=1)} mg/L" if hscrp_v is not None else "—"
+    infl_rows.append(
+        f"""
+<div class="rc2-row">
+  {_cell("hsCRP")}
+  {_cell("≥2.0 mg/L")}
+  {_cell(hscrp_txt, ring=hscrp_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+"""
+    )
+    infl_block = _domain_header("Inflammation", active=dom_infl) + "\n".join(infl_rows)
+
+    # Genetics block
+    gen_rows = []
+    if lpa_unit_v in ("nmol/L", "mg/dL") and lpa_v is not None:
+        lpa_txt = f"{_fmt_num(lpa_v)} {lpa_unit_v}"
+    else:
+        lpa_txt = "—"
+    gen_rows.append(
+        f"""
+<div class="rc2-row">
+  {_cell("Lp(a)")}
+  {_cell("≥125 nmol/L or ≥50 mg/dL")}
+  {_cell(lpa_txt, ring=lpa_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+    )
+    gen_block = _domain_header("Genetics", active=dom_gen) + "\n".join(gen_rows)
+
+    # Smoking block
+    smoke_rows = []
+    smoke_txt = "Yes" if smoking_major else "No"
+    smoke_rows.append(
+        f"""
+<div class="rc2-row">
+  {_cell("Smoking")}
+  {_cell("Current smoking")}
+  {_cell(smoke_txt, ring=smoking_major)}
+  {_cell("Major driver" if smoking_major else "—", tag=("major" if smoking_major else None))}
+</div>
+"""
+    )
+    smoke_block = _domain_header("Smoking", active=dom_smoke) + "\n".join(smoke_rows)
+
+    # Assemble: one compact card
+    html = f"""
+<style>
+  /* Tight, matches your card aesthetic */
+  .rc2-wrap {{
+    border:1px solid rgba(31,41,55,0.12);
+    border-radius:12px;
+    background:#fff;
+    padding:10px 12px;
+    font-size:0.90rem;
+    line-height:1.25;
+    margin-top:10px;
+  }}
+
+  .rc2-title {{
+    font-variant-caps:all-small-caps;
+    letter-spacing:0.08em;
+    font-weight:900;
+    font-size:0.80rem;
+    color:#4b5563;
+    margin-bottom:8px;
+  }}
+
+  .rc2-gridhead {{
+    display:grid;
+    grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
+    gap:8px;
+    padding:6px 0 6px 0;
+    border-bottom:1px solid rgba(31,41,55,0.10);
+    color:rgba(31,41,55,0.65);
+    font-size:0.80rem;
+    font-weight:800;
+  }}
+
+  .rc2-domain {{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-top:10px;
+    padding-top:8px;
+    border-top:1px solid rgba(31,41,55,0.08);
+  }}
+
+  .rc2-domain-title {{
+    font-weight:900;
+    color:#111827;
+    font-size:0.86rem;
+  }}
+
+  .rc2-domain-note {{
+    color:rgba(31,41,55,0.60);
+    font-size:0.80rem;
+    font-weight:700;
+  }}
+
+  .rc2-domain-active .rc2-domain-title {{
+    color:#111827;
+  }}
+
+  .rc2-domain-active {{
+    background: rgba(59,130,246,0.04);
+    border-radius:10px;
+    padding:6px 8px;
+    border:1px solid rgba(59,130,246,0.12);
+  }}
+
+  .rc2-row {{
+    display:grid;
+    grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
+    gap:8px;
+    padding:5px 0;
+    border-bottom:1px solid rgba(31,41,55,0.06);
+    align-items:start;
+  }}
+  .rc2-row:last-child {{
+    border-bottom:none;
+  }}
+
+  .rc2-cell {{
+    margin:0;
+    padding:0;
+    color:#111827;
+  }}
+
+  .rc2-muted {{
+    color:rgba(31,41,55,0.55);
+  }}
+
+  /* "Circle the range" effect: pill ring around the patient-value cell */
+  .rc2-ring {{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    border:2px solid rgba(59,130,246,0.85);
+    background: rgba(59,130,246,0.08);
+    font-weight:900;
+    width: fit-content;
+  }}
+
+  .rc2-tag {{
+    display:inline-block;
+    margin-left:6px;
+    font-size:0.74rem;
+    padding:2px 8px;
+    border-radius:999px;
+    border:1px solid rgba(31,41,55,0.16);
+    background:#fff;
+    font-weight:900;
+    color:rgba(31,41,55,0.80);
+    vertical-align:middle;
+  }}
+</style>
+
+<div class="rc2-wrap">
+  <div class="rc2-title">Where this patient falls</div>
+
+  <div class="rc2-gridhead">
+    <div>Marker</div>
+    <div>Range / condition</div>
+    <div>Patient</div>
+    <div>Level effect</div>
+  </div>
+
+  {athero_block}
+  {gly_block}
+  {infl_block}
+  {gen_block}
+  {smoke_block}
+</div>
+"""
+    return html
+
+
+# ============================================================
+# HOW TO USE (inside tab_report)
+# ============================================================
+# st.markdown(
+#     render_criteria_table_compact(
+#         apob_v=apob_v,
+#         ldl_v=ldl_v,
+#         a1c_v=a1c_v,
+#         hscrp_v=hscrp_v,
+#         lpa_v=lpa_v,
+#         lpa_unit_v=lpa_unit_v,
+#         smoker_v=smoker_v,
+#         diabetes_v=diabetes_v,
+#     ),
+#     unsafe_allow_html=True,
+# )
 
     # ------------------------------------------------------------
     # Secondary insights (engine-gated): lifestyle vs biology driver
@@ -2203,6 +2609,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
