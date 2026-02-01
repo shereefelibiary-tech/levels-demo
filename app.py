@@ -2131,7 +2131,14 @@ with tab_details:
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("Coronary calcium (engine rationale)")
     cs = (out.get("insights") or {}).get("cac_decision_support") or {}
-    st.write(f"**Status:** {(cs.get('status') or '—')}")
+
+    # NOTE: Do not surface cs["status"] (optional/deferred/suppressed) to clinicians.
+    # The clinician-facing CAC posture is rendered elsewhere from insights["cac_copy"].
+    if cs:
+        st.write("**Engine signal:** See rationale below (internal decision-support).")
+    else:
+        st.write("**Engine signal:** —")
+
     if cs.get("rationale"):
         st.write(f"**Rationale:** {scrub_terms(cs.get('rationale'))}")
     if cs.get("message"):
@@ -2190,6 +2197,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
