@@ -2080,6 +2080,18 @@ with col_m:
 """,
         unsafe_allow_html=True,
     )
+# ------------------------------------------------------------
+# EMR NOTE (copy/paste)
+# ------------------------------------------------------------
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+st.subheader("EMR note (copy/paste)")
+
+emr_note = build_emr_note()  # clinician-facing note
+emr_copy_box("Risk Continuum — EMR Note", emr_note, height_px=520)
+
+# Optional: show engine quick text for comparison
+with st.expander("Engine quick text (debug comparison)", expanded=False):
+    st.code(note_text, language="text")
 
 # ============================================================
 # Decision Framework — convergence + causality helpers
@@ -2609,6 +2621,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
