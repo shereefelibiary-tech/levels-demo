@@ -2622,16 +2622,9 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     elif "unknown" in pe_l or "no structural" in pe_l or "unmeasured" in pe_l:
         plaque_status = "Unmeasured"
 
-    asp_status_raw = str(asp.get("status", "Not assessed") or "").strip()
-    asp_l = asp_status_raw.lower()
-    if asp_l.startswith("avoid"):
-        asp_line = "Aspirin: Not indicated"
-    elif asp_l.startswith("consider"):
-        asp_line = "Aspirin: Consider (shared decision)"
-    elif asp_l.startswith("secondary prevention"):
-        asp_line = "Aspirin: Secondary prevention (if no contraindication)"
-    else:
-        asp_line = f"Aspirin: {asp_status_raw}" if asp_status_raw else "Aspirin: —"
+    # Canonical aspirin language (match UI/EMR)
+    asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
+    asp_line = str(asp_copy.get("headline") or "Aspirin: —").strip()
 
     lvl_name = "—"
     if level == 1:
@@ -2682,18 +2675,27 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         lines.append(f"- {aa}")
     lines.append(f"- {asp_line}")
 
-    # IMPORTANT FIX:
-    # Do NOT append unconditional CAC lines here.
-    # CAC language belongs in nextActions (and only appears when plaque is unmeasured).
+    # NOTE: CAC language is rendered from insights["cac_copy"] (single source of truth).
+    cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+    cac_head = str(cac_copy.get("headline") or "").strip()
+    cac_det = str(cac_copy.get("detail") or "").strip()
+    cac_ref = str(cac_copy.get("referral") or "").strip()
+
+    if cac_head:
+        lines.append(f"- {cac_head}")
+        if cac_det:
+            lines.append(f"  {cac_det}")
+        if cac_ref:
+            lines.append(f"- {cac_ref}")
+
     near = (anchors.get("nearTerm") or {}).get("summary", "—")
     life = (anchors.get("lifetime") or {}).get("summary", "—")
     lines.append("")
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(lines)
-# =========================
-# CHUNK 6 / 6 — END
-# =========================
+
+
 
 
 
