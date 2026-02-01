@@ -1999,26 +1999,26 @@ def render_criteria_table_compact(
 
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-    col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
+        col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
 
-# ------------------------------------------------------------
-# Targets
-# ------------------------------------------------------------
-with col_t:
-    if primary:
-        lipid_targets_line = f"{primary[0]} {primary[1]}"
-        if apob_line:
-            lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+    # ------------------------------------------------------------
+    # Targets
+    # ------------------------------------------------------------
+    with col_t:
+        if primary:
+            lipid_targets_line = f"{primary[0]} {primary[1]}"
+            if apob_line:
+                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
 
-        anchor = guideline_anchor_note(level, clinical_ascvd)
-        apob_note = (
-            "ApoB not measured — optional add-on if discordance suspected."
-            if apob_line and not apob_measured
-            else ""
-        )
+            anchor = guideline_anchor_note(level, clinical_ascvd)
+            apob_note = (
+                "ApoB not measured — optional add-on if discordance suspected."
+                if apob_line and not apob_measured
+                else ""
+            )
 
-        st.markdown(
-            f"""
+            st.markdown(
+                f"""
 <div class="block compact">
   <div class="block-title compact">Targets (if treated)</div>
   <div class="kvline compact"><b>Targets:</b> {_html.escape(lipid_targets_line)}</div>
@@ -2026,45 +2026,43 @@ with col_t:
   {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
 </div>
 """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            """
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
 <div class="block compact">
   <div class="block-title compact">Targets (if treated)</div>
   <div class="kvline compact"><b>Targets:</b> —</div>
 </div>
 """,
-            unsafe_allow_html=True,
+                unsafe_allow_html=True,
+            )
+
+    # ------------------------------------------------------------
+    # Action
+    # ------------------------------------------------------------
+    with col_m:
+        rec_action = recommended_action_line(
+            lvl, plan_clean, decision_stability, decision_stability_note
         )
 
-# ------------------------------------------------------------
-# Action
-# ------------------------------------------------------------
-with col_m:
-    rec_action = recommended_action_line(
-        lvl, plan_clean, decision_stability, decision_stability_note
-    )
+        cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+        cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
+        cac_det = _html.escape(cac_copy.get("detail") or "")
+        cac_ref = _html.escape(cac_copy.get("referral") or "")
 
-    # Canonical CAC language (engine single source of truth)
-    cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
-    cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
-    cac_det = _html.escape(cac_copy.get("detail") or "")
-    cac_ref = _html.escape(cac_copy.get("referral") or "")
+        cac_block = (
+            f"<div class='kvline compact'>{cac_head}</div>"
+            + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
+            + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
+        )
 
-    cac_block = (
-        f"<div class='kvline compact'>{cac_head}</div>"
-        + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
-        + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
-    )
+        asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
+        asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
 
-    # Canonical aspirin language (engine single source of truth)
-    asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
-    asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
-
-    st.markdown(
-        f"""
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Action</div>
 
@@ -2078,20 +2076,21 @@ with col_m:
   <div class="kvline compact">{asp_head}</div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
-# ------------------------------------------------------------
-# EMR NOTE (copy/paste)
-# ------------------------------------------------------------
-st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-st.subheader("EMR note (copy/paste)")
+            unsafe_allow_html=True,
+        )
 
-emr_note = build_emr_note()  # clinician-facing note
-emr_copy_box("Risk Continuum — EMR Note", emr_note, height_px=520)
+    # ------------------------------------------------------------
+    # EMR NOTE (copy/paste)
+    # ------------------------------------------------------------
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("EMR note (copy/paste)")
 
-# Optional: show engine quick text for comparison
-with st.expander("Engine quick text (debug comparison)", expanded=False):
-    st.code(note_text, language="text")
+    emr_note = build_emr_note()
+    emr_copy_box("Risk Continuum — EMR Note", emr_note, height_px=520)
+
+    with st.expander("Engine quick text (debug comparison)", expanded=False):
+        st.code(note_text, language="text")
+
 
 # ============================================================
 # Decision Framework — convergence + causality helpers
@@ -2621,6 +2620,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
