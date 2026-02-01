@@ -2035,40 +2035,97 @@ def plan_sentence(
     return "Secondary-prevention intensity lipid lowering is indicated; add-ons may be needed."
 
 # -------------------------------------------------------------------
+# Canonical action language helpers (single source of truth)
+# -------------------------------------------------------------------
+def _action_line(title: str, verb_phrase: str, detail: Optional[str] = None) -> List[str]:
+    """
+    Returns 1–2 lines, already in a clinician-friendly 'Action:' style.
+    """
+    lines = [f"{title}: {verb_phrase}."]
+    if detail:
+        lines.append(detail.strip())
+    return lines
+
+
+def canonical_cac_copy(
+    p: Patient,
+    plaque: Dict[str, Any],
+    cac_support: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Canonical CAC language used by BOTH UI and EMR.
+    Intentionally ignores cac_support.status wording (optional/deferred/suppressed).
+    """
+    if p.get("ascvd") is True or plaque.get("plaque_present") in (True, False):
+        cac_val = plaque.get("cac_value")
+        if isinstance(cac_val, int):
+            headline = f"Coronary calcium: Already assessed (CAC {cac_val})."
+        else:
+            headline = "Coronary calcium: Already assessed."
+        referral = None
+        if isinstance(cac_val, int):
+            if cac_val >= 1000:
+                referral = "Cardiology referral: Indicated for further evaluation given marked coronary calcium burden."
+            elif cac_val >= 400:
+                referral = "Cardiology referral: Appropriate for further evaluation given high coronary calcium burden."
+        return {
+            "status": "assessed",
+            "headline": headline,
+            "detail": None,
+            "referral": referral,
+        }
+
+    return {
+        "status": "unmeasured",
+        "headline": "Coronary calcium: Reasonable to obtain.",
+        "detail": "Useful to define disease burden or if results would change treatment intensity or downstream evaluation.",
+        "referral": None,
+    }
+
+
+# -------------------------------------------------------------------
 # Authoritative action composer (WHY → WHAT)
 # -------------------------------------------------------------------
 APOB_INITIATE_CUT = 110.0
 
 def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
+    """
+    Canonical action outputs (WHY → WHAT).
+    CAC language is NOT emitted here to avoid duplication/contradiction.
+    CAC is rendered from insights["cac_copy"] in both UI and EMR.
+    """
     actions: List[str] = []
 
     lvl = out.get("levels") or {}
-    risk10 = out.get("ascvdPce10yRisk") or {}
     evidence = (lvl.get("evidence") or {})
     targets = out.get("targets") or {}
-
-    rp = risk10.get("risk_pct")
-    zone = pce_zone(rp)
-
-    apob = safe_float(p.get("apob")) if p.has("apob") else None
-    ldl = safe_float(p.get("ldl")) if p.has("ldl") else None
-    cac = evidence.get("cac_value", None)
+    risk10 = out.get("ascvdPce10yRisk") or {}
+    zone = pce_zone(risk10.get("risk_pct"))
 
     therapy_on = on_lipid_therapy(p)
     at_tgt = at_target(p, targets)
 
+    # -----------------------------
     # 1) ASCVD / plaque established
+    # -----------------------------
     if p.get("ascvd") is True:
-        actions.append("Clinical ASCVD → initiate or continue secondary-prevention intensity lipid-lowering therapy.")
+        actions += _action_line("Lipid-lowering therapy", "Indicated (secondary-prevention intensity)")
         return actions
 
-    if isinstance(cac, int) and cac >= 100:
-        actions.append(f"CAC {cac} → initiate high-intensity lipid-lowering therapy (subclinical atherosclerosis).")
+    cac_val = evidence.get("cac_value", None)
+    if isinstance(cac_val, int) and cac_val >= 100:
+        actions += _action_line("Lipid-lowering therapy", "Appropriate (target-driven; plaque present)")
         if therapy_on and not at_tgt:
-            actions.append("Above target on current therapy → intensify lipid-lowering or add adjunctive therapy.")
+            actions += _action_line(
+                "Therapy optimization",
+                "Appropriate",
+                "Above target on current therapy → assess tolerance/adherence and intensify to achieve targets.",
+            )
         return actions
 
-    # 2) Missing key clarifiers
+    # -----------------------------
+    # 2) Missing key clarifiers (keep concise)
+    # -----------------------------
     missing: List[str] = []
     if not p.has("apob"):
         missing.append("ApoB")
@@ -2076,63 +2133,94 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
         missing.append("Lp(a)")
 
     if missing:
-        actions.append(f"{', '.join(missing)} missing → obtain now to define atherogenic burden/inherited risk before escalation.")
+        actions += _action_line(
+            "Data completion",
+            "Reasonable",
+            f"{', '.join(missing)} missing → obtain to define atherogenic burden / inherited risk.",
+        )
+        # NOTE: do not output CAC text here (handled by insights['cac_copy'])
         return actions
 
-    # 3) ApoB hard trigger
+    # -----------------------------
+    # 3) Atherogenic burden triggers
+    # -----------------------------
+    apob = safe_float(p.get("apob")) if p.has("apob") else None
+    ldl = safe_float(p.get("ldl")) if p.has("ldl") else None
+
     if apob is not None and apob >= APOB_INITIATE_CUT:
         if not therapy_on:
-            actions.append(f"ApoB {int(apob)} mg/dL → initiate lipid-lowering therapy now (atherogenic burden).")
+            actions += _action_line(
+                "Lipid-lowering therapy",
+                "Appropriate",
+                f"ApoB {int(apob)} mg/dL suggests actionable atherogenic burden.",
+            )
         elif not at_tgt:
-            actions.append(f"ApoB {int(apob)} mg/dL on therapy → intensify lipid-lowering to achieve target.")
+            actions += _action_line(
+                "Therapy optimization",
+                "Appropriate",
+                f"ApoB {int(apob)} mg/dL on therapy → intensify to achieve targets.",
+            )
         else:
-            actions.append(f"ApoB {int(apob)} mg/dL with targets achieved → continue current therapy.")
+            actions += _action_line(
+                "Lipid-lowering therapy",
+                "Appropriate",
+                "Targets achieved → continue current therapy.",
+            )
         return actions
 
-    # 4) LDL hard trigger
     if ldl is not None and ldl >= 190:
         if not therapy_on:
-            actions.append(f"LDL-C {int(ldl)} mg/dL → initiate lipid-lowering therapy now (severe hypercholesterolemia range).")
+            actions += _action_line(
+                "Lipid-lowering therapy",
+                "Appropriate",
+                f"LDL-C {int(ldl)} mg/dL (severe hypercholesterolemia range).",
+            )
         elif not at_tgt:
-            actions.append(f"LDL-C {int(ldl)} mg/dL on therapy → intensify lipid-lowering to achieve target.")
+            actions += _action_line(
+                "Therapy optimization",
+                "Appropriate",
+                f"LDL-C {int(ldl)} mg/dL on therapy → intensify to achieve targets.",
+            )
         else:
-            actions.append(f"LDL-C {int(ldl)} mg/dL with targets achieved → continue current therapy.")
+            actions += _action_line(
+                "Lipid-lowering therapy",
+                "Appropriate",
+                "Targets achieved → continue current therapy.",
+            )
         return actions
 
-    # 5) Therapy on, not at target
+    # -----------------------------
+    # 4) On therapy but not at target
+    # -----------------------------
     if therapy_on and not at_tgt:
-        actions.append("Above target on current therapy → assess adherence/tolerance and optimize lipid-lowering intensity.")
+        actions += _action_line(
+            "Therapy optimization",
+            "Appropriate",
+            "Above target on current therapy → assess tolerance/adherence and optimize intensity.",
+        )
         return actions
 
-    # 6) CAC language ONLY when plaque is unmeasured, driven by cac_decision_support()
-    cac_support = (out.get("insights") or {}).get("cac_decision_support") or {}
-    if cac is None and cac_support:
-        st = (cac_support.get("status") or "").strip().lower()
-        msg = (cac_support.get("message") or "").strip()
-        rat = (cac_support.get("rationale") or "").strip()
-
-        if st == "optional":
-            actions.append("Coronary calcium: Optional.")
-            if rat:
-                actions.append(rat)
-            if msg:
-                actions.append(msg)
-            return actions
-
-        if st in ("deferred", "suppressed"):
-            actions.append("Coronary calcium: Do not obtain at this time.")
-            if msg:
-                actions.append(msg)
-            return actions
-
-    # 7) Low near-term risk
+    # -----------------------------
+    # 5) Low near-term risk with no dominant drivers
+    # -----------------------------
+    rp = risk10.get("risk_pct")
     if zone == "hard_no":
-        actions.append(f"ASCVD PCE {rp}% with no dominant biologic drivers → no escalation required.")
+        actions += _action_line(
+            "Lipid-lowering therapy",
+            "Not required at this time",
+            f"ASCVD PCE {rp}% with no dominant biologic drivers.",
+        )
         return actions
 
-    actions.append("No immediate escalation indicated; reassess with interval follow-up.")
+    # -----------------------------
+    # 6) Default
+    # -----------------------------
+    actions += _action_line(
+        "Management",
+        "Not required at this time",
+        "No immediate escalation required; reassess with interval follow-up.",
+    )
     return actions
-
 
 # -------------------------------------------------------------------
 # Aspirin module
@@ -2382,9 +2470,14 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     if _cclass:
         _clar = (_clar + " " + _cclass).strip()
 
+       cac_copy = canonical_cac_copy(p, plaque, cac_support)
+
     insights = {
-        "cac_decision_support": cac_support,
+        "cac_decision_support": cac_support,  # keep for Details/Debug
         "structural_clarification": _clar if _clar else None,
+
+        # Canonical CAC language (UI + EMR should use this)
+        "cac_copy": cac_copy,
 
         # Secondary insight (engine-gated)
         "risk_driver_pattern": risk_driver,
@@ -2399,6 +2492,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
         "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
+
 
 
     out = {
@@ -2540,6 +2634,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
