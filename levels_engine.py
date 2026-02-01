@@ -2550,3 +2550,4 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
 
 
+
