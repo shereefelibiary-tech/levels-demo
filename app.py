@@ -1665,25 +1665,25 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-# ------------------------------------------------------------
-# Secondary insights (engine-gated): lifestyle vs biology driver
-# ------------------------------------------------------------
-rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
-if rd.get("should_surface"):
-    st.markdown(
-        f"""
+    # ------------------------------------------------------------
+    # Secondary insights (engine-gated): lifestyle vs biology driver
+    # ------------------------------------------------------------
+    rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
+    if rd.get("should_surface"):
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Secondary insights</div>
   <div class="kvline compact">{_html.escape(rd.get("headline",""))}</div>
   <div class="kvline compact inline-muted">{_html.escape(rd.get("detail",""))}</div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
 
-st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
+    col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
 
 # ------------------------------------------------------------
 # Targets
@@ -2286,6 +2286,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
