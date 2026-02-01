@@ -7,7 +7,7 @@
 # Goals:
 # - Outputs "ease and confidence" in CV risk management decisions
 # - Senior clinical tone (no second person; no marketing language)
-# - CAC is optional/deferred/suppressed (never "recommended")
+# - CAC is reasonable to obtain when plaque status is unmeasured; results inform burden, intensity, and downstream evaluation
 # - Plaque concepts are explicit: Plaque Evidence vs Plaque Burden
 # - Decision Confidence vs Decision Stability are distinct, consistent, and calm
 # - Buffered binaries: hard gates + reasonableness buffer around cutoffs
@@ -23,7 +23,6 @@
 #
 # NEW in this file (compat fixes):
 # - levels["dominantAction"] flag (used by app.py recommended_action_line())
-# - CAC "tie-breaker" language only when plaque is UNMEASURED
 # - render_quick_text() no longer adds unconditional CAC lines (prevents duplication/contradictions)
 
 import math
@@ -150,7 +149,8 @@ LEVEL_DEFS = {
         ),
         "typical_pattern": [
             "Major actionable biologic driver present (ApoB/LDL, Lp(a), inflammatory disease/hsCRP context, diabetes-range, or smoking)",
-            "Plaque may be unmeasured; CAC is tie-breaker only if it would change timing/intensity",
+            "Plaque may be unmeasured; CAC can be obtained to define disease burden when results would inform intensity/targets or downstream evaluation",
+
         ],
         "medication_action": "Lipid-lowering therapy is reasonable (3A) or generally favored (3B).",
     },
@@ -251,7 +251,8 @@ SUBLEVEL_DEFS = {
             "  - Current smoking",
         ],
         "major_drivers_list": MAJOR_ACTIONABLE_DRIVERS_EXPLICIT,
-        "medication_action": "Therapy is generally favored unless there is a strong reason to defer. CAC is tie-breaker only if plaque is unmeasured and it would change timing or intensity.",
+        "Therapy is generally favored unless there is a strong reason to defer. If plaque is unmeasured, CAC can be obtained to define disease burden and to inform intensity/targets or downstream evaluation.",
+
     },
 }
 
@@ -301,8 +302,6 @@ def levels_legend_compact() -> List[str]:
         "Level 4: plaque present (CAC 1–99) → treat as early disease; target-driven therapy",
         "Level 5: very high risk (CAC ≥100 or clinical ASCVD) → secondary-prevention intensity",
         "CAC: reasonable to obtain when plaque status is unmeasured; informs burden, intensity, and downstream evaluation",
-    ]
-
     ]
 
 
@@ -2697,6 +2696,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(lines)
+
 
 
 
