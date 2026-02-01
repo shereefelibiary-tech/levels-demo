@@ -1506,45 +1506,44 @@ def _plaque_unmeasured(ev_dict: dict) -> bool:
 def build_emr_note() -> str:
     lines = []
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
-    lines.append("-" * 64)
+    lines.append("-" * 48)
+    lines.append("")
 
-    # -----------------------------
-    # Snapshot
-    # -----------------------------
+    # ---- Level / plaque / confidence (3 lines) ----
     lines.append(
-        f"Level: {level}"
-        + (f" ({sub})" if sub else "")
-        + f" — {LEVEL_NAMES.get(level,'—')}"
+        f"Level: {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}"
     )
-    lines.append(f"Plaque status: {scrub_terms(ev.get('cac_status','—'))}")
-    lines.append(f"Plaque burden: {scrub_terms(ev.get('burden_band','—'))}")
-
-    lines.append(f"Decision confidence: {decision_conf}")
     lines.append(
-        f"Decision stability: {decision_stability}"
+        f"Plaque: {scrub_terms(ev.get('cac_status','—'))} | Burden: {scrub_terms(ev.get('burden_band','—'))}"
+    )
+    lines.append(
+        f"Confidence: {decision_conf} | Stability: {decision_stability}"
         + (f" — {decision_stability_note}" if decision_stability_note else "")
     )
 
-    # -----------------------------
-    # Key metrics (kept concise)
-    # -----------------------------
+    # ---- Why (top drivers) ----
+    why = (lvl.get("triggers") or [])[:3]
+    if why:
+        lines.append("")
+        lines.append("Why (top drivers):")
+        for w in why:
+            ww = scrub_terms(str(w)).strip()
+            if ww:
+                lines.append(f"- {ww}")
+
+    # ---- Key metrics ----
     lines.append("")
-    lines.append("KEY METRICS")
-    lines.append(f"- Risk Signal Score: {rs.get('score','—')}/100 ({rs.get('band','—')})")
+    lines.append("Key metrics:")
+    lines.append(f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})")
     lines.append(f"- ASCVD PCE (10y): {pce_line} {pce_cat}".strip())
     lines.append(
-        f"- PREVENT (10y, population model): "
-        f"total CVD {p_total if p_total is not None else '—'}%; "
+        f"- PREVENT (10y): Total CVD {p_total if p_total is not None else '—'}% | "
         f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
     )
-    if (p_total is None and p_ascvd is None) and p_note:
-        lines.append(f"  PREVENT note: {p_note}")
 
-    # -----------------------------
-    # Targets (reference only)
-    # -----------------------------
+    # ---- Targets (reference only) ----
     lines.append("")
-    lines.append("TARGETS (IF TREATED)")
+    lines.append("Targets (if treated):")
     if primary:
         tgt = f"- {primary[0]} {primary[1]}"
         if apob_line:
@@ -1553,52 +1552,30 @@ def build_emr_note() -> str:
     else:
         lines.append("- —")
 
-    # -----------------------------
-    # PLAN (single place: what to do + why)
-    # -----------------------------
+    # ---- Plan (single place) ----
     lines.append("")
-    lines.append("PLAN (WHAT TO DO NEXT)")
+    lines.append("Plan (what to do next):")
 
-    # WHY: top drivers (engine-derived), plus stability context
-    why = (lvl.get("triggers") or [])[:3]
-    if why:
-        lines.append("Why:")
-        for w in why:
-            ww = scrub_terms(str(w)).strip()
-            if ww:
-                lines.append(f"- {ww}")
-
-    # WHAT: action lines (single list)
-    # 1) Recommended action (single sentence)
-    rec_action = recommended_action_line(
-        lvl, plan_clean, decision_stability, decision_stability_note
-    )
+    # 1) single decision sentence
+    rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
     if rec_action:
-        lines.append("")
-        lines.append("What to do:")
         lines.append(f"- {rec_action}")
 
-    # 2) Action details from engine nextActions (already cleaned/standardized by compose_actions)
-    # Keep it short (3–6 lines max)
+    # 2) key action details (tight; avoid redundancy)
     act = out.get("nextActions") or []
     act_clean = []
     for a in act:
         aa = scrub_terms(str(a)).strip()
-        if aa:
+        if aa and aa.lower() not in (rec_action or "").lower():
             act_clean.append(aa)
-    if act_clean:
-        for a in act_clean[:6]:
-            # avoid double periods
-            if a.endswith(".."):
-                a = a[:-1]
-            lines.append(f"- {a}")
+    for a in act_clean[:3]:
+        lines.append(f"- {a}")
 
-    # 3) Canonical CAC + aspirin (consistent with UI; no contradictions)
+    # 3) Canonical CAC + aspirin (shared with UI)
     cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
     cac_head = (cac_copy.get("headline") or "").strip()
     cac_det = (cac_copy.get("detail") or "").strip()
     cac_ref = (cac_copy.get("referral") or "").strip()
-
     if cac_head:
         lines.append(f"- {cac_head}")
         if cac_det:
@@ -1613,6 +1590,7 @@ def build_emr_note() -> str:
 
     lines.append("")
     return "\n".join(lines)
+
 
 # ============================================================
 # Tabs
@@ -2308,6 +2286,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
