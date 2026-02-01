@@ -1508,7 +1508,11 @@ def build_emr_note() -> str:
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
     lines.append("-" * 64)
 
-    lines.append(f"Level: {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}")
+    lines.append(
+        f"Level: {level}"
+        + (f" ({sub})" if sub else "")
+        + f" — {LEVEL_NAMES.get(level,'—')}"
+    )
     lines.append(f"Plaque status: {scrub_terms(ev.get('cac_status','—'))}")
     lines.append(f"Plaque burden: {scrub_terms(ev.get('burden_band','—'))}")
 
@@ -1541,36 +1545,40 @@ def build_emr_note() -> str:
     else:
         lines.append("- —")
 
-    # --- Recommended Action: decision-only ---
-    rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
+    # --- Recommended Action (decision-only) ---
+    rec_action = recommended_action_line(
+        lvl, plan_clean, decision_stability, decision_stability_note
+    )
     lines.append("")
     lines.append("RECOMMENDED ACTION")
-    lines.append(rec_action)
+    lines.append(f"- {rec_action}")
 
-    # --- Management Plan: suppress for Level 1–2 (no redundancy) ---
+    # --- Management Plan (suppress for Level 1–2) ---
     level_int = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
-    show_plan = level_int >= 3
-
-    if show_plan:
+    if level_int >= 3:
         lines.append("")
         lines.append("MANAGEMENT PLAN")
         lines.append(plan_clean or "—")
 
-    # --- Next Steps ---
+    # --- Next Steps (canonical, shared with UI) ---
     lines.append("")
     lines.append("NEXT STEPS")
-    if _plaque_unmeasured(ev):
-        lines.append("- Coronary calcium: Do not obtain at this time.")
-        lines.append("- Obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification (tie-breaker only).")
-    else:
-        cac_val = ev.get("cac_value")
-        if cac_val is not None:
-            lines.append(f"- Coronary calcium: Already assessed (CAC {int(cac_val)}).")
-        else:
-            lines.append("- Coronary calcium: Already assessed (no further CAC needed for decision-making).")
+
+    cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+    cac_head = (cac_copy.get("headline") or "").strip()
+    cac_det = (cac_copy.get("detail") or "").strip()
+    cac_ref = (cac_copy.get("referral") or "").strip()
+
+    if cac_head:
+        lines.append(f"- {cac_head}")
+        if cac_det:
+            lines.append(f"  {cac_det}")
+        if cac_ref:
+            lines.append(f"- {cac_ref}")
 
     lines.append(f"- Aspirin: {asp_line}")
     lines.append("")
+
     return "\n".join(lines)
 
 # ============================================================
@@ -1708,43 +1716,17 @@ with tab_report:
             lvl, plan_clean, decision_stability, decision_stability_note
         )
 
-        # ---- CAC decision-support (engine-driven; no hardcoded CAC text) ----
-        cac_support = (out.get("insights") or {}).get("cac_decision_support") or {}
-        cac_val = ev.get("cac_value")
+        # Canonical CAC language from engine (single source of truth)
+        cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+        cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
+        cac_det = _html.escape(cac_copy.get("detail") or "")
+        cac_ref = _html.escape(cac_copy.get("referral") or "")
 
-        if cac_val is not None:
-            try:
-                cac_block = f"<div class='kvline compact'>Already assessed (CAC {int(cac_val)}).</div>"
-            except Exception:
-                cac_block = "<div class='kvline compact'>Already assessed.</div>"
-        else:
-            stt = (cac_support.get("status") or "").strip().lower()
-            rat = _html.escape(cac_support.get("rationale") or "")
-            msg = _html.escape(cac_support.get("message") or "")
-            tag = _html.escape(cac_support.get("tag") or "")
-
-            if stt == "optional":
-                cac_block = (
-                    "<div class='kvline compact'>Optional (risk clarification).</div>"
-                    + (f"<div class='kvline compact inline-muted'>{rat}</div>" if rat else "")
-                    + (f"<div class='kvline compact inline-muted'>{msg}</div>" if msg else "")
-                    + (f"<div class='kvline compact inline-muted'>Tag: {tag}</div>" if tag else "")
-                )
-            elif stt == "deferred":
-                cac_block = (
-                    "<div class='kvline compact'>Deferred.</div>"
-                    + (f"<div class='kvline compact inline-muted'>{rat}</div>" if rat else "")
-                    + (f"<div class='kvline compact inline-muted'>{msg}</div>" if msg else "")
-                    + (f"<div class='kvline compact inline-muted'>Tag: {tag}</div>" if tag else "")
-                )
-            else:
-                # suppressed/unknown
-                cac_block = (
-                    "<div class='kvline compact'>Do not obtain at this time.</div>"
-                    + (f"<div class='kvline compact inline-muted'>{rat}</div>" if rat else "")
-                    + (f"<div class='kvline compact inline-muted'>{msg}</div>" if msg else "")
-                    + (f"<div class='kvline compact inline-muted'>Tag: {tag}</div>" if tag else "")
-                )
+        cac_block = (
+            f"<div class='kvline compact'>{cac_head}</div>"
+            + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
+            + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
+        )
 
         st.markdown(
             f"""
@@ -1764,37 +1746,6 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-    # Context
-    plaque_unmeasured = _plaque_unmeasured(ev)
-
-    with col_c:
-        driver_line = (
-            f"<div class='kvline compact'><b>Primary driver:</b> {_html.escape(drivers[0])}</div>"
-            if drivers else ""
-        )
-        plaque_line = (
-            "<div class='kvline compact inline-muted'>Plaque unmeasured (CAC not performed)</div>"
-            if plaque_unmeasured
-            else ""
-        )
-
-        st.markdown(
-            f"""
-<div class="block compact">
-  <div class="block-title compact">Clinical context</div>
-  {driver_line}
-  {plaque_line}
-  <div class="kvline compact"><b>Near-term:</b> {_html.escape(near_anchor)}</div>
-  <div class="kvline compact"><b>Lifetime:</b> {_html.escape(life_anchor)}</div>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.markdown("### Clinical Report (copy/paste into EMR)")
-    st.caption("Click **Copy**, then paste into the EMR note.")
-    emr_copy_box("Clinical Report (EMR paste)", build_emr_note(), height_px=560)
 # ============================================================
 # Decision Framework — convergence + causality helpers
 # ============================================================
@@ -2316,6 +2267,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
