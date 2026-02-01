@@ -1496,7 +1496,606 @@ def build_emr_note() -> str:
     return "\n".join(lines)
 
 
-f"""{YOUR_EXISTING_TRANSITION_TABLE_HTML_HERE}"""
+# ============================================================
+# Tight criteria table (with circles) — helper
+# ============================================================
+def render_criteria_table_compact(
+    *,
+    apob_v,
+    ldl_v,
+    a1c_v,
+    hscrp_v,
+    lpa_v,
+    lpa_unit_v,
+    smoker_v,
+    diabetes_v,
+) -> str:
+    def _fmt_num(x, decimals=0):
+        if x is None:
+            return "—"
+        try:
+            fx = float(x)
+        except Exception:
+            return "—"
+        if decimals <= 0:
+            return str(int(round(fx)))
+        return f"{fx:.{decimals}f}"
+
+    def _in_range(v, lo=None, hi=None):
+        if v is None:
+            return False
+        try:
+            v = float(v)
+        except Exception:
+            return False
+        if lo is not None and v < lo:
+            return False
+        if hi is not None and v > hi:
+            return False
+        return True
+
+    apob_measured = apob_v is not None
+    use_ldl = (not apob_measured) and (ldl_v is not None)
+
+    apob_mild = apob_measured and _in_range(apob_v, 80, 99)
+    apob_major = apob_measured and _in_range(apob_v, 100, None)
+
+    ldl_mild = use_ldl and _in_range(ldl_v, 100, 129)
+    ldl_major = use_ldl and _in_range(ldl_v, 130, None)
+
+    a1c_mild1 = _in_range(a1c_v, 5.7, 6.1)
+    a1c_mild2 = _in_range(a1c_v, 6.2, 6.4)
+    a1c_major = bool(diabetes_v) or _in_range(a1c_v, 6.5, None)
+
+    hscrp_mild = _in_range(hscrp_v, 2.0, None)
+
+    lpa_major = False
+    if lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"):
+        if lpa_unit_v == "nmol/L":
+            lpa_major = _in_range(lpa_v, 125, None)
+        else:
+            lpa_major = _in_range(lpa_v, 50, None)
+
+    smoking_major = bool(smoker_v)
+
+    dom_athero = bool(apob_mild or apob_major or ldl_mild or ldl_major)
+    dom_gly = bool(a1c_mild1 or a1c_mild2 or a1c_major)
+    dom_infl = bool(hscrp_mild)
+    dom_gen = bool(lpa_major)
+    dom_smoke = bool(smoking_major)
+
+    def _cell(text, *, ring=False, muted=False, tag=None):
+        cls = "rc2-cell"
+        if muted:
+            cls += " rc2-muted"
+        if ring:
+            cls += " rc2-ring"
+        tag_html = f"<span class='rc2-tag'>{tag}</span>" if tag else ""
+        return f"<div class='{cls}'>{text}{tag_html}</div>"
+
+    def _domain_header(name, active=False, right_note=""):
+        a = " rc2-domain-active" if active else ""
+        rn = f"<div class='rc2-domain-note'>{right_note}</div>" if right_note else "<div></div>"
+        return f"""
+<div class="rc2-domain{a}">
+  <div class="rc2-domain-title">{name}</div>
+  {rn}
+</div>
+"""
+
+    athero_rows = []
+
+    if apob_measured:
+        apob_txt = f"{_fmt_num(apob_v)} mg/dL"
+        athero_rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("ApoB")}
+  {_cell("80–99 mg/dL")}
+  {_cell(apob_txt, ring=apob_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥100 mg/dL")}
+  {_cell(apob_txt, ring=apob_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+        )
+    else:
+        athero_rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("ApoB")}
+  {_cell("—")}
+  {_cell("—", muted=True)}
+  {_cell("Not measured", muted=True)}
+</div>
+"""
+        )
+
+    ldl_txt = f"{_fmt_num(ldl_v)} mg/dL" if ldl_v is not None else "—"
+    if use_ldl:
+        athero_rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("LDL-C")}
+  {_cell("100–129 mg/dL")}
+  {_cell(ldl_txt, ring=ldl_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥130 mg/dL")}
+  {_cell(ldl_txt, ring=ldl_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+        )
+    else:
+        athero_rows.append(
+            f"""
+<div class="rc2-row">
+  {_cell("LDL-C")}
+  {_cell("—")}
+  {_cell(ldl_txt, muted=True)}
+  {_cell("Used only if ApoB not measured", muted=True)}
+</div>
+"""
+        )
+
+    athero_block = _domain_header(
+        "Atherogenic burden",
+        active=dom_athero,
+        right_note=("ApoB preferred" if apob_measured else "LDL used (ApoB not measured)"),
+    ) + "\n".join(athero_rows)
+
+    a1c_txt = f"{_fmt_num(a1c_v, decimals=1)} %" if a1c_v is not None else "—"
+    gly_block = _domain_header("Glycemia", active=dom_gly) + f"""
+<div class="rc2-row">
+  {_cell("A1c")}
+  {_cell("5.7–6.1%")}
+  {_cell(a1c_txt, ring=a1c_mild1)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("6.2–6.4%")}
+  {_cell(a1c_txt, ring=a1c_mild2)}
+  {_cell("Near boundary", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥6.5% or diabetes = true")}
+  {_cell(a1c_txt, ring=a1c_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+
+    hscrp_txt = f"{_fmt_num(hscrp_v, decimals=1)} mg/L" if hscrp_v is not None else "—"
+    infl_block = _domain_header("Inflammation", active=dom_infl) + f"""
+<div class="rc2-row">
+  {_cell("hsCRP")}
+  {_cell("≥2.0 mg/L")}
+  {_cell(hscrp_txt, ring=hscrp_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+"""
+
+    lpa_txt = f"{_fmt_num(lpa_v)} {lpa_unit_v}" if (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL")) else "—"
+    gen_block = _domain_header("Genetics", active=dom_gen) + f"""
+<div class="rc2-row">
+  {_cell("Lp(a)")}
+  {_cell("≥125 nmol/L or ≥50 mg/dL")}
+  {_cell(lpa_txt, ring=lpa_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+
+    smoke_txt = "Yes" if smoking_major else "No"
+    smoke_block = _domain_header("Smoking", active=dom_smoke) + f"""
+<div class="rc2-row">
+  {_cell("Smoking")}
+  {_cell("Current smoking")}
+  {_cell(smoke_txt, ring=smoking_major)}
+  {_cell("Major driver" if smoking_major else "—", tag=("major" if smoking_major else None))}
+</div>
+"""
+
+    html = f"""
+<style>
+  .rc2-wrap {{
+    border:1px solid rgba(31,41,55,0.12);
+    border-radius:12px;
+    background:#fff;
+    padding:10px 12px;
+    font-size:0.90rem;
+    line-height:1.25;
+    margin-top:10px;
+  }}
+  .rc2-title {{
+    font-variant-caps:all-small-caps;
+    letter-spacing:0.08em;
+    font-weight:900;
+    font-size:0.80rem;
+    color:#4b5563;
+    margin-bottom:8px;
+  }}
+  .rc2-gridhead {{
+    display:grid;
+    grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
+    gap:8px;
+    padding:6px 0;
+    border-bottom:1px solid rgba(31,41,55,0.10);
+    color:rgba(31,41,55,0.65);
+    font-size:0.80rem;
+    font-weight:800;
+  }}
+  .rc2-domain {{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-top:10px;
+    padding-top:8px;
+    border-top:1px solid rgba(31,41,55,0.08);
+  }}
+  .rc2-domain-title {{ font-weight:900; color:#111827; font-size:0.86rem; }}
+  .rc2-domain-note {{ color:rgba(31,41,55,0.60); font-size:0.80rem; font-weight:700; }}
+  .rc2-domain-active {{
+    background: rgba(59,130,246,0.04);
+    border-radius:10px;
+    padding:6px 8px;
+    border:1px solid rgba(59,130,246,0.12);
+  }}
+  .rc2-row {{
+    display:grid;
+    grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
+    gap:8px;
+    padding:5px 0;
+    border-bottom:1px solid rgba(31,41,55,0.06);
+    align-items:start;
+  }}
+  .rc2-row:last-child {{ border-bottom:none; }}
+  .rc2-cell {{ margin:0; padding:0; color:#111827; }}
+  .rc2-muted {{ color:rgba(31,41,55,0.55); }}
+  .rc2-ring {{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    border:2px solid rgba(59,130,246,0.85);
+    background: rgba(59,130,246,0.08);
+    font-weight:900;
+    width: fit-content;
+  }}
+  .rc2-tag {{
+    display:inline-block;
+    margin-left:6px;
+    font-size:0.74rem;
+    padding:2px 8px;
+    border-radius:999px;
+    border:1px solid rgba(31,41,55,0.16);
+    background:#fff;
+    font-weight:900;
+    color:rgba(31,41,55,0.80);
+    vertical-align:middle;
+  }}
+</style>
+
+<div class="rc2-wrap">
+  <div class="rc2-title">Where this patient falls</div>
+  <div class="rc2-gridhead">
+    <div>Marker</div><div>Range / condition</div><div>Patient</div><div>Level effect</div>
+  </div>
+
+  {athero_block}
+  {gly_block}
+  {infl_block}
+  {gen_block}
+  {smoke_block}
+</div>
+"""
+    return html
+
+
+# ============================================================
+# Tabs
+# ============================================================
+tab_report, tab_framework, tab_details, tab_debug = st.tabs(
+    ["Report", "Decision Framework", "Details", "Debug"]
+)
+
+# ------------------------------------------------------------
+# REPORT TAB
+# ------------------------------------------------------------
+with tab_report:
+    st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
+
+    stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
+
+    st.markdown(
+        f"""
+<div class="block">
+  <div class="block-title">Snapshot</div>
+
+  <div class="kvline"><b>Level:</b>
+    {level}{f" ({sub})" if sub else ""} — {LEVEL_NAMES.get(level,'—')}
+  </div>
+
+  <div class="kvline">
+    <b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))}
+    &nbsp; <b>Plaque burden:</b> {scrub_terms(ev.get('burden_band','—'))}
+  </div>
+
+  <div class="kvline">
+    <b>Decision confidence:</b> {decision_conf}
+    &nbsp; <b>Decision stability:</b> {stab_line}
+  </div>
+
+  <div class="kvline">
+    <b>Key metrics:</b>
+    RSS {rs.get('score','—')}/100 ({rs.get('band','—')})
+    • ASCVD PCE (10y) {pce_line} {pce_cat}
+  </div>
+
+  <div class="kvline">
+    <b>PREVENT (10y, population model):</b>
+    total CVD {f"{p_total}%" if p_total is not None else '—'}
+    • ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>", unsafe_allow_html=True)
+    if (p_total is None and p_ascvd is None) and p_note:
+        st.markdown(f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>", unsafe_allow_html=True)
+
+    # Tight criteria table (rings)
+    st.markdown(
+        render_criteria_table_compact(
+            apob_v=data.get("apob"),
+            ldl_v=data.get("ldl"),
+            a1c_v=data.get("a1c"),
+            hscrp_v=data.get("hscrp"),
+            lpa_v=data.get("lpa"),
+            lpa_unit_v=data.get("lpa_unit"),
+            smoker_v=bool(data.get("smoking")),
+            diabetes_v=bool(data.get("diabetes")),
+        ),
+        unsafe_allow_html=True,
+    )
+
+    # Secondary insights (engine-gated)
+    rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
+    if rd.get("should_surface"):
+        st.markdown(
+            f"""
+<div class="block compact">
+  <div class="block-title compact">Secondary insights</div>
+  <div class="kvline compact">{_html.escape(rd.get("headline",""))}</div>
+  <div class="kvline compact inline-muted">{_html.escape(rd.get("detail",""))}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+    col_t, col_m = st.columns([1.05, 1.35], gap="small")
+
+    # Targets
+    with col_t:
+        if primary:
+            lipid_targets_line = f"{primary[0]} {primary[1]}"
+            if apob_line:
+                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+
+            anchor = guideline_anchor_note(level, clinical_ascvd)
+            apob_note = (
+                "ApoB not measured — optional add-on if discordance suspected."
+                if apob_line and not apob_measured
+                else ""
+            )
+
+            st.markdown(
+                f"""
+<div class="block compact">
+  <div class="block-title compact">Targets (if treated)</div>
+  <div class="kvline compact"><b>Targets:</b> {_html.escape(lipid_targets_line)}</div>
+  <div class="compact-caption">{_html.escape(anchor)}</div>
+  {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """
+<div class="block compact">
+  <div class="block-title compact">Targets (if treated)</div>
+  <div class="kvline compact"><b>Targets:</b> —</div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+    # Action
+    with col_m:
+        rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
+
+        cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+        cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
+        cac_det = _html.escape(cac_copy.get("detail") or "")
+        cac_ref = _html.escape(cac_copy.get("referral") or "")
+
+        cac_block = (
+            f"<div class='kvline compact'>{cac_head}</div>"
+            + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
+            + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
+        )
+
+        asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
+        asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
+
+        st.markdown(
+            f"""
+<div class="block compact">
+  <div class="block-title compact">Action</div>
+
+  <div class="kvline compact"><b>Recommended action:</b></div>
+  <div class="kvline compact">{_html.escape(rec_action)}</div>
+
+  <div class="kvline compact" style="margin-top:6px;"><b>Coronary calcium:</b></div>
+  {cac_block}
+
+  <div class="kvline compact" style="margin-top:6px;"><b>Aspirin:</b></div>
+  <div class="kvline compact">{asp_head}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    # EMR note
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("EMR note (copy/paste)")
+    emr_copy_box("Risk Continuum — EMR Note", build_emr_note(), height_px=520)
+
+
+# ------------------------------------------------------------
+# DECISION FRAMEWORK TAB (no giant second table)
+# ------------------------------------------------------------
+with tab_framework:
+    st.subheader("How Levels Are Specified")
+    st.caption(
+        "Levels are assigned based on biologic signal strength, plaque status, and convergence of risk — "
+        "not by forced treatment rules."
+    )
+
+    st.markdown("### This patient")
+    this_def = safe_level_def(level, sub)
+    if this_def:
+        title = this_def.get("sublevel_name") or this_def.get("level_name") or "—"
+        desc = this_def.get("sublevel_definition") or this_def.get("level_definition") or "—"
+        st.markdown(f"**Assigned:** Level {level}" + (f" ({sub})" if sub else "") + f" — {title}")
+        st.write(desc)
+    else:
+        st.info("Engine definitions not available (get_level_definition_payload not found).")
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+    components.html(
+        """
+<div style="overflow-x:auto;">
+  <table style="width:100%; border-collapse:collapse; font-size:0.92rem; border:1px solid rgba(31,41,55,0.12);">
+    <thead>
+      <tr style="background:#f9fafb;">
+        <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Level</th>
+        <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Risk state</th>
+        <th style="text-align:left; padding:10px; border-bottom:2px solid rgba(31,41,55,0.18);">Medication posture</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>1</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Minimal risk signal</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Do not treat</td></tr>
+      <tr><td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>2A/2B</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Emerging risk signals</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Preference-sensitive</td></tr>
+      <tr><td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>3A/3B</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Actionable biologic risk</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Treatment reasonable / favored</td></tr>
+      <tr><td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);"><b>4</b></td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Subclinical atherosclerosis present</td>
+          <td style="padding:10px; border-bottom:1px solid rgba(31,41,55,0.12);">Treat (target-driven)</td></tr>
+      <tr><td style="padding:10px;"><b>5</b></td>
+          <td style="padding:10px;">Very high risk / ASCVD intensity</td>
+          <td style="padding:10px;">Treat (secondary prevention)</td></tr>
+    </tbody>
+  </table>
+</div>
+""",
+        height=360,
+    )
+
+# ------------------------------------------------------------
+# DETAILS TAB
+# ------------------------------------------------------------
+with tab_details:
+    st.subheader("Anchors (near-term vs lifetime)")
+    st.markdown(f"**Near-term anchor:** {near_anchor}")
+    st.markdown(f"**Lifetime anchor:** {life_anchor}")
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("Coronary calcium (engine rationale)")
+    cs = (out.get("insights") or {}).get("cac_decision_support") or {}
+
+    if cs:
+        st.write("**Engine signal:** See rationale below (internal decision-support).")
+    else:
+        st.write("**Engine signal:** —")
+
+    if cs.get("rationale"):
+        st.write(f"**Rationale:** {scrub_terms(cs.get('rationale'))}")
+    if cs.get("message"):
+        st.write(f"**Use:** {scrub_terms(cs.get('message'))}")
+    if cs.get("tag"):
+        st.caption(f"Tag: {cs.get('tag')}")
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("Decision stability (detail)")
+    st.markdown(
+        f"**{decision_stability}**"
+        + (f" — {decision_stability_note}" if decision_stability_note else "")
+    )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("Aspirin (detail)")
+    asp_why = scrub_terms(short_why(asp.get("rationale", []), max_items=5))
+    st.write(
+        f"**{asp_status_raw}**"
+        + (f" — {asp_expl}" if asp_expl else "")
+        + (f" **Why:** {asp_why}" if asp_why else "")
+    )
+
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("PREVENT (population model) — details")
+    st.caption(PREVENT_EXPLAINER)
+    if p_total is not None or p_ascvd is not None:
+        st.markdown(f"**10-year total CVD:** {p_total}%")
+        st.markdown(f"**10-year ASCVD:** {p_ascvd}%")
+    else:
+        st.caption(p_note or "PREVENT not calculated.")
+
+    with st.expander("How Levels work (legend)", expanded=False):
+        for item in legend:
+            st.write(f"• {scrub_terms(item)}")
+
+# ------------------------------------------------------------
+# DEBUG TAB
+# ------------------------------------------------------------
+with tab_debug:
+    st.subheader("Engine quick output (raw text)")
+    st.code(note_text, language="text")
+
+    st.subheader("Trace (audit trail)")
+    st.json(out.get("trace", []))
+
+    if show_json:
+        st.subheader("JSON (debug)")
+        st.json(out)
+
+# ------------------------------------------------------------
+# Footer
+# ------------------------------------------------------------
+st.caption(
+    f"Versions: {VERSION.get('levels','')} | {VERSION.get('riskSignal','')} | "
+    f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
+    f"{VERSION.get('prevent','')}. No storage intended."
+)
+
+
 
 
 
