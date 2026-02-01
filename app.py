@@ -1576,7 +1576,10 @@ def build_emr_note() -> str:
         if cac_ref:
             lines.append(f"- {cac_ref}")
 
-    lines.append(f"- Aspirin: {asp_line}")
+    asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
+    asp_head = (asp_copy.get("headline") or f"Aspirin: {asp_line}").strip()
+    lines.append(f"- {asp_head}")
+
     lines.append("")
 
     return "\n".join(lines)
@@ -1654,42 +1657,44 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-    # ------------------------------------------------------------
-    # Secondary insights (engine-gated): lifestyle vs biology driver
-    # ------------------------------------------------------------
-    rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
-    if rd.get("should_surface"):
-        st.markdown(
-            f"""
+# ------------------------------------------------------------
+# Secondary insights (engine-gated): lifestyle vs biology driver
+# ------------------------------------------------------------
+rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
+if rd.get("should_surface"):
+    st.markdown(
+        f"""
 <div class="block compact">
   <div class="block-title compact">Secondary insights</div>
   <div class="kvline compact">{_html.escape(rd.get("headline",""))}</div>
   <div class="kvline compact inline-muted">{_html.escape(rd.get("detail",""))}</div>
 </div>
 """,
-            unsafe_allow_html=True,
+        unsafe_allow_html=True,
+    )
+
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
+
+# ------------------------------------------------------------
+# Targets
+# ------------------------------------------------------------
+with col_t:
+    if primary:
+        lipid_targets_line = f"{primary[0]} {primary[1]}"
+        if apob_line:
+            lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+
+        anchor = guideline_anchor_note(level, clinical_ascvd)
+        apob_note = (
+            "ApoB not measured — optional add-on if discordance suspected."
+            if apob_line and not apob_measured
+            else ""
         )
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
-    col_t, col_m, col_c = st.columns([1.05, 1.35, 1.6], gap="small")
-
-    # Targets
-    with col_t:
-        if primary:
-            lipid_targets_line = f"{primary[0]} {primary[1]}"
-            if apob_line:
-                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
-
-            anchor = guideline_anchor_note(level, clinical_ascvd)
-            apob_note = (
-                "ApoB not measured — optional add-on if discordance suspected."
-                if apob_line and not apob_measured
-                else ""
-            )
-
-            st.markdown(
-                f"""
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Targets (if treated)</div>
   <div class="kvline compact"><b>Targets:</b> {_html.escape(lipid_targets_line)}</div>
@@ -1697,39 +1702,45 @@ with tab_report:
   {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                """
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
 <div class="block compact">
   <div class="block-title compact">Targets (if treated)</div>
   <div class="kvline compact"><b>Targets:</b> —</div>
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-
-    # Action
-    with col_m:
-        rec_action = recommended_action_line(
-            lvl, plan_clean, decision_stability, decision_stability_note
+            unsafe_allow_html=True,
         )
 
-        # Canonical CAC language from engine (single source of truth)
-        cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
-        cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
-        cac_det = _html.escape(cac_copy.get("detail") or "")
-        cac_ref = _html.escape(cac_copy.get("referral") or "")
+# ------------------------------------------------------------
+# Action
+# ------------------------------------------------------------
+with col_m:
+    rec_action = recommended_action_line(
+        lvl, plan_clean, decision_stability, decision_stability_note
+    )
 
-        cac_block = (
-            f"<div class='kvline compact'>{cac_head}</div>"
-            + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
-            + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
-        )
+    # Canonical CAC language (engine single source of truth)
+    cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+    cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
+    cac_det = _html.escape(cac_copy.get("detail") or "")
+    cac_ref = _html.escape(cac_copy.get("referral") or "")
 
-        st.markdown(
-            f"""
+    cac_block = (
+        f"<div class='kvline compact'>{cac_head}</div>"
+        + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
+        + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
+    )
+
+    # Canonical aspirin language (engine single source of truth)
+    asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
+    asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
+
+    st.markdown(
+        f"""
 <div class="block compact">
   <div class="block-title compact">Action</div>
 
@@ -1740,11 +1751,11 @@ with tab_report:
   {cac_block}
 
   <div class="kvline compact" style="margin-top:6px;"><b>Aspirin:</b></div>
-  <div class="kvline compact">{_html.escape(asp_line)}</div>
+  <div class="kvline compact">{asp_head}</div>
 </div>
 """,
-            unsafe_allow_html=True,
-        )
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # Decision Framework — convergence + causality helpers
@@ -2267,6 +2278,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
