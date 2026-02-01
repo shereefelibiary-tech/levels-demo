@@ -251,10 +251,13 @@ SUBLEVEL_DEFS = {
             "  - Current smoking",
         ],
         "major_drivers_list": MAJOR_ACTIONABLE_DRIVERS_EXPLICIT,
-        "Therapy is generally favored unless there is a strong reason to defer. If plaque is unmeasured, CAC can be obtained to define disease burden and to inform intensity/targets or downstream evaluation.",
-
+        "medication_action": (
+            "Therapy is generally favored unless there is a strong reason to defer. "
+            "If plaque is unmeasured, CAC can be obtained to define disease burden and to inform intensity/targets or downstream evaluation."
+        ),
     },
 }
+
 
 CAC_RULE_TEXT = (
     "Coronary artery calcium (CAC) can be obtained to define atherosclerotic disease burden when plaque status is unmeasured. "
@@ -2696,6 +2699,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(lines)
+
 
 
 
