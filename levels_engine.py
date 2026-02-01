@@ -1222,6 +1222,192 @@ def ranked_drivers(p: Patient, plaque: Dict[str, Any], trace: List[Dict[str, Any
     ranked = [d for _, d in drivers]
     add_trace(trace, "Drivers_ranked", ranked, "Drivers ranked")
     return ranked
+# -------------------------------------------------------------------
+# Secondary insight: Lifestyle-responsive vs Biology-dominant pattern
+# -------------------------------------------------------------------
+def classify_risk_driver(
+    *,
+    p: Patient,
+    plaque: Dict[str, Any],
+    rss: Dict[str, Any],
+    risk10: Dict[str, Any],
+    level: int,
+    sublevel: Optional[str],
+    decision_confidence: str,
+    trace: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Conservative, clinician-facing driver pattern classifier.
+
+    Goal:
+      - Surface only when confidence is high and signals are concordant.
+      - Never claims "genetic" — frames as biologic vs behavioral mediation.
+      - Suppress when plaque is known (CAC=0 or CAC positive) or ASCVD is present.
+      - Suppress in higher postures (Level 4+) and when decision confidence isn't High.
+
+    Returns:
+      {
+        "should_surface": bool,
+        "class": "biology_dominant"|"lifestyle_responsive"|"mixed",
+        "confidence": "high"|"low",
+        "headline": str|None,
+        "detail": str|None,
+        "debug": {...}  # optional; safe to omit from UI
+      }
+    """
+
+    # ---- defaults (silent) ----
+    out = {
+        "should_surface": False,
+        "class": "mixed",
+        "confidence": "low",
+        "headline": None,
+        "detail": None,
+        "debug": {},
+    }
+
+    # ---- suppressions: keep cardiology/medico-legal comfortable ----
+    if str(decision_confidence or "").strip().lower() != "high":
+        add_trace(trace, "RiskDriver_suppressed_confidence", decision_confidence, "Decision confidence not high")
+        return out
+
+    # If plaque already assessed (CAC known or ASCVD), do not label drivers.
+    if p.get("ascvd") is True or plaque.get("plaque_present") in (True, False):
+        add_trace(trace, "RiskDriver_suppressed_plaque_known", plaque.get("plaque_evidence"), "Plaque already assessed")
+        return out
+
+    # If higher posture (plaque-driven), do not distract.
+    if int(level or 0) >= 4:
+        add_trace(trace, "RiskDriver_suppressed_level4plus", level, "Higher posture")
+        return out
+
+    # Require key domains in play: need at least ApoB or LDL AND RSS AND age.
+    if not p.has("age"):
+        add_trace(trace, "RiskDriver_suppressed_missing_age", None, "Age missing")
+        return out
+
+    rss_score = None
+    try:
+        rss_score = int(rss.get("score"))
+    except Exception:
+        rss_score = None
+
+    apob = safe_float(p.get("apob")) if p.has("apob") else None
+    ldl = safe_float(p.get("ldl")) if p.has("ldl") else None
+    lpa_hi = bool(lpa_elevated_no_trace(p))
+
+    if apob is None and ldl is None:
+        add_trace(trace, "RiskDriver_suppressed_missing_athero", None, "No ApoB/LDL available")
+        return out
+    if rss_score is None:
+        add_trace(trace, "RiskDriver_suppressed_missing_rss", None, "RSS missing")
+        return out
+
+    age = int(p.get("age"))
+    # optional near-term risk (may be None)
+    pce = risk10.get("risk_pct")
+    pce_f = float(pce) if pce is not None else None
+
+    # ---- domain flags ----
+    # Strong biologic marker signal
+    bio_strong = False
+    if apob is not None and apob >= 120:
+        bio_strong = True
+    if lpa_hi:
+        bio_strong = True
+    # LDL can contribute only when ApoB absent (avoid mixed messaging)
+    if apob is None and ldl is not None and ldl >= 190:
+        bio_strong = True
+
+    # Strong lifestyle burden (RSS is your biologic+plaque signal, but
+    # in practice high RSS without strong atherogenic markers suggests behavior/metabolic contributors.)
+    lifestyle_burden = (rss_score >= 60)
+
+    # Age–risk discordance (conservative)
+    # Without plaque, use “very strong biology at young age” as discordance.
+    age_discordant = False
+    if age < 50 and (lpa_hi or (apob is not None and apob >= 130)):
+        age_discordant = True
+
+    # ---- voting (require >=3 "votes" for any surfacing) ----
+    bio_votes = 0
+    life_votes = 0
+
+    # Domain 1: Atherogenic biology
+    if bio_strong:
+        bio_votes += 1
+    else:
+        # if clearly low-ish ApoB and no Lp(a), that supports lifestyle-responsiveness
+        if (apob is not None and apob < 100) and (not lpa_hi):
+            life_votes += 1
+
+    # Domain 2: Lifestyle burden proxy
+    if lifestyle_burden:
+        life_votes += 1
+
+    # Domain 3: Age proportionality
+    if age_discordant:
+        bio_votes += 1
+
+    # Domain 4: Near-term risk discordance (optional)
+    # If PCE is low but biology is strong, that's a “biology-dominant” pattern.
+    if pce_f is not None and pce_f < 5.0 and bio_strong:
+        bio_votes += 1
+    # If PCE is elevated but biology is not strong and RSS high, that supports modifiable exposure.
+    if pce_f is not None and pce_f >= 7.5 and (not bio_strong) and lifestyle_burden:
+        life_votes += 1
+
+    out["debug"] = {
+        "age": age,
+        "rss": rss_score,
+        "apob": apob,
+        "ldl": ldl,
+        "lpa_hi": lpa_hi,
+        "pce": pce_f,
+        "bio_votes": bio_votes,
+        "life_votes": life_votes,
+    }
+
+    # ---- high-confidence thresholds (asymmetric strictness) ----
+    # Biology-dominant: requires strong biology + discordance + low lifestyle burden.
+    biology_high = (
+        bio_votes >= 3
+        and bio_strong
+        and (not lifestyle_burden or rss_score < 50)
+    )
+
+    # Lifestyle-responsive: requires strong lifestyle burden + lack of strong biology.
+    lifestyle_high = (
+        life_votes >= 3
+        and lifestyle_burden
+        and (not bio_strong)
+        and (not age_discordant)
+    )
+
+    if biology_high:
+        add_trace(trace, "RiskDriver_biology_high", out["debug"], "Biology-dominant pattern surfaced")
+        return {
+            "should_surface": True,
+            "class": "biology_dominant",
+            "confidence": "high",
+            "headline": "Risk appears biologically driven rather than behaviorally mediated",
+            "detail": "Risk signals appear disproportionate to modifiable exposures; lifestyle improves health but may not fully normalize atherosclerotic risk.",
+            "debug": out["debug"],
+        }
+
+    if lifestyle_high:
+        add_trace(trace, "RiskDriver_lifestyle_high", out["debug"], "Lifestyle-responsive pattern surfaced")
+        return {
+            "should_surface": True,
+            "class": "lifestyle_responsive",
+            "confidence": "high",
+            "headline": "Risk pattern appears responsive to lifestyle change",
+            "detail": "Modifiable exposures appear to be primary drivers on the available data; a time-bounded lifestyle interval is reasonable before escalation.",
+            "debug": out["debug"],
+        }
+
+    add_trace(trace, "RiskDriver_not_surfaced", out["debug"], "Mixed/indeterminate")
+    return out
 
 # -------------------------------------------------------------------
 # Anchors (near-term vs lifetime)
@@ -2101,8 +2287,22 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     cac_support = cac_decision_support(p, plaque, risk10, level, trace)
     asp = aspirin_advice(p, risk10, plaque, trace)
 
-    drivers_all = ranked_drivers(p, plaque, trace)
+       drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
+
+    # ------------------------------------------------------------
+    # Secondary Insight: lifestyle vs biology driver pattern
+    # ------------------------------------------------------------
+    risk_driver = classify_risk_driver(
+        p=p,
+        plaque=plaque,
+        rss=rss,
+        risk10=risk10,
+        level=level,
+        sublevel=sublevel,
+        decision_confidence=dec_conf,
+        trace=trace,
+    )
 
     plan = plan_sentence(level, sublevel, therapy_on, at_tgt, risk10, plaque)
 
@@ -2336,6 +2536,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
