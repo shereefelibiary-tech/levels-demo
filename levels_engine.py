@@ -2287,7 +2287,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     cac_support = cac_decision_support(p, plaque, risk10, level, trace)
     asp = aspirin_advice(p, risk10, plaque, trace)
 
-       drivers_all = ranked_drivers(p, plaque, trace)
+    drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
 
     # ------------------------------------------------------------
@@ -2386,6 +2386,9 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "cac_decision_support": cac_support,
         "structural_clarification": _clar if _clar else None,
 
+        # Secondary insight (engine-gated)
+        "risk_driver_pattern": risk_driver,
+
         "phenotype_label": None,
         "phenotype_definition": None,
 
@@ -2396,6 +2399,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
         "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
+
 
     out = {
         "version": VERSION,
@@ -2536,6 +2540,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 # =========================
 # CHUNK 6 / 6 — END
 # =========================
+
 
 
 
