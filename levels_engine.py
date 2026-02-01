@@ -256,10 +256,11 @@ SUBLEVEL_DEFS = {
 }
 
 CAC_RULE_TEXT = (
-    "CAC is never recommended. It is tie-breaker only when plaque is unmeasured: "
-    "obtain CAC only if a score of 0 would delay therapy or a positive score would prompt initiation or intensification. "
+    "Coronary artery calcium (CAC) can be obtained to define atherosclerotic disease burden when plaque status is unmeasured. "
+    "It is most useful when the result would change treatment intensity/targets or inform downstream evaluation. "
     "If CAC is already known (CAC=0 or CAC positive), CAC messaging is suppressed."
 )
+
 
 def get_level_definition_payload(level: int, sublevel: Optional[str] = None) -> Dict[str, Any]:
     lvl = int(level or 0)
@@ -296,10 +297,12 @@ def levels_legend_compact() -> List[str]:
         "Level 2A: emerging (isolated) → data completion; lifestyle sprint; reassess",
         "Level 2B: emerging (converging) → clarify risk; treatment reasonable (preference-sensitive)",
         "Level 3A: actionable biology → therapy reasonable; timing preference-sensitive",
-        "Level 3B: actionable biology + enhancers → therapy generally favored; CAC tie-breaker only if unmeasured",
+        "Level 3B: actionable biology + enhancers → therapy generally favored; CAC can define disease burden if unmeasured",
         "Level 4: plaque present (CAC 1–99) → treat as early disease; target-driven therapy",
         "Level 5: very high risk (CAC ≥100 or clinical ASCVD) → secondary-prevention intensity",
-        "CAC: tie-breaker only when unmeasured; never recommended",
+        "CAC: reasonable to obtain when plaque status is unmeasured; informs burden, intensity, and downstream evaluation",
+    ]
+
     ]
 
 
@@ -2694,6 +2697,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(lines)
+
 
 
 
