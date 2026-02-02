@@ -2603,88 +2603,226 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 # Canonical EMR output (locked style) — direct: WHY → WHAT
 # -------------------------------------------------------------------
+# -------------------------------------------------------------------
+# FINAL-POLISH LAYER (engine-owned, single source of truth)
+# -------------------------------------------------------------------
+def _normalize_space(s: str) -> str:
+    return " ".join((s or "").strip().split())
+
+def _dedup_lines(lines: List[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for x in lines:
+        t = _normalize_space(x).lower()
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append(x)
+    return out
+
+def _pick_primary_action(next_actions: List[str], dominant: bool) -> Tuple[Optional[str], List[str]]:
+    """
+    Returns (primary_action_line, remaining_action_lines)
+
+    Strategy:
+    - If dominantAction=True: prefer the first "Lipid-lowering therapy:" / "Therapy optimization:" / "Treatment escalation:" line
+    - Else: prefer the first non-defensive line (avoid stacking "not required/no escalation" repeats)
+    """
+    if not next_actions:
+        return None, []
+
+    lines = [str(x).strip() for x in next_actions if str(x).strip()]
+    if not lines:
+        return None, []
+
+    # Candidates by clinical salience
+    preferred_prefixes = (
+        "Lipid-lowering therapy:",
+        "Therapy optimization:",
+        "Treatment escalation:",
+        "Management:",
+        "Data completion:",
+        "Reassessment:",
+    )
+
+    def is_preferred(s: str) -> bool:
+        return any(s.startswith(p) for p in preferred_prefixes)
+
+    if dominant:
+        for i, s in enumerate(lines):
+            if is_preferred(s):
+                primary = s
+                rest = lines[:i] + lines[i+1:]
+                return primary, rest
+
+    # Non-dominant: choose first preferred; otherwise first line.
+    for i, s in enumerate(lines):
+        if is_preferred(s):
+            primary = s
+            rest = lines[:i] + lines[i+1:]
+            return primary, rest
+
+    return lines[0], lines[1:]
+
+
+def _action_to_plan_bullets(primary: Optional[str], rest: List[str]) -> List[str]:
+    """
+    Converts nextActions (already canonical) into a minimal, non-redundant Plan section.
+    Removes repeated negations and collapses boilerplate.
+    """
+    bullets: List[str] = []
+
+    # Helper: strip trailing period; keep colon formatting intact
+    def tidy(s: str) -> str:
+        s = _normalize_space(s)
+        if s.endswith("."):
+            s = s[:-1]
+        return s
+
+    primary_t = tidy(primary) if primary else None
+    rest_t = [tidy(x) for x in rest if tidy(x)]
+
+    # Drop redundant "no escalation / not required" echoes if primary already conveys it
+    redundant_starts = (
+        "No escalation",
+        "No immediate escalation",
+        "Management: Not required at this time",
+        "Management: Not required",
+        "Lipid-lowering therapy: Not required at this time",
+    )
+
+    def is_redundant(s: str) -> bool:
+        low = s.lower()
+        if any(s.startswith(r) for r in redundant_starts):
+            return True
+        # also catch “No immediate escalation required; reassess …” if we already include reassessment
+        if "no immediate escalation" in low:
+            return True
+        return False
+
+    # Always include primary (if present)
+    if primary_t:
+        bullets.append(primary_t)
+
+    # Include up to 2 additional lines that add *new* info
+    keep: List[str] = []
+    for s in rest_t:
+        if is_redundant(s):
+            continue
+        keep.append(s)
+        if len(keep) >= 2:
+            break
+
+    bullets.extend(keep)
+    return _dedup_lines([f"- {b}" for b in bullets])
+
+
+# -------------------------------------------------------------------
+# CANONICAL CLINICAL REPORT (polished; single source of truth)
+# -------------------------------------------------------------------
 def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lvl = out.get("levels") or {}
     rs = out.get("riskSignal") or {}
-    risk10 = out.get("pooledCohortEquations10yAscvdRisk") or {}
+    risk10 = out.get("ascvdPce10yRisk") or out.get("pooledCohortEquations10yAscvdRisk") or {}
     prev = out.get("prevent10") or {}
-    asp = out.get("aspirin") or {}
     anchors = out.get("anchors") or {}
+    insights = out.get("insights") or {}
 
     level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
-    sub = lvl.get("sublevel")
+    sub = (lvl.get("sublevel") or None)
+    label = (lvl.get("label") or "").strip()
+    label_fallback = LEVEL_LABELS.get(level, f"Level {level}")
+    level_line = f"{label}" if label else label_fallback
 
-    plaque_evidence = lvl.get("plaqueEvidence") or "—"
-    plaque_burden = lvl.get("plaqueBurden") or "—"
-    plaque_status = "Unmeasured"
-    pe_l = str(plaque_evidence).lower()
-    if "cac = 0" in pe_l or "cac=0" in pe_l:
-        plaque_status = "CAC = 0"
-    elif "cac positive" in pe_l:
-        plaque_status = "CAC positive"
-    elif "clinical ascvd" in pe_l:
-        plaque_status = "Clinical ASCVD"
-    elif "unknown" in pe_l or "no structural" in pe_l or "unmeasured" in pe_l:
-        plaque_status = "Unmeasured"
+    # Plaque lines (use your explicit evidence/burden)
+    plaque_evidence = (lvl.get("plaqueEvidence") or "—").strip()
+    plaque_burden = (lvl.get("plaqueBurden") or "—").strip()
 
-    # Canonical aspirin language (match UI/EMR)
-    asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
-    asp_line = str(asp_copy.get("headline") or "Aspirin: —").strip()
+    # Decision lines
+    dec_conf = (lvl.get("decisionConfidence") or "—").strip()
+    stab = (lvl.get("decisionStability") or "—").strip()
+    stab_note = (lvl.get("decisionStabilityNote") or "").strip()
+    stab_line = stab + (f" — {stab_note}" if stab_note else "")
 
-    lvl_name = "—"
-    if level == 1:
-        lvl_name = "Minimal risk signal"
-    elif level == 2:
-        lvl_name = "Emerging risk signals"
-    elif level == 3:
-        lvl_name = "Actionable biologic risk"
-    elif level == 4:
-        lvl_name = "Subclinical atherosclerosis present"
-    elif level == 5:
-        lvl_name = "Very high risk / ASCVD intensity"
+    # Drivers (already deterministic + explicit in your assign_level logic)
+    drivers = (out.get("drivers") or lvl.get("triggers") or [])[:3]
+    drivers = [str(d).strip() for d in drivers if str(d).strip()]
 
-    subtxt = f"{sub}" if sub else None
+    # Metrics
+    rss_score = rs.get("score", "—")
+    rss_band = rs.get("band", "—")
+    pce_pct = risk10.get("risk_pct", None)
+    pce_cat = risk10.get("category", "—")
+    p_total = prev.get("total_cvd_10y_pct", None)
+    p_ascvd = prev.get("ascvd_10y_pct", None)
 
+    # Targets (only show if you want "Targets (if treated)" behavior; engine already sets targets dict)
+    targets = out.get("targets") or {}
+    # Use your intended label
+    targets_label = "Targets (if treated)"
+
+    # Aspirin / CAC canonical copy (single source of truth already exists)
+    asp_copy = insights.get("aspirin_copy") or {}
+    asp_head = _normalize_space(str(asp_copy.get("headline") or "Aspirin: —"))
+
+    cac_copy = insights.get("cac_copy") or {}
+    cac_head = _normalize_space(str(cac_copy.get("headline") or ""))
+    cac_det = _normalize_space(str(cac_copy.get("detail") or ""))
+    cac_ref = _normalize_space(str(cac_copy.get("referral") or ""))
+
+    # Build Plan from nextActions with dominance + dedup
+    dominant = bool(lvl.get("dominantAction") is True)
+    primary, rest = _pick_primary_action(out.get("nextActions") or [], dominant=dominant)
+    plan_bullets = _action_to_plan_bullets(primary, rest)
+
+    # --- Report assembly (clinician voice, low redundancy) ---
     lines: List[str] = []
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
     lines.append("-" * 60)
-    lines.append(f"Level: {subtxt} — {lvl_name}" if subtxt else f"Level: {level} — {lvl_name}")
+    lines.append(f"Level: {level_line}")
+    lines.append(f"Plaque: {plaque_evidence} | Burden: {plaque_burden}")
+    lines.append(f"Confidence: {dec_conf} | Stability: {stab_line}")
+    lines.append("")
 
-    drivers = (lvl.get("triggers") or [])[:3]
     if drivers:
-        lines.append("Why:")
+        lines.append("Why (top drivers):")
         for d in drivers:
             lines.append(f"- {d}")
+        lines.append("")
 
-    lines.append(f"Plaque: {plaque_status}")
-    if plaque_status in ("CAC positive", "CAC = 0", "Clinical ASCVD"):
-        lines.append(f"Plaque burden: {plaque_burden}")
-
-    p_total = prev.get("total_cvd_10y_pct")
-    p_ascvd = prev.get("ascvd_10y_pct")
-    lines.append("")
-    lines.append("Metrics:")
-    lines.append(f"- RSS: {rs.get('score','—')} / 100 ({rs.get('band','—')})")
-    if risk10.get("risk_pct") is not None:
-        lines.append(f"- ASCVD PCE 10y: {risk10.get('risk_pct')}% ({risk10.get('category','—')})")
+    lines.append("Risk estimates:")
+    lines.append(f"- RSS: {rss_score}/100 ({rss_band})")
+    if pce_pct is not None:
+        lines.append(f"- ASCVD PCE (10y): {pce_pct}% ({pce_cat})")
     else:
-        lines.append("- ASCVD PCE 10y: —")
-    lines.append(f"- PREVENT 10y: Total CVD {p_total if p_total is not None else '—'}% | ASCVD {p_ascvd if p_ascvd is not None else '—'}%")
-
+        lines.append("- ASCVD PCE (10y): —")
+    lines.append(
+        f"- PREVENT (10y): Total CVD {p_total if p_total is not None else '—'}% | "
+        f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
+    )
     lines.append("")
-    lines.append("Action:")
-    for a in (out.get("nextActions") or [])[:4]:
-        aa = str(a).strip()
-        if aa.endswith("."):
-            aa = aa[:-1]
-        lines.append(f"- {aa}")
-    lines.append(f"- {asp_line}")
 
-    # NOTE: CAC language is rendered from insights["cac_copy"] (single source of truth).
-    cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
-    cac_head = str(cac_copy.get("headline") or "").strip()
-    cac_det = str(cac_copy.get("detail") or "").strip()
-    cac_ref = str(cac_copy.get("referral") or "").strip()
+    # Targets (if treated)
+    if isinstance(targets, dict) and targets:
+        # Preserve your intended targets (ApoB/LDL ints)
+        t_parts: List[str] = []
+        if "ldl" in targets:
+            t_parts.append(f"LDL-C <{int(targets['ldl'])} mg/dL")
+        if "apob" in targets:
+            t_parts.append(f"ApoB <{int(targets['apob'])} mg/dL")
+        if t_parts:
+            lines.append(f"{targets_label}:")
+            for t in t_parts:
+                lines.append(f"- {t}")
+            lines.append("")
+
+    # Plan
+    lines.append("Plan:")
+    lines.extend(plan_bullets)
+
+    # Aspirin + CAC (canonical)
+    if asp_head:
+        lines.append(f"- {asp_head}")
 
     if cac_head:
         lines.append(f"- {cac_head}")
@@ -2693,12 +2831,15 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
         if cac_ref:
             lines.append(f"- {cac_ref}")
 
+    # Context anchors
     near = (anchors.get("nearTerm") or {}).get("summary", "—")
     life = (anchors.get("lifetime") or {}).get("summary", "—")
     lines.append("")
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
-    return "\n".join(lines)
+    return "\n".join(_dedup_lines(lines))
+
+
 
 
 
