@@ -2606,6 +2606,53 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 # -------------------------------------------------------------------
 # FINAL-POLISH LAYER (engine-owned, single source of truth)
 # -------------------------------------------------------------------
+def recommended_action_line(out: Dict[str, Any]) -> str:
+    """
+    Single-sentence, decision-today recommended action.
+    - No next-step tasks (CAC/labs/reassess)
+    - No aspirin mention (handled elsewhere)
+    - Uses dominantAction when present
+    """
+    lvl = out.get("levels") or {}
+    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
+    sub = (lvl.get("sublevel") or None)
+
+    dominant = bool(lvl.get("dominantAction") is True)
+
+    # Prefer the managementPlan sentence if it is "decision today" (it often is).
+    plan = str(lvl.get("managementPlan") or lvl.get("defaultPosture") or "").strip()
+
+    # Take first sentence-ish chunk
+    s = " ".join(plan.split())
+    if "." in s:
+        s = s.split(".", 1)[0].strip()
+    if s and not s.endswith("."):
+        s += "."
+
+    # Hard forbid next-step content for the single action line
+    forbidden = ("reassess", "follow", "obtain", "order", "cac", "calcium", "aspirin", "labs", "repeat", "check")
+    if not s or any(w in s.lower() for w in forbidden):
+        # Safe fallbacks by posture
+        if level >= 5:
+            return "Continue secondary-prevention intensity lipid-lowering."
+        if level == 4:
+            return "Target-driven lipid-lowering therapy is appropriate."
+        if dominant and level >= 3:
+            return "Initiate treatment now."
+        if level == 3 and sub == "3B":
+            return "Initiate lipid-lowering therapy."
+        if level == 3:
+            return "Treatment is reasonable."
+        if level <= 2:
+            return "No escalation today."
+        return "—"
+
+    # Optional: if dominant, avoid hedgy phrasing
+    if dominant and ("reasonable" in s.lower() or "preference" in s.lower()):
+        return "Initiate treatment now."
+
+    return s
+
 def _normalize_space(s: str) -> str:
     return " ".join((s or "").strip().split())
 
@@ -2838,6 +2885,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
