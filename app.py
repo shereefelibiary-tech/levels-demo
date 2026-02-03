@@ -501,6 +501,56 @@ def extract_aspirin_line(asp: dict) -> str:
     if l.startswith("secondary prevention"):
         return "Secondary prevention (if no contraindication)"
     return raw or "—"
+# ============================================================
+# Unified Action (single source of truth for Action card + EMR note)
+# ============================================================
+
+def recommended_action_line_unified(out: dict, fallback: str = "") -> str:
+    """
+    Prefer engine's recommended_action_line(out) if present.
+    Fall back to managementPlan/defaultPosture if missing.
+    """
+    # 1) Engine-provided helper (best)
+    try:
+        fn = getattr(le, "recommended_action_line", None)
+        if callable(fn):
+            s = str(fn(out) or "").strip()
+            if s:
+                return scrub_terms(s)
+    except Exception:
+        pass
+
+    # 2) Fallback to plan/posture text (still deterministic)
+    s = str(fallback or "").strip()
+    return scrub_terms(s) if s else "—"
+
+
+def _inject_management_line_into_note(note: str, action_line: str) -> str:
+    """
+    Replace any existing 'Management:' line in the EMR note with the unified action line.
+    Works with bullet or non-bullet forms.
+    """
+    if not note:
+        return note or ""
+
+    action_line = (action_line or "").strip()
+    if not action_line:
+        return note
+
+    action_clean = action_line.rstrip().rstrip(".")
+
+    pat = re.compile(r"(?mi)^(?P<prefix>\s*(?:[-•]\s*)?)Management:\s*.*$")
+    repl = r"\g<prefix>Management: " + action_clean
+
+    if pat.search(note):
+        return pat.sub(repl, note, count=1)
+
+    # If no Management line exists, try to add it under "Plan:" (fail-soft)
+    pat_plan = re.compile(r"(?mi)^(Plan:\s*)$")
+    if pat_plan.search(note):
+        return pat_plan.sub(r"\1\n- Management: " + action_clean, note, count=1)
+
+    return note
 
 
 # ============================================================
@@ -2090,6 +2140,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
