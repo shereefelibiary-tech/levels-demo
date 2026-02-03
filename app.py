@@ -242,14 +242,20 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 
 .block + .block { margin-top: 10px; }
 
+/* ============================================================
+   PRIMARY SECTION TITLES (Snapshot, Action, Targets, etc.)
+   ============================================================ */
 .block-title {
   font-variant-caps: all-small-caps;
   letter-spacing: 0.10em;
   font-weight: 950;
-  font-size: 0.95rem;      /* bigger, easier to scan */
-  color: rgba(17,24,39,0.70);
-  margin-bottom: 9px;
+  font-size: 1.05rem;            /* ⬆️ noticeably larger */
+  color: rgba(17,24,39,0.85);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(31,41,55,0.14);
 }
+
 
 .kvline { margin: 6px 0; line-height: 1.35; }
 .kvline b { font-weight: 950; }
@@ -263,11 +269,16 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
   box-shadow: var(--rc-shadow2);
 }
 
+/* Compact cards (still readable, but secondary) */
 .block-title.compact {
-  font-size: 0.88rem;
+  font-size: 0.92rem;            /* ⬆️ still bigger than before */
+  font-weight: 900;
+  letter-spacing: 0.10em;
   margin-bottom: 7px;
-  letter-spacing: 0.11em;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(31,41,55,0.10);
 }
+
 
 .kvline.compact { margin: 4px 0; line-height: 1.22; }
 
@@ -1978,6 +1989,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
