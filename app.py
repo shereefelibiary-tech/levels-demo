@@ -126,6 +126,10 @@ st.markdown(
 
   --rc-shadow: 0 10px 30px rgba(0,0,0,0.06);
   --rc-shadow2: 0 8px 22px rgba(0,0,0,0.08);
+
+  /* Accent used sparingly (chips/underline) */
+  --rc-accent: rgba(59,130,246,0.85);
+  --rc-accent-bg: rgba(59,130,246,0.08);
 }
 
 /* ============================================================
@@ -168,16 +172,16 @@ html, body {
    HEADING SCALE (readable, clinician-grade)
    ============================================================ */
 .stApp h2 { /* st.subheader */
-  font-size: 1.25rem;
-  font-weight: 900;
-  letter-spacing: -0.01em;
-  margin: 0.75rem 0 0.35rem 0;
+  font-size: 1.28rem;
+  font-weight: 950;
+  letter-spacing: -0.012em;
+  margin: 0.85rem 0 0.40rem 0;
 }
 .stApp h3 { /* markdown ### */
-  font-size: 1.06rem;
-  font-weight: 850;
-  letter-spacing: -0.005em;
-  margin: 0.55rem 0 0.25rem 0;
+  font-size: 1.08rem;
+  font-weight: 900;
+  letter-spacing: -0.006em;
+  margin: 0.60rem 0 0.30rem 0;
 }
 
 /* ============================================================
@@ -190,7 +194,7 @@ html, body {
 
 /* Streamlit vertical block spacing */
 div[data-testid="stVerticalBlock"] {
-  gap: 0.65rem;
+  gap: 0.70rem;
 }
 
 div[data-testid="stMarkdownContainer"] p { margin: 0.28rem 0; }
@@ -215,15 +219,15 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 }
 
 .header-title {
-  font-size: 1.45rem;      /* bigger + premium */
-  font-weight: 950;
-  letter-spacing: -0.015em;
-  margin: 0 0 5px 0;
+  font-size: 1.50rem;
+  font-weight: 975;
+  letter-spacing: -0.018em;
+  margin: 0 0 6px 0;
 }
 
 .header-sub {
   color: var(--rc-muted);
-  font-size: 0.93rem;
+  font-size: 0.95rem;
   margin: 0;
 }
 
@@ -247,15 +251,28 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
    ============================================================ */
 .block-title {
   font-variant-caps: all-small-caps;
-  letter-spacing: 0.10em;
-  font-weight: 950;
-  font-size: 1.05rem;            /* ⬆️ noticeably larger */
-  color: rgba(17,24,39,0.85);
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(31,41,55,0.14);
+  letter-spacing: 0.14em;
+  font-weight: 975;
+  font-size: 1.18rem;            /* ⬆️ bigger */
+  color: rgba(17,24,39,0.92);    /* ⬆️ higher contrast */
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(31,41,55,0.18);
+  position: relative;
 }
 
+/* subtle anchor underline (very “premium”, not loud) */
+.block-title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 38px;
+  height: 2px;
+  background: var(--rc-accent);
+  border-radius: 2px;
+  opacity: 0.9;
+}
 
 .kvline { margin: 6px 0; line-height: 1.35; }
 .kvline b { font-weight: 950; }
@@ -269,28 +286,71 @@ div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
   box-shadow: var(--rc-shadow2);
 }
 
-/* Compact cards (still readable, but secondary) */
+/* Compact cards (secondary but readable) */
 .block-title.compact {
-  font-size: 0.92rem;            /* ⬆️ still bigger than before */
-  font-weight: 900;
-  letter-spacing: 0.10em;
-  margin-bottom: 7px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid rgba(31,41,55,0.10);
+  font-size: 1.00rem;            /* ⬆️ bigger */
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  color: rgba(17,24,39,0.82);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(31,41,55,0.12);
+  position: relative;
 }
 
+/* no accent underline on compact */
+.block-title.compact::before { display: none; }
 
 .kvline.compact { margin: 4px 0; line-height: 1.22; }
 
 .compact-caption {
-  margin-top: 5px;
+  margin-top: 6px;
   color: var(--rc-muted);
   font-size: 0.84rem;
+  line-height: 1.25;
 }
 
 .inline-muted {
   color: var(--rc-muted2);
   font-size: 0.86rem;
+}
+
+/* ============================================================
+   FIGURE-STYLE TITLE ROW (for “Where this patient falls”)
+   ============================================================ */
+.fig-title-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:10px;
+  margin-bottom:6px;
+}
+
+.fig-title{
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.14em;
+  font-weight: 975;
+  font-size: 1.08rem;             /* matches section feel */
+  color: rgba(17,24,39,0.90);
+}
+
+.fig-chip{
+  display:inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 2px solid var(--rc-accent);
+  background: var(--rc-accent-bg);
+  font-weight: 950;
+  font-size: 0.84rem;
+  color: var(--rc-text);
+  white-space: nowrap;
+}
+
+.fig-cap{
+  margin: 0 0 10px 0;
+  color: var(--rc-muted);
+  font-size: 0.84rem;
+  line-height: 1.25;
 }
 
 /* ============================================================
@@ -399,6 +459,7 @@ div[data-testid="stCheckbox"] label {
 """,
     unsafe_allow_html=True,
 )
+
 
 # ============================================================
 # Header card (title + version)
@@ -1989,6 +2050,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
