@@ -1463,11 +1463,11 @@ def _plaque_unmeasured(ev_dict: dict) -> bool:
     cs = str(ev_dict.get("cac_status", "")).strip().lower()
     return ("unknown" in cs) or ("no structural" in cs) or ("unmeasured" in cs)
 
-
-
-
 # ============================================================
-# Tight criteria table (with circles) — helper
+# Tight criteria table (with circles) — UPDATED (no drift)
+# - Patient value appears ONLY in the matching row (no duplication)
+# - Non-matching threshold rows show a blank patient cell (not "—")
+# - LDL section still behaves: shown as reference unless ApoB not measured
 # ============================================================
 def render_criteria_table_compact(
     *,
@@ -1507,39 +1507,52 @@ def render_criteria_table_compact(
     apob_measured = apob_v is not None
     use_ldl = (not apob_measured) and (ldl_v is not None)
 
+    # ------------------------------------------------------------
     # Atherogenic
-    apob_mild = apob_measured and _in_range(apob_v, 80, 99)
+    # ------------------------------------------------------------
+    apob_mild  = apob_measured and _in_range(apob_v, 80, 99)
     apob_major = apob_measured and _in_range(apob_v, 100, None)
 
-    ldl_mild = use_ldl and _in_range(ldl_v, 100, 129)
+    ldl_mild  = use_ldl and _in_range(ldl_v, 100, 129)
     ldl_major = use_ldl and _in_range(ldl_v, 130, None)
 
+    # ------------------------------------------------------------
     # Glycemia
+    # ------------------------------------------------------------
     a1c_mild1 = _in_range(a1c_v, 5.7, 6.1)
     a1c_mild2 = _in_range(a1c_v, 6.2, 6.4)
     a1c_major = bool(diabetes_v) or _in_range(a1c_v, 6.5, None)
 
+    # ------------------------------------------------------------
     # Inflammation
+    # ------------------------------------------------------------
     hscrp_mild = _in_range(hscrp_v, 2.0, None)
 
+    # ------------------------------------------------------------
     # Genetics
-    lpa_major = False
+    # ------------------------------------------------------------
     lpa_present = (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"))
+    lpa_major = False
     if lpa_present:
         if lpa_unit_v == "nmol/L":
             lpa_major = _in_range(lpa_v, 125, None)
         else:
             lpa_major = _in_range(lpa_v, 50, None)
 
+    # ------------------------------------------------------------
     # Smoking
+    # ------------------------------------------------------------
     smoking_major = bool(smoker_v)
 
     dom_athero = bool(apob_mild or apob_major or ldl_mild or ldl_major)
-    dom_gly = bool(a1c_mild1 or a1c_mild2 or a1c_major)
-    dom_infl = bool(hscrp_mild)
-    dom_gen = bool(lpa_major)
-    dom_smoke = bool(smoking_major)
+    dom_gly    = bool(a1c_mild1 or a1c_mild2 or a1c_major)
+    dom_infl   = bool(hscrp_mild)
+    dom_gen    = bool(lpa_major)
+    dom_smoke  = bool(smoking_major)
 
+    # ------------------------------------------------------------
+    # Cell builders
+    # ------------------------------------------------------------
     def _cell(text, *, ring=False, muted=False, tag=None):
         cls = "rc2-cell"
         if muted:
@@ -1548,6 +1561,16 @@ def render_criteria_table_compact(
             cls += " rc2-ring"
         tag_html = f"<span class='rc2-tag'>{tag}</span>" if tag else ""
         return f"<div class='{cls}'>{text}{tag_html}</div>"
+
+    def _patient_cell(value_text: str, match: bool):
+        """
+        Show patient value only in the matching row.
+        Non-matching rows show a blank patient cell (reference-only),
+        which prevents the same value from appearing in multiple rows.
+        """
+        if match:
+            return _cell(value_text, ring=True, muted=False)
+        return _cell("&nbsp;", muted=True)  # blank but keeps row height stable
 
     def _domain_header(name, active=False, right_note=""):
         a = " rc2-domain-active" if active else ""
@@ -1560,33 +1583,27 @@ def render_criteria_table_compact(
 """
 
     # ------------------------------------------------------------
-    # Active chip (ties the circled value to the figure title)
-    # Prefer the strongest/most relevant circled value
+    # Active chip text: the strongest matching row
     # ------------------------------------------------------------
     def _active_chip_text() -> str:
-        # Atherogenic first (ApoB preferred)
         if apob_measured and apob_v is not None and (apob_mild or apob_major):
             return f"ApoB {_fmt_num(apob_v)} mg/dL"
         if (not apob_measured) and (ldl_v is not None) and (ldl_mild or ldl_major):
             return f"LDL-C {_fmt_num(ldl_v)} mg/dL"
 
-        # Glycemia
         if a1c_v is not None and (a1c_mild1 or a1c_mild2 or a1c_major):
             return f"A1c {_fmt_num(a1c_v, decimals=1)}%"
 
-        # Inflammation
         if hscrp_v is not None and hscrp_mild:
             return f"hsCRP {_fmt_num(hscrp_v, decimals=1)} mg/L"
 
-        # Genetics
         if lpa_present and lpa_major:
             return f"Lp(a) {_fmt_num(lpa_v)} {lpa_unit_v}"
 
-        # Smoking
         if smoking_major:
             return "Smoking: Yes"
 
-        # Fallback: show a measured ApoB/A1c/Lp(a) even if not in range (muted context)
+        # fallback context (measured values, no match)
         if apob_measured and apob_v is not None:
             return f"ApoB {_fmt_num(apob_v)} mg/dL"
         if a1c_v is not None:
@@ -1600,147 +1617,7 @@ def render_criteria_table_compact(
         return ""
 
     # ------------------------------------------------------------
-    # ATHEROGENIC BURDEN
-    # ------------------------------------------------------------
-    athero_rows = []
-
-    if apob_measured:
-        apob_txt = f"{_fmt_num(apob_v)} mg/dL"
-        athero_rows.append(
-            f"""
-<div class="rc2-row">
-  {_cell("ApoB")}
-  {_cell("80–99 mg/dL")}
-  {_cell(apob_txt if apob_mild else "—", ring=apob_mild, muted=(not apob_mild))}
-  {_cell("Mild signal", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("≥100 mg/dL")}
-  {_cell(apob_txt if apob_major else "—", ring=apob_major, muted=(not apob_major))}
-  {_cell("Major driver", tag="major")}
-</div>
-"""
-        )
-    else:
-        athero_rows.append(
-            f"""
-<div class="rc2-row">
-  {_cell("ApoB")}
-  {_cell("—")}
-  {_cell("—", muted=True)}
-  {_cell("Not measured", muted=True)}
-</div>
-"""
-        )
-
-    ldl_txt = f"{_fmt_num(ldl_v)} mg/dL" if ldl_v is not None else "—"
-    if use_ldl:
-        athero_rows.append(
-            f"""
-<div class="rc2-row">
-  {_cell("LDL-C")}
-  {_cell("100–129 mg/dL")}
-  {_cell(ldl_txt if ldl_mild else "—", ring=ldl_mild, muted=(not ldl_mild))}
-  {_cell("Mild signal", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("≥130 mg/dL")}
-  {_cell(ldl_txt if ldl_major else "—", ring=ldl_major, muted=(not ldl_major))}
-  {_cell("Major driver", tag="major")}
-</div>
-"""
-        )
-    else:
-        athero_rows.append(
-            f"""
-<div class="rc2-row">
-  {_cell("LDL-C")}
-  {_cell("—")}
-  {_cell(ldl_txt, muted=True)}
-  {_cell("Used only if ApoB not measured", muted=True)}
-</div>
-"""
-        )
-
-    athero_block = _domain_header(
-        "Atherogenic burden",
-        active=dom_athero,
-        right_note=("ApoB preferred" if apob_measured else ("LDL used (ApoB not measured)" if ldl_v is not None else "ApoB preferred")),
-    ) + "\n".join(athero_rows)
-
-    # ------------------------------------------------------------
-    # GLYCEMIA
-    # ------------------------------------------------------------
-    a1c_txt = f"{_fmt_num(a1c_v, decimals=1)} %" if a1c_v is not None else "—"
-    gly_block = _domain_header("Glycemia", active=dom_gly) + f"""
-<div class="rc2-row">
-  {_cell("A1c")}
-  {_cell("5.7–6.1%")}
-  {_cell(a1c_txt if a1c_mild1 else "—", ring=a1c_mild1, muted=(not a1c_mild1))}
-  {_cell("Mild signal", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("6.2–6.4%")}
-  {_cell(a1c_txt if a1c_mild2 else "—", ring=a1c_mild2, muted=(not a1c_mild2))}
-  {_cell("Near boundary", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("≥6.5% or diabetes = true")}
-  {_cell(a1c_txt if a1c_major else "—", ring=a1c_major, muted=(not a1c_major))}
-  {_cell("Major driver", tag="major")}
-</div>
-"""
-
-    # ------------------------------------------------------------
-    # INFLAMMATION
-    # ------------------------------------------------------------
-    hscrp_txt = f"{_fmt_num(hscrp_v, decimals=1)} mg/L" if hscrp_v is not None else "—"
-    infl_block = _domain_header("Inflammation", active=dom_infl) + f"""
-<div class="rc2-row">
-  {_cell("hsCRP")}
-  {_cell("≥2.0 mg/L")}
-  {_cell(hscrp_txt if hscrp_mild else "—", ring=hscrp_mild, muted=(not hscrp_mild))}
-  {_cell("Mild signal", tag="mild")}
-</div>
-"""
-
-    # ------------------------------------------------------------
-    # GENETICS
-    # ------------------------------------------------------------
-    lpa_txt = f"{_fmt_num(lpa_v)} {lpa_unit_v}" if lpa_present else "—"
-    gen_level_effect = ("Major driver" if lpa_major else "—")
-    gen_tag = ("major" if lpa_major else None)
-    gen_muted = (not lpa_major)
-
-    gen_block = _domain_header("Genetics", active=dom_gen) + f"""
-<div class="rc2-row">
-  {_cell("Lp(a)")}
-  {_cell("≥125 nmol/L or ≥50 mg/dL")}
-  {_cell(lpa_txt if lpa_present else "—", ring=lpa_major, muted=(not lpa_major))}
-  {_cell(gen_level_effect, tag=gen_tag, muted=gen_muted)}
-</div>
-"""
-
-    # ------------------------------------------------------------
-    # SMOKING
-    # ------------------------------------------------------------
-    smoke_txt = "Yes" if smoking_major else "No"
-    smoke_block = _domain_header("Smoking", active=dom_smoke) + f"""
-<div class="rc2-row">
-  {_cell("Smoking")}
-  {_cell("Current smoking")}
-  {_cell(smoke_txt, ring=smoking_major, muted=(not smoking_major))}
-  {_cell("Major driver" if smoking_major else "—", tag=("major" if smoking_major else None), muted=(not smoking_major))}
-</div>
-"""
-
-    # ------------------------------------------------------------
     # Figure header (title + chip + caption)
-    # Uses your global CSS: .fig-title-row / .fig-title / .fig-chip / .fig-cap
     # ------------------------------------------------------------
     active_txt = _active_chip_text()
     chip_html = f"<span class='fig-chip'>{active_txt}</span>" if active_txt else ""
@@ -1753,9 +1630,144 @@ def render_criteria_table_compact(
 <div class="fig-cap">Circled row shows the patient’s matching range; other rows are reference thresholds.</div>
 """
 
+    # ------------------------------------------------------------
+    # ATHEROGENIC BURDEN
+    # ------------------------------------------------------------
+    athero_rows = []
+
+    if apob_measured:
+        apob_txt = f"{_fmt_num(apob_v)} mg/dL"
+        athero_rows.append(f"""
+<div class="rc2-row">
+  {_cell("ApoB")}
+  {_cell("80–99 mg/dL")}
+  {_patient_cell(apob_txt, apob_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥100 mg/dL")}
+  {_patient_cell(apob_txt, apob_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+""")
+    else:
+        athero_rows.append(f"""
+<div class="rc2-row">
+  {_cell("ApoB")}
+  {_cell("—")}
+  {_cell("—", muted=True)}
+  {_cell("Not measured", muted=True)}
+</div>
+""")
+
+    ldl_txt = f"{_fmt_num(ldl_v)} mg/dL" if ldl_v is not None else "—"
+
+    if use_ldl:
+        athero_rows.append(f"""
+<div class="rc2-row">
+  {_cell("LDL-C")}
+  {_cell("100–129 mg/dL")}
+  {_patient_cell(ldl_txt, ldl_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥130 mg/dL")}
+  {_patient_cell(ldl_txt, ldl_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+""")
+    else:
+        # ApoB measured OR LDL missing: show LDL as reference-only context
+        athero_rows.append(f"""
+<div class="rc2-row">
+  {_cell("LDL-C")}
+  {_cell("—")}
+  {_cell(ldl_txt if ldl_v is not None else "—", muted=True)}
+  {_cell("Used only if ApoB not measured", muted=True)}
+</div>
+""")
+
+    athero_block = _domain_header(
+        "Atherogenic burden",
+        active=dom_athero,
+        right_note=("ApoB preferred" if apob_measured else ("LDL used (ApoB not measured)" if ldl_v is not None else "ApoB preferred")),
+    ) + "\n".join(athero_rows)
+
+    # ------------------------------------------------------------
+    # GLYCEMIA
+    # ------------------------------------------------------------
+    a1c_txt = f"{_fmt_num(a1c_v, decimals=1)}%" if a1c_v is not None else "—"
+
+    gly_block = _domain_header("Glycemia", active=dom_gly) + f"""
+<div class="rc2-row">
+  {_cell("A1c")}
+  {_cell("5.7–6.1%")}
+  {_patient_cell(a1c_txt, a1c_mild1)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("6.2–6.4%")}
+  {_patient_cell(a1c_txt, a1c_mild2)}
+  {_cell("Near boundary", tag="mild")}
+</div>
+<div class="rc2-row">
+  {_cell("")}
+  {_cell("≥6.5% or diabetes = true")}
+  {_patient_cell(a1c_txt, a1c_major)}
+  {_cell("Major driver", tag="major")}
+</div>
+"""
+
+    # ------------------------------------------------------------
+    # INFLAMMATION
+    # ------------------------------------------------------------
+    hscrp_txt = f"{_fmt_num(hscrp_v, decimals=1)} mg/L" if hscrp_v is not None else "—"
+
+    infl_block = _domain_header("Inflammation", active=dom_infl) + f"""
+<div class="rc2-row">
+  {_cell("hsCRP")}
+  {_cell("≥2.0 mg/L")}
+  {_patient_cell(hscrp_txt, hscrp_mild)}
+  {_cell("Mild signal", tag="mild")}
+</div>
+"""
+
+    # ------------------------------------------------------------
+    # GENETICS
+    # ------------------------------------------------------------
+    lpa_txt = f"{_fmt_num(lpa_v)} {lpa_unit_v}" if lpa_present else "—"
+
+    gen_block = _domain_header("Genetics", active=dom_gen) + f"""
+<div class="rc2-row">
+  {_cell("Lp(a)")}
+  {_cell("≥125 nmol/L or ≥50 mg/dL")}
+  {_patient_cell(lpa_txt, lpa_major)}
+  {_cell("Major driver", tag="major", muted=(not lpa_major))}
+</div>
+"""
+
+    # ------------------------------------------------------------
+    # SMOKING
+    # ------------------------------------------------------------
+    smoke_txt = "Yes" if smoking_major else "No"
+
+    smoke_block = _domain_header("Smoking", active=dom_smoke) + f"""
+<div class="rc2-row">
+  {_cell("Smoking")}
+  {_cell("Current smoking")}
+  {_cell(smoke_txt, ring=smoking_major, muted=(not smoking_major))}
+  {_cell("Major driver" if smoking_major else "—", tag=("major" if smoking_major else None), muted=(not smoking_major))}
+</div>
+"""
+
+    # ------------------------------------------------------------
+    # HTML + local CSS
+    # ------------------------------------------------------------
     html = f"""
 <style>
-  /* Keep the rc2 styles local and compatible with your global theme */
   .rc2-wrap {{
     border:1px solid rgba(31,41,55,0.12);
     border-radius:12px;
@@ -1841,6 +1853,7 @@ def render_criteria_table_compact(
 </div>
 """
     return html
+
 
 
 # ============================================================
@@ -2143,6 +2156,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
