@@ -1474,7 +1474,8 @@ def render_criteria_table_compact(
 
     # Genetics
     lpa_major = False
-    if lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"):
+    lpa_present = (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"))
+    if lpa_present:
         if lpa_unit_v == "nmol/L":
             lpa_major = _in_range(lpa_v, 125, None)
         else:
@@ -1508,9 +1509,49 @@ def render_criteria_table_compact(
 </div>
 """
 
-    # -----------------------------
+    # ------------------------------------------------------------
+    # Active chip (ties the circled value to the figure title)
+    # Prefer the strongest/most relevant circled value
+    # ------------------------------------------------------------
+    def _active_chip_text() -> str:
+        # Atherogenic first (ApoB preferred)
+        if apob_measured and apob_v is not None and (apob_mild or apob_major):
+            return f"ApoB {_fmt_num(apob_v)} mg/dL"
+        if (not apob_measured) and (ldl_v is not None) and (ldl_mild or ldl_major):
+            return f"LDL-C {_fmt_num(ldl_v)} mg/dL"
+
+        # Glycemia
+        if a1c_v is not None and (a1c_mild1 or a1c_mild2 or a1c_major):
+            return f"A1c {_fmt_num(a1c_v, decimals=1)}%"
+
+        # Inflammation
+        if hscrp_v is not None and hscrp_mild:
+            return f"hsCRP {_fmt_num(hscrp_v, decimals=1)} mg/L"
+
+        # Genetics
+        if lpa_present and lpa_major:
+            return f"Lp(a) {_fmt_num(lpa_v)} {lpa_unit_v}"
+
+        # Smoking
+        if smoking_major:
+            return "Smoking: Yes"
+
+        # Fallback: show a measured ApoB/A1c/Lp(a) even if not in range (muted context)
+        if apob_measured and apob_v is not None:
+            return f"ApoB {_fmt_num(apob_v)} mg/dL"
+        if a1c_v is not None:
+            return f"A1c {_fmt_num(a1c_v, decimals=1)}%"
+        if lpa_present:
+            return f"Lp(a) {_fmt_num(lpa_v)} {lpa_unit_v}"
+        if hscrp_v is not None:
+            return f"hsCRP {_fmt_num(hscrp_v, decimals=1)} mg/L"
+        if smoker_v is not None:
+            return "Smoking: Yes" if smoker_v else "Smoking: No"
+        return ""
+
+    # ------------------------------------------------------------
     # ATHEROGENIC BURDEN
-    # -----------------------------
+    # ------------------------------------------------------------
     athero_rows = []
 
     if apob_measured:
@@ -1579,9 +1620,9 @@ def render_criteria_table_compact(
         right_note=("ApoB preferred" if apob_measured else ("LDL used (ApoB not measured)" if ldl_v is not None else "ApoB preferred")),
     ) + "\n".join(athero_rows)
 
-    # -----------------------------
+    # ------------------------------------------------------------
     # GLYCEMIA
-    # -----------------------------
+    # ------------------------------------------------------------
     a1c_txt = f"{_fmt_num(a1c_v, decimals=1)} %" if a1c_v is not None else "—"
     gly_block = _domain_header("Glycemia", active=dom_gly) + f"""
 <div class="rc2-row">
@@ -1604,9 +1645,9 @@ def render_criteria_table_compact(
 </div>
 """
 
-    # -----------------------------
+    # ------------------------------------------------------------
     # INFLAMMATION
-    # -----------------------------
+    # ------------------------------------------------------------
     hscrp_txt = f"{_fmt_num(hscrp_v, decimals=1)} mg/L" if hscrp_v is not None else "—"
     infl_block = _domain_header("Inflammation", active=dom_infl) + f"""
 <div class="rc2-row">
@@ -1617,38 +1658,26 @@ def render_criteria_table_compact(
 </div>
 """
 
-    # -----------------------------
+    # ------------------------------------------------------------
     # GENETICS
-    # -----------------------------
-    lpa_txt = (
-        f"{_fmt_num(lpa_v)} {lpa_unit_v}"
-        if (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"))
-        else "—"
-    )
+    # ------------------------------------------------------------
+    lpa_txt = f"{_fmt_num(lpa_v)} {lpa_unit_v}" if lpa_present else "—"
+    gen_level_effect = ("Major driver" if lpa_major else "—")
+    gen_tag = ("major" if lpa_major else None)
+    gen_muted = (not lpa_major)
+
     gen_block = _domain_header("Genetics", active=dom_gen) + f"""
 <div class="rc2-row">
   {_cell("Lp(a)")}
   {_cell("≥125 nmol/L or ≥50 mg/dL")}
-  {_cell(lpa_txt if lpa_major else (lpa_txt if lpa_txt == "—" else lpa_txt), ring=lpa_major, muted=(not lpa_major))}
-  {_cell("Major driver", tag="major")}
+  {_cell(lpa_txt if lpa_present else "—", ring=lpa_major, muted=(not lpa_major))}
+  {_cell(gen_level_effect, tag=gen_tag, muted=gen_muted)}
 </div>
 """
 
-    # If Lp(a) is present but not elevated, we still want to show the value once (not as —).
-    # We do that by showing the actual value but muted when not elevated.
-    if (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL")) and (not lpa_major):
-        gen_block = _domain_header("Genetics", active=dom_gen) + f"""
-<div class="rc2-row">
-  {_cell("Lp(a)")}
-  {_cell("≥125 nmol/L or ≥50 mg/dL")}
-  {_cell(lpa_txt, ring=False, muted=True)}
-  {_cell("—", muted=True)}
-</div>
-"""
-
-    # -----------------------------
+    # ------------------------------------------------------------
     # SMOKING
-    # -----------------------------
+    # ------------------------------------------------------------
     smoke_txt = "Yes" if smoking_major else "No"
     smoke_block = _domain_header("Smoking", active=dom_smoke) + f"""
 <div class="rc2-row">
@@ -1659,34 +1688,43 @@ def render_criteria_table_compact(
 </div>
 """
 
+    # ------------------------------------------------------------
+    # Figure header (title + chip + caption)
+    # Uses your global CSS: .fig-title-row / .fig-title / .fig-chip / .fig-cap
+    # ------------------------------------------------------------
+    active_txt = _active_chip_text()
+    chip_html = f"<span class='fig-chip'>{active_txt}</span>" if active_txt else ""
+
+    fig_header = f"""
+<div class="fig-title-row">
+  <div class="fig-title">Where this patient falls</div>
+  {chip_html}
+</div>
+<div class="fig-cap">Circled row shows the patient’s matching range; other rows are reference thresholds.</div>
+"""
+
     html = f"""
 <style>
+  /* Keep the rc2 styles local and compatible with your global theme */
   .rc2-wrap {{
     border:1px solid rgba(31,41,55,0.12);
     border-radius:12px;
     background:#fff;
-    padding:10px 12px;
-    font-size:0.90rem;
+    padding:12px 14px;
+    font-size:0.92rem;
     line-height:1.25;
     margin-top:10px;
-  }}
-  .rc2-title {{
-    font-variant-caps:all-small-caps;
-    letter-spacing:0.08em;
-    font-weight:900;
-    font-size:0.80rem;
-    color:#4b5563;
-    margin-bottom:8px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.06);
   }}
   .rc2-gridhead {{
     display:grid;
     grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
     gap:8px;
-    padding:6px 0;
+    padding:7px 0;
     border-bottom:1px solid rgba(31,41,55,0.10);
     color:rgba(31,41,55,0.65);
-    font-size:0.80rem;
-    font-weight:800;
+    font-size:0.82rem;
+    font-weight:900;
   }}
   .rc2-domain {{
     display:flex;
@@ -1696,8 +1734,8 @@ def render_criteria_table_compact(
     padding-top:8px;
     border-top:1px solid rgba(31,41,55,0.08);
   }}
-  .rc2-domain-title {{ font-weight:900; color:#111827; font-size:0.86rem; }}
-  .rc2-domain-note {{ color:rgba(31,41,55,0.60); font-size:0.80rem; font-weight:700; }}
+  .rc2-domain-title {{ font-weight:950; color:#111827; font-size:0.88rem; }}
+  .rc2-domain-note {{ color:rgba(31,41,55,0.60); font-size:0.82rem; font-weight:800; }}
   .rc2-domain-active {{
     background: rgba(59,130,246,0.04);
     border-radius:10px;
@@ -1708,7 +1746,7 @@ def render_criteria_table_compact(
     display:grid;
     grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
     gap:8px;
-    padding:5px 0;
+    padding:6px 0;
     border-bottom:1px solid rgba(31,41,55,0.06);
     align-items:start;
   }}
@@ -1721,7 +1759,7 @@ def render_criteria_table_compact(
     border-radius:999px;
     border:2px solid rgba(59,130,246,0.85);
     background: rgba(59,130,246,0.08);
-    font-weight:900;
+    font-weight:950;
     width: fit-content;
   }}
   .rc2-tag {{
@@ -1732,14 +1770,15 @@ def render_criteria_table_compact(
     border-radius:999px;
     border:1px solid rgba(31,41,55,0.16);
     background:#fff;
-    font-weight:900;
+    font-weight:950;
     color:rgba(31,41,55,0.80);
     vertical-align:middle;
   }}
 </style>
 
 <div class="rc2-wrap">
-  <div class="rc2-title">Where this patient falls</div>
+  {fig_header}
+
   <div class="rc2-gridhead">
     <div>Marker</div><div>Range / condition</div><div>Patient</div><div>Level effect</div>
   </div>
@@ -1752,6 +1791,7 @@ def render_criteria_table_compact(
 </div>
 """
     return html
+
 
 # ============================================================
 # Tabs
@@ -2050,6 +2090,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
