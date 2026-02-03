@@ -109,30 +109,51 @@ st.markdown(
 <style>
 
 /* ============================================================
-   BASE APP TYPOGRAPHY (SAFE)
+   THEME TOKENS (single source of truth)
+   ============================================================ */
+:root{
+  --rc-text: #111827;
+  --rc-muted: rgba(17,24,39,0.62);
+  --rc-muted2: rgba(17,24,39,0.48);
+  --rc-line: rgba(31,41,55,0.12);
+  --rc-line-strong: rgba(31,41,55,0.18);
+  --rc-surface: #ffffff;
+  --rc-surface2: #fbfbfc;
+  --rc-bg: #f6f7fb;
+
+  --rc-radius-lg: 16px;
+  --rc-radius-md: 12px;
+
+  --rc-shadow: 0 10px 30px rgba(0,0,0,0.06);
+  --rc-shadow2: 0 8px 22px rgba(0,0,0,0.08);
+}
+
+/* ============================================================
+   BASE TYPOGRAPHY (SAFE)
    ============================================================ */
 html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
-  color: #1f2937;
+  color: var(--rc-text);
+  background: var(--rc-bg);
 }
 
 /* Apply font to app root only (DO NOT use .stApp *) */
 .stApp {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
-  color: #1f2937;
+  color: var(--rc-text);
+  background: var(--rc-bg);
 }
 
-/* Apply font only to safe text elements
-   (NO div/span — those contain icon glyphs) */
+/* Apply font only to safe text elements (NO div/span) */
 .stApp :is(
   p, label, li, ul, ol,
   h1, h2, h3, h4, h5, h6
 ) {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif;
-  color: #1f2937;
+  color: var(--rc-text);
 }
 
 /* Preserve Material icon fonts explicitly */
@@ -144,137 +165,144 @@ html, body {
 }
 
 /* ============================================================
+   HEADING SCALE (readable, clinician-grade)
+   ============================================================ */
+.stApp h2 { /* st.subheader */
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  margin: 0.75rem 0 0.35rem 0;
+}
+.stApp h3 { /* markdown ### */
+  font-size: 1.06rem;
+  font-weight: 850;
+  letter-spacing: -0.005em;
+  margin: 0.55rem 0 0.25rem 0;
+}
+
+/* ============================================================
    LAYOUT + SPACING
    ============================================================ */
 .block-container {
-  padding-top: 2.25rem;
+  padding-top: 2.35rem;
   padding-bottom: 1.0rem;
 }
 
+/* Streamlit vertical block spacing */
 div[data-testid="stVerticalBlock"] {
-  gap: 0.6rem;
+  gap: 0.65rem;
 }
 
-div[data-testid="stMarkdownContainer"] p {
-  margin: 0.25rem 0;
-}
-div[data-testid="stMarkdownContainer"] ul {
-  margin: 0.25rem 0 0.25rem 1.1rem;
-}
-div[data-testid="stMarkdownContainer"] li {
-  margin: 0.10rem 0;
-}
+div[data-testid="stMarkdownContainer"] p { margin: 0.28rem 0; }
+div[data-testid="stMarkdownContainer"] ul { margin: 0.28rem 0 0.28rem 1.1rem; }
+div[data-testid="stMarkdownContainer"] li { margin: 0.10rem 0; }
 
 .hr {
-  margin: 10px 0;
-  border-top: 1px solid rgba(31,41,55,0.12);
+  margin: 12px 0;
+  border-top: 1px solid var(--rc-line);
 }
 
 /* ============================================================
    HEADER CARD
    ============================================================ */
 .header-card {
-  background:#fff;
-  border:1px solid rgba(31,41,55,0.12);
-  border-radius:14px;
-  padding:16px 18px;
-  margin-bottom:12px;
+  background: linear-gradient(180deg, var(--rc-surface) 0%, var(--rc-surface2) 100%);
+  border: 1px solid var(--rc-line);
+  border-radius: var(--rc-radius-lg);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+  box-shadow: var(--rc-shadow);
 }
 
 .header-title {
-  font-size:1.15rem;
-  font-weight:800;
-  margin:0 0 4px 0;
+  font-size: 1.45rem;      /* bigger + premium */
+  font-weight: 950;
+  letter-spacing: -0.015em;
+  margin: 0 0 5px 0;
 }
 
 .header-sub {
-  color: rgba(31,41,55,0.60);
-  font-size:0.9rem;
-  margin:0;
+  color: var(--rc-muted);
+  font-size: 0.93rem;
+  margin: 0;
 }
 
 /* ============================================================
    CARDS / BLOCKS
    ============================================================ */
 .block {
-  border:1px solid rgba(31,41,55,0.12);
-  border-radius:14px;
-  background:#fff;
-  padding:14px 16px;
-  font-size:0.94rem;
-  line-height:1.35;
+  border: 1px solid var(--rc-line);
+  border-radius: var(--rc-radius-lg);
+  background: var(--rc-surface);
+  padding: 14px 16px;
+  font-size: 0.95rem;
+  line-height: 1.38;
+  box-shadow: var(--rc-shadow);
 }
 
-.block + .block {
-  margin-top:8px;
-}
+.block + .block { margin-top: 10px; }
 
 .block-title {
-  font-variant-caps:all-small-caps;
-  letter-spacing:0.08em;
-  font-weight:900;
-  font-size:0.85rem;
-  color:#4b5563;
-  margin-bottom:8px;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.10em;
+  font-weight: 950;
+  font-size: 0.95rem;      /* bigger, easier to scan */
+  color: rgba(17,24,39,0.70);
+  margin-bottom: 9px;
 }
 
-.kvline {
-  margin:6px 0;
-  line-height:1.35;
-}
-.kvline b {
-  font-weight:900;
-}
+.kvline { margin: 6px 0; line-height: 1.35; }
+.kvline b { font-weight: 950; }
 
 /* Compact blocks */
 .block.compact {
-  padding:10px 12px;
-  border-radius:12px;
-  font-size:0.90rem;
-  line-height:1.28;
+  padding: 11px 12px;
+  border-radius: var(--rc-radius-md);
+  font-size: 0.91rem;
+  line-height: 1.28;
+  box-shadow: var(--rc-shadow2);
 }
 
 .block-title.compact {
-  font-size:0.80rem;
-  margin-bottom:6px;
+  font-size: 0.88rem;
+  margin-bottom: 7px;
+  letter-spacing: 0.11em;
 }
 
-.kvline.compact {
-  margin:4px 0;
-  line-height:1.22;
-}
+.kvline.compact { margin: 4px 0; line-height: 1.22; }
 
 .compact-caption {
-  margin-top:4px;
-  color: rgba(31,41,55,0.62);
-  font-size:0.82rem;
+  margin-top: 5px;
+  color: var(--rc-muted);
+  font-size: 0.84rem;
 }
 
 .inline-muted {
-  color: rgba(31,41,55,0.65);
-  font-size:0.86rem;
+  color: var(--rc-muted2);
+  font-size: 0.86rem;
 }
 
 /* ============================================================
    BADGES
    ============================================================ */
 .badge {
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:999px;
-  border:1px solid rgba(31,41,55,0.15);
-  background:#fff;
-  font-size:0.82rem;
-  margin-left:6px;
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--rc-line-strong);
+  background: rgba(255,255,255,0.65);
+  backdrop-filter: blur(4px);
+  font-size: 0.82rem;
+  margin-left: 6px;
 }
 
 .ok {
-  border-color: rgba(16,185,129,0.35);
+  border-color: rgba(16,185,129,0.30);
   background: rgba(16,185,129,0.08);
 }
 
 .miss {
-  border-color: rgba(245,158,11,0.35);
+  border-color: rgba(245,158,11,0.30);
   background: rgba(245,158,11,0.10);
 }
 
@@ -282,28 +310,24 @@ div[data-testid="stMarkdownContainer"] li {
    TABLES (SAFE)
    ============================================================ */
 table {
-  width:100%;
-  border-collapse:collapse;
-  font-size:0.92rem;
-  line-height:1.25;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.25;
 }
 
 table th,
 table td {
-  padding:6px 10px;
-  border-bottom:1px solid rgba(31,41,55,0.12);
-  text-align:left;
-  vertical-align:top;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--rc-line);
+  text-align: left;
+  vertical-align: top;
 }
 
 table th {
-  background:#f9fafb;
-  font-weight:700;
-  border-bottom:2px solid rgba(31,41,55,0.18);
-}
-
-table tr:last-child td {
-  border-bottom:none;
+  background: #f9fafb;
+  font-weight: 800;
+  border-bottom: 2px solid var(--rc-line-strong);
 }
 
 /* Decision Framework (iframe tables) */
@@ -312,25 +336,20 @@ table tr:last-child td {
 .components-html td {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
                "Helvetica Neue", Arial, sans-serif !important;
-  font-size:0.92rem !important;
-  line-height:1.25 !important;
-  color:#1f2937 !important;
+  font-size: 0.92rem !important;
+  line-height: 1.25 !important;
+  color: var(--rc-text) !important;
 }
 
-.components-html {
-  margin-top:4px !important;
-  margin-bottom:4px !important;
-}
-.components-html + .components-html {
-  margin-top:6px !important;
-}
+.components-html { margin-top: 4px !important; margin-bottom: 4px !important; }
+.components-html + .components-html { margin-top: 6px !important; }
 
 /* ============================================================
    EXPANDERS
    ============================================================ */
 div[data-testid="stExpander"] div[role="button"] {
-  padding-top:0.35rem;
-  padding-bottom:0.35rem;
+  padding-top: 0.38rem;
+  padding-bottom: 0.38rem;
 }
 
 /* ============================================================
@@ -338,33 +357,31 @@ div[data-testid="stExpander"] div[role="button"] {
    ============================================================ */
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
-  font-size:0.94rem !important;
-  line-height:1.25 !important;
-  padding:0.45rem 0.55rem !important;
+  font-size: 0.95rem !important;
+  line-height: 1.25 !important;
+  padding: 0.48rem 0.58rem !important;
 }
 
 div[data-baseweb="input"],
 div[data-baseweb="textarea"] {
-  min-height:2.5rem !important;
+  min-height: 2.55rem !important;
 }
 
 div[data-baseweb="input"] input,
 div[data-baseweb="textarea"] textarea {
-  height:2.5rem !important;
+  height: 2.55rem !important;
 }
 
-div[data-baseweb="input"] > div {
-  align-items:center !important;
-}
+div[data-baseweb="input"] > div { align-items: center !important; }
 
 div[data-baseweb="select"] > div {
-  font-size:0.94rem !important;
-  line-height:1.25 !important;
+  font-size: 0.95rem !important;
+  line-height: 1.25 !important;
 }
 
 div[data-testid="stRadio"] label,
 div[data-testid="stCheckbox"] label {
-  line-height:1.25 !important;
+  line-height: 1.25 !important;
 }
 
 </style>
@@ -388,7 +405,6 @@ st.markdown(
 )
 
 st.info("De-identified use only. Do not enter patient identifiers.")
-
 
 # ============================================================
 # Normalized extractors + action helpers (single source of truth)
@@ -1962,6 +1978,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
