@@ -1968,7 +1968,7 @@ with tab_report:
 
     # Action
     with col_m:
-        rec_action = le.recommended_action_line(out)
+        rec_action = recommended_action_line_unified(out, fallback=plan_clean)
 
         cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
         cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
@@ -2140,6 +2140,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
