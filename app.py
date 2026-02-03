@@ -20,7 +20,8 @@ import streamlit.components.v1 as components
 
 import levels_engine as le
 from smartphrase_ingest.parser import parse_smartphrase
-from levels_engine import Patient, evaluate, render_quick_text, VERSION, short_why
+from levels_engine import Patient, evaluate, VERSION, short_why
+
 # ============================================================
 # Guardrails + scrubbing (must be defined before first use)
 # ============================================================
@@ -393,10 +394,6 @@ st.info("De-identified use only. Do not enter patient identifiers.")
 # Normalized extractors + action helpers (single source of truth)
 # ============================================================
 
-def scrub_list(xs):
-    if not xs:
-        return xs
-    return [scrub_terms(str(x)) for x in xs]
 
 def extract_management_plan(levels: dict) -> str:
     return str((levels.get("managementPlan") or levels.get("defaultPosture") or "")).strip()
@@ -416,40 +413,6 @@ def extract_aspirin_line(asp: dict) -> str:
     if l.startswith("secondary prevention"):
         return "Secondary prevention (if no contraindication)"
     return raw or "—"
-
-# -----------------------------
-# RECOMMENDED ACTION (decision-only, no redundancy)
-# -----------------------------
-
-    HARD CONTRACT (no redundancy):
-    - Exactly one sentence.
-    - Decision today only (no 'reassess', 'obtain', 'complete missing data', CAC/aspirin/labs).
-    - If plan_clean violates the contract, it is ignored.
-    """
-    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
-    sub = lvl.get("sublevel")
-
-    dominant = bool(lvl.get("dominantAction"))
-    if not dominant:
-        ds = (decision_stability or "").strip().lower()
-        note = (decision_stability_note or "").strip().lower()
-        dominant = (level >= 3 and ds == "high" and "dominant risk drivers" in note)
-
-    plan_action = _clean_action_candidate(plan_clean)
-
-    if level >= 5:
-        return plan_action or "Continue secondary-prevention intensity lipid-lowering."
-    if level == 4:
-        return plan_action or "Initiate or intensify lipid-lowering therapy (plaque present)."
-    if dominant:
-        return "Initiate treatment now."
-    if level == 3 and sub == "3B":
-        return plan_action or "Initiate lipid-lowering therapy."
-    if level == 3:
-        return "Treatment is reasonable."
-    if level <= 2:
-        return "No escalation today."
-    return plan_action or "—"
 
 
 # ============================================================
@@ -1309,7 +1272,7 @@ data_json = json.dumps(data, sort_keys=True)
 out = run_engine_uncached(data_json) if DEV_DISABLE_CACHE else run_engine_cached(data_json, ENGINE_CACHE_SALT)
 
 patient = Patient(data)
-note_text = render_quick_text(patient, out)
+note_text = le.render_quick_text(patient, out)
 note_text = scrub_terms(note_text)
 
 lvl = out.get("levels", {}) or {}
@@ -1964,6 +1927,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
