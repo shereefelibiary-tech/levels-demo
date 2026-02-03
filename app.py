@@ -2005,8 +2005,11 @@ with tab_report:
     # EMR note
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("EMR note (copy/paste)")
-    emr_copy_box("Risk Continuum — EMR Note", le.render_quick_text(patient, out), height_px=520)
+    note_for_emr = le.render_quick_text(patient, out)
+    note_for_emr = scrub_terms(note_for_emr)
+    note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
 
+    emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
 
 
 # ------------------------------------------------------------
@@ -2140,6 +2143,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
