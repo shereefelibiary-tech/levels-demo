@@ -110,6 +110,65 @@ def short_why(items: List[str], max_items: int = 2) -> str:
         return ""
     cleaned = [str(x).strip() for x in items if str(x).strip()]
     return "; ".join(cleaned[:max_items])
+def risk_model_mismatch(risk10: Dict[str, Any], prevent10: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compare PCE vs PREVENT and return a conservative, clinician-safe interpretation.
+    Decision-support framing only (does not change level/plan).
+    """
+    pce = risk10.get("risk_pct", None)
+    prev_total = prevent10.get("total_cvd_10y_pct", None)
+
+    try:
+        pce_f = float(pce) if pce is not None else None
+    except Exception:
+        pce_f = None
+    try:
+        prev_f = float(prev_total) if prev_total is not None else None
+    except Exception:
+        prev_f = None
+
+    if pce_f is None or prev_f is None:
+        return {"status": "unavailable"}
+
+    delta = round(pce_f - prev_f, 1)
+
+    # Conservative thresholds (tune later)
+    if abs(delta) < 1.5:
+        tag = "aligned"
+        label = "Aligned"
+        should_surface = False
+    elif delta >= 1.5:
+        tag = "atherosclerosis_leading"
+        label = "PCE higher than PREVENT"
+        should_surface = True
+    else:
+        tag = "comorbidity_leading"
+        label = "PREVENT higher than PCE"
+        should_surface = True
+
+    explainer_clinical = (
+        "ASCVD PCE estimates atherosclerotic event risk and is sensitive to lipid burden, smoking, and diabetes. "
+        "PREVENT estimates population cardiovascular event risk and is influenced more by age, kidney disease, diabetes, BMI, and social risk. "
+        "When these estimates diverge, it may reflect different dominant risk drivers or early atherosclerotic risk before population event rates rise."
+    )
+
+    explainer_kid = (
+        "One model looks for early warning signs, like seeing smoke. "
+        "The other counts serious events, like a fire alarm going off. "
+        "Smoke can appear before the alarm is triggered."
+    )
+
+    return {
+        "status": "ok",
+        "pce_pct": pce_f,
+        "prevent_total_cvd_pct": prev_f,
+        "delta_points": delta,
+        "tag": tag,
+        "label": label,
+        "should_surface": bool(should_surface),
+        "explainer_clinical": explainer_clinical,
+        "explainer_kid": explainer_kid,
+    }
 
 
 # ============================================================
@@ -2559,6 +2618,142 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
 
+    # NEW: teachable moment — PREVENT vs PCE divergence (engine-owned)
+    insights["risk_model_mismatch"] = risk_model_mismatch(risk10, prevent10)
+
+    out = {
+        "version": VERSION,
+        "system": SYSTEM_NAME,
+
+        "levels": levels_obj,
+
+        "riskSignal": {**rss, "drivers": drivers_top},
+
+        "pooledCohortEquations10yAscvdRisk": risk10,
+        "ascvdPce10yRisk": risk10,
+        "prevent10": prevent10,
+
+        "targets": targets,
+        "confidence": conf,
+        "diseaseBurden": disease_burden,
+
+        "drivers": drivers_top,
+        "drivers_all": drivers_all,
+
+        "nextActions": [],
+
+        "escGoals": esc_numeric_goals(
+            level,
+            clinical_ascvd=bool(p.get("ascvd") is True),
+        ),
+
+        "aspirin": asp,
+        "anchors": anchors,
+        "lpaInfo": lpa_info(p, trace),
+
+        "insights": insights,
+        "trace": trace,
+        "trajectoryNote": levels_obj.get("trajectoryNote"),
+    }
+
+    out["nextActions"] = compose_actions(p, out)
+
+    add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
+    return out
+
+    # ---- FIX: label builder (no posture dependency) ----
+    # Uses management label when sublevels exist (2A/2B/3A/3B).
+    # Falls back safely if label helper was renamed elsewhere.
+    try:
+        label_txt = management_label(level, sublevel=sublevel)  # preferred
+    except Exception:
+        try:
+            label_txt = posture_label(level, sublevel=sublevel)   # backward-compat
+        except Exception:
+            # absolute fallback (never crash)
+            base = LEVEL_LABELS.get(level, f"Level {level}")
+            if sublevel and level in (2, 3):
+                parts = base.split("—", 1)
+                label_txt = f"Level {sublevel} — {parts[1].strip()}" if len(parts) == 2 else base
+            else:
+                label_txt = base
+
+    levels_obj = {
+        "postureLevel": level,          # kept for backward compatibility
+        "managementLevel": level,
+        "sublevel": sublevel,
+        "label": label_txt,
+        "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
+        "triggers": sorted(set(level_triggers or [])),
+
+        "managementPlan": plan,
+        "defaultPosture": plan,         # kept for backward compatibility
+
+        "decisionConfidence": dec_conf,
+        "decisionStability": stab_band,
+        "decisionStabilityNote": stab_note,
+
+        "plaqueEvidence": plaque.get("plaque_evidence", "—"),
+        "plaqueBurden": plaque.get("plaque_burden", "—"),
+
+        # NEW: aligns with app.py recommended_action_line()
+        "dominantAction": bool(dominant_action),
+
+        "evidence": {
+            "clinical_ascvd": bool(p.get("ascvd") is True),
+            "cac_status": plaque.get("plaque_evidence", "Unknown"),
+            "burden_band": plaque.get("plaque_burden", "Not quantified"),
+            "cac_value": plaque.get("cac_value"),
+        },
+
+        "anchorsSummary": {
+            "nearTerm": (anchors.get("nearTerm") or {}).get("summary", "—"),
+            "lifetime": (anchors.get("lifetime") or {}).get("summary", "—"),
+        },
+
+        "legend": levels_legend_compact(),
+        "trajectoryNote": trajectory_note(p, risk10),
+    }
+
+    disease_burden = "Unknown"
+    if p.get("ascvd") is True:
+        disease_burden = "Present (clinical ASCVD)"
+    elif plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
+        disease_burden = f"Present (CAC {int(plaque['cac_value'])})"
+    elif plaque.get("plaque_present") is False:
+        disease_burden = "Not detected (CAC=0)"
+    elif str(plaque.get("plaque_evidence", "")).startswith("Unknown"):
+        disease_burden = "Unknown (CAC not available)"
+
+    _clar = (cac_support.get("message") or "").strip()
+    _cclass = (cac_support.get("classification_message") or "").strip()
+    if _cclass:
+        _clar = (_clar + " " + _cclass).strip()
+
+    cac_copy = canonical_cac_copy(p, plaque, cac_support)
+
+    insights = {
+        "cac_decision_support": cac_support,  # keep for Details/Debug
+        "structural_clarification": _clar if _clar else None,
+
+        # Canonical CAC + aspirin language (UI + EMR should use this)
+        "cac_copy": cac_copy,
+        "aspirin_copy": asp_copy,
+
+        # Secondary insight (engine-gated)
+        "risk_driver_pattern": risk_driver,
+
+        "phenotype_label": None,
+        "phenotype_definition": None,
+
+        "decision_stability": stab_band,
+        "decision_stability_note": stab_note,
+        "decision_robustness": stab_band,
+        "decision_robustness_note": stab_note,
+
+        "pce_zone": pce_zone(risk10.get("risk_pct")),
+    }
+
     out = {
         "version": VERSION,
         "system": SYSTEM_NAME,
@@ -2885,6 +3080,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
