@@ -392,16 +392,6 @@ st.info("De-identified use only. Do not enter patient identifiers.")
 # ============================================================
 # Normalized extractors + action helpers (single source of truth)
 # ============================================================
-import re
-
-def scrub_terms(s: str) -> str:
-    if not s:
-        return s
-    s = re.sub(r"\brisk\s+drift\b", "Emerging risk", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
-    s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
-    return s
 
 def scrub_list(xs):
     if not xs:
@@ -430,41 +420,6 @@ def extract_aspirin_line(asp: dict) -> str:
 # -----------------------------
 # RECOMMENDED ACTION (decision-only, no redundancy)
 # -----------------------------
-_ACTION_FORBIDDEN = [
-    # plan / follow-up / tasks (must NOT appear in recommended action)
-    "reassess", "follow up", "follow-up", "next", "then", "after", "until",
-    "complete missing data", "missing data", "data completion", "obtain", "order",
-    "consider", "schedule", "monitor", "labs", "check", "repeat",
-    # specific next-step content
-    "cac", "calcium", "aspirin",
-]
-
-def _one_sentence(s: str) -> str:
-    s = (s or "").strip()
-    s = re.sub(r"\s+", " ", s)
-    # clause-ish punctuation that often introduces redundancy
-    s = s.replace("—", " ").replace(";", ".").replace(":", " ")
-    # take first sentence-ish chunk
-    s = re.split(r"[.!?]\s+", s, maxsplit=1)[0].strip()
-    if not s.endswith("."):
-        s += "."
-    return s
-
-def _clean_action_candidate(s: str) -> str:
-    s = _one_sentence(s)
-    low = s.lower()
-    if any(b in low for b in _ACTION_FORBIDDEN):
-        return ""
-    return s
-
-def recommended_action_line(
-    lvl: dict,
-    plan_clean: str,
-    decision_stability: str,
-    decision_stability_note: str
-) -> str:
-    """
-    Single source of truth for RECOMMENDED ACTION.
 
     HARD CONTRACT (no redundancy):
     - Exactly one sentence.
@@ -1407,93 +1362,7 @@ def _plaque_unmeasured(ev_dict: dict) -> bool:
     cs = str(ev_dict.get("cac_status", "")).strip().lower()
     return ("unknown" in cs) or ("no structural" in cs) or ("unmeasured" in cs)
 
-def build_emr_note() -> str:
-    lines = []
-    lines.append("RISK CONTINUUM — CLINICAL REPORT")
-    lines.append("-" * 48)
-    lines.append("")
 
-    # ---- Level / plaque / confidence (3 lines) ----
-    lines.append(
-        f"Level: {level}" + (f" ({sub})" if sub else "") + f" — {LEVEL_NAMES.get(level,'—')}"
-    )
-    lines.append(
-        f"Plaque: {scrub_terms(ev.get('cac_status','—'))} | Burden: {scrub_terms(ev.get('burden_band','—'))}"
-    )
-    lines.append(
-        f"Confidence: {decision_conf} | Stability: {decision_stability}"
-        + (f" — {decision_stability_note}" if decision_stability_note else "")
-    )
-
-    # ---- Why (top drivers) ----
-    why = (lvl.get("triggers") or [])[:3]
-    if why:
-        lines.append("")
-        lines.append("Why (top drivers):")
-        for w in why:
-            ww = scrub_terms(str(w)).strip()
-            if ww:
-                lines.append(f"- {ww}")
-
-    # ---- Key metrics ----
-    lines.append("")
-    lines.append("Key metrics:")
-    lines.append(f"- RSS: {rs.get('score','—')}/100 ({rs.get('band','—')})")
-    lines.append(f"- ASCVD PCE (10y): {pce_line} {pce_cat}".strip())
-    lines.append(
-        f"- PREVENT (10y): Total CVD {p_total if p_total is not None else '—'}% | "
-        f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
-    )
-
-    # ---- Targets (reference only) ----
-    lines.append("")
-    lines.append("Targets (if treated):")
-    if primary:
-        tgt = f"- {primary[0]} {primary[1]}"
-        if apob_line:
-            tgt += f"; {apob_line[0]} {apob_line[1]}"
-        lines.append(tgt)
-    else:
-        lines.append("- —")
-
-    # ---- Plan (single place) ----
-    lines.append("")
-    lines.append("Plan (what to do next):")
-
-    # 1) single decision sentence
-    rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
-    if rec_action:
-        lines.append(f"- {rec_action}")
-
-    # 2) key action details (tight; avoid redundancy)
-    act = out.get("nextActions") or []
-    act_clean = []
-    for a in act:
-        aa = scrub_terms(str(a)).strip()
-        if aa and aa.lower() not in (rec_action or "").lower():
-            act_clean.append(aa)
-    for a in act_clean[:3]:
-        lines.append(f"- {a}")
-
-    # 3) Canonical CAC + aspirin (shared with UI)
-    cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
-    cac_head = (cac_copy.get("headline") or "").strip()
-    cac_det = (cac_copy.get("detail") or "").strip()
-    cac_ref = (cac_copy.get("referral") or "").strip()
-    if cac_head:
-        lines.append(f"- {cac_head}")
-        if cac_det:
-            lines.append(f"  {cac_det}")
-        if cac_ref:
-            lines.append(f"- {cac_ref}")
-
-    asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
-    asp_head = (asp_copy.get("headline") or f"Aspirin: {asp_line}").strip()
-    if asp_head:
-        lines.append(f"- {asp_head}")
-
-    lines.append("")
-    return "\n".join(lines)
 
 
 # ============================================================
@@ -1923,7 +1792,7 @@ with tab_report:
 
     # Action
     with col_m:
-        rec_action = recommended_action_line(lvl, plan_clean, decision_stability, decision_stability_note)
+        rec_action = le.recommended_action_line(out)
 
         cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
         cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
@@ -1960,7 +1829,8 @@ with tab_report:
     # EMR note
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("EMR note (copy/paste)")
-    emr_copy_box("Risk Continuum — EMR Note", build_emr_note(), height_px=520)
+    emr_copy_box("Risk Continuum — EMR Note", le.render_quick_text(patient, out), height_px=520)
+
 
 
 # ------------------------------------------------------------
@@ -2094,6 +1964,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
