@@ -1369,18 +1369,22 @@ def render_criteria_table_compact(
     apob_measured = apob_v is not None
     use_ldl = (not apob_measured) and (ldl_v is not None)
 
+    # Atherogenic
     apob_mild = apob_measured and _in_range(apob_v, 80, 99)
     apob_major = apob_measured and _in_range(apob_v, 100, None)
 
     ldl_mild = use_ldl and _in_range(ldl_v, 100, 129)
     ldl_major = use_ldl and _in_range(ldl_v, 130, None)
 
+    # Glycemia
     a1c_mild1 = _in_range(a1c_v, 5.7, 6.1)
     a1c_mild2 = _in_range(a1c_v, 6.2, 6.4)
     a1c_major = bool(diabetes_v) or _in_range(a1c_v, 6.5, None)
 
+    # Inflammation
     hscrp_mild = _in_range(hscrp_v, 2.0, None)
 
+    # Genetics
     lpa_major = False
     if lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"):
         if lpa_unit_v == "nmol/L":
@@ -1388,6 +1392,7 @@ def render_criteria_table_compact(
         else:
             lpa_major = _in_range(lpa_v, 50, None)
 
+    # Smoking
     smoking_major = bool(smoker_v)
 
     dom_athero = bool(apob_mild or apob_major or ldl_mild or ldl_major)
@@ -1415,6 +1420,9 @@ def render_criteria_table_compact(
 </div>
 """
 
+    # -----------------------------
+    # ATHEROGENIC BURDEN
+    # -----------------------------
     athero_rows = []
 
     if apob_measured:
@@ -1424,13 +1432,13 @@ def render_criteria_table_compact(
 <div class="rc2-row">
   {_cell("ApoB")}
   {_cell("80–99 mg/dL")}
-  {_cell(apob_txt, ring=apob_mild)}
+  {_cell(apob_txt if apob_mild else "—", ring=apob_mild, muted=(not apob_mild))}
   {_cell("Mild signal", tag="mild")}
 </div>
 <div class="rc2-row">
   {_cell("")}
   {_cell("≥100 mg/dL")}
-  {_cell(apob_txt, ring=apob_major)}
+  {_cell(apob_txt if apob_major else "—", ring=apob_major, muted=(not apob_major))}
   {_cell("Major driver", tag="major")}
 </div>
 """
@@ -1454,13 +1462,13 @@ def render_criteria_table_compact(
 <div class="rc2-row">
   {_cell("LDL-C")}
   {_cell("100–129 mg/dL")}
-  {_cell(ldl_txt, ring=ldl_mild)}
+  {_cell(ldl_txt if ldl_mild else "—", ring=ldl_mild, muted=(not ldl_mild))}
   {_cell("Mild signal", tag="mild")}
 </div>
 <div class="rc2-row">
   {_cell("")}
   {_cell("≥130 mg/dL")}
-  {_cell(ldl_txt, ring=ldl_major)}
+  {_cell(ldl_txt if ldl_major else "—", ring=ldl_major, muted=(not ldl_major))}
   {_cell("Major driver", tag="major")}
 </div>
 """
@@ -1480,58 +1488,86 @@ def render_criteria_table_compact(
     athero_block = _domain_header(
         "Atherogenic burden",
         active=dom_athero,
-        right_note=("ApoB preferred" if apob_measured else "LDL used (ApoB not measured)"),
+        right_note=("ApoB preferred" if apob_measured else ("LDL used (ApoB not measured)" if ldl_v is not None else "ApoB preferred")),
     ) + "\n".join(athero_rows)
 
+    # -----------------------------
+    # GLYCEMIA
+    # -----------------------------
     a1c_txt = f"{_fmt_num(a1c_v, decimals=1)} %" if a1c_v is not None else "—"
     gly_block = _domain_header("Glycemia", active=dom_gly) + f"""
 <div class="rc2-row">
   {_cell("A1c")}
   {_cell("5.7–6.1%")}
-  {_cell(a1c_txt, ring=a1c_mild1)}
+  {_cell(a1c_txt if a1c_mild1 else "—", ring=a1c_mild1, muted=(not a1c_mild1))}
   {_cell("Mild signal", tag="mild")}
 </div>
 <div class="rc2-row">
   {_cell("")}
   {_cell("6.2–6.4%")}
-  {_cell(a1c_txt, ring=a1c_mild2)}
+  {_cell(a1c_txt if a1c_mild2 else "—", ring=a1c_mild2, muted=(not a1c_mild2))}
   {_cell("Near boundary", tag="mild")}
 </div>
 <div class="rc2-row">
   {_cell("")}
   {_cell("≥6.5% or diabetes = true")}
-  {_cell(a1c_txt, ring=a1c_major)}
+  {_cell(a1c_txt if a1c_major else "—", ring=a1c_major, muted=(not a1c_major))}
   {_cell("Major driver", tag="major")}
 </div>
 """
 
+    # -----------------------------
+    # INFLAMMATION
+    # -----------------------------
     hscrp_txt = f"{_fmt_num(hscrp_v, decimals=1)} mg/L" if hscrp_v is not None else "—"
     infl_block = _domain_header("Inflammation", active=dom_infl) + f"""
 <div class="rc2-row">
   {_cell("hsCRP")}
   {_cell("≥2.0 mg/L")}
-  {_cell(hscrp_txt, ring=hscrp_mild)}
+  {_cell(hscrp_txt if hscrp_mild else "—", ring=hscrp_mild, muted=(not hscrp_mild))}
   {_cell("Mild signal", tag="mild")}
 </div>
 """
 
-    lpa_txt = f"{_fmt_num(lpa_v)} {lpa_unit_v}" if (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL")) else "—"
+    # -----------------------------
+    # GENETICS
+    # -----------------------------
+    lpa_txt = (
+        f"{_fmt_num(lpa_v)} {lpa_unit_v}"
+        if (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"))
+        else "—"
+    )
     gen_block = _domain_header("Genetics", active=dom_gen) + f"""
 <div class="rc2-row">
   {_cell("Lp(a)")}
   {_cell("≥125 nmol/L or ≥50 mg/dL")}
-  {_cell(lpa_txt, ring=lpa_major)}
+  {_cell(lpa_txt if lpa_major else (lpa_txt if lpa_txt == "—" else lpa_txt), ring=lpa_major, muted=(not lpa_major))}
   {_cell("Major driver", tag="major")}
 </div>
 """
 
+    # If Lp(a) is present but not elevated, we still want to show the value once (not as —).
+    # We do that by showing the actual value but muted when not elevated.
+    if (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL")) and (not lpa_major):
+        gen_block = _domain_header("Genetics", active=dom_gen) + f"""
+<div class="rc2-row">
+  {_cell("Lp(a)")}
+  {_cell("≥125 nmol/L or ≥50 mg/dL")}
+  {_cell(lpa_txt, ring=False, muted=True)}
+  {_cell("—", muted=True)}
+</div>
+"""
+
+    # -----------------------------
+    # SMOKING
+    # -----------------------------
     smoke_txt = "Yes" if smoking_major else "No"
     smoke_block = _domain_header("Smoking", active=dom_smoke) + f"""
 <div class="rc2-row">
   {_cell("Smoking")}
   {_cell("Current smoking")}
-  {_cell(smoke_txt, ring=smoking_major)}
-  {_cell("Major driver" if smoking_major else "—", tag=("major" if smoking_major else None))}
+  {_cell(smoke_txt, ring=smoking_major, muted=(not smoking_major))}
+  {_cell("Major driver" if smoking_major else "—", tag=("major" if smoking_major else None), muted=(not smoking_major))}
 </div>
 """
 
@@ -1628,7 +1664,6 @@ def render_criteria_table_compact(
 </div>
 """
     return html
-
 
 # ============================================================
 # Tabs
@@ -1927,6 +1962,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
