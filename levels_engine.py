@@ -2543,16 +2543,15 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     # NEW: dominantAction flag (consumed by app.py)
     dominant_action = False
 
-# Dominant action should mean "treatment-forward today", not merely "plaque assessed".
-if p.get("ascvd") is True:
-    dominant_action = True
-elif int(level or 0) >= 4:
-    dominant_action = True
-elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or "").strip().lower():
-    dominant_action = True
+    # Dominant action should mean "treatment-forward today", not merely "plaque assessed".
+    if p.get("ascvd") is True:
+        dominant_action = True
+    elif int(level or 0) >= 4:
+        dominant_action = True
+    elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or "").strip().lower():
+        dominant_action = True
 
-
-       # ---- FIX: label builder (no posture dependency) ----
+    # ---- FIX: label builder (no posture dependency) ----
     # Uses management label when sublevels exist (2A/2B/3A/3B).
     # Falls back safely if label helper was renamed elsewhere.
     try:
@@ -2687,6 +2686,7 @@ elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
+
 
 # -------------------------------------------------------------------
 # Canonical EMR output (locked style) — direct: WHY → WHAT
@@ -2973,6 +2973,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
