@@ -1998,10 +1998,10 @@ with tab_report:
     with col_m:
         rec_action = recommended_action_line_unified(out, fallback=plan_clean)
 
-        cac_copy2 = (out.get("insights") or {}).get("cac_copy") or {}
-        cac_head = _html.escape(cac_copy2.get("headline") or "Coronary calcium: —")
-        cac_det = _html.escape(cac_copy2.get("detail") or "")
-        cac_ref = _html.escape(cac_copy2.get("referral") or "")
+        cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+        cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
+        cac_det = _html.escape(cac_copy.get("detail") or "")
+        cac_ref = _html.escape(cac_copy.get("referral") or "")
 
         cac_block = (
             f"<div class='kvline compact'>{cac_head}</div>"
@@ -2009,8 +2009,8 @@ with tab_report:
             + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
         )
 
-        asp_copy2 = (out.get("insights") or {}).get("aspirin_copy") or {}
-        asp_head = _html.escape(asp_copy2.get("headline") or f"Aspirin: {asp_line}")
+        asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
+        asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
 
         st.markdown(
             f"""
@@ -2030,7 +2030,7 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-    # EMR note
+    # EMR note  ✅ MUST stay inside tab_report
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("EMR note (copy/paste)")
 
@@ -2045,6 +2045,7 @@ with tab_report:
             note_for_emr += "\n" + str(ckm_copy.get("detail"))
 
     emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+
 
 
 
@@ -2187,6 +2188,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
