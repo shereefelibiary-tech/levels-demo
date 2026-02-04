@@ -1908,9 +1908,15 @@ with tab_report:
         unsafe_allow_html=True,
     )
 
-       st.markdown(f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>",
+        unsafe_allow_html=True
+    )
     if (p_total is None and p_ascvd is None) and p_note:
-        st.markdown(f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
+            unsafe_allow_html=True
+        )
 
     # Tight criteria table (rings)
     st.markdown(
@@ -2045,7 +2051,6 @@ with tab_report:
             note_for_emr += "\n" + str(ckm_copy.get("detail"))
 
     emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
-
 
 # ------------------------------------------------------------
 # DECISION FRAMEWORK TAB (no giant second table)
@@ -2186,6 +2191,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
