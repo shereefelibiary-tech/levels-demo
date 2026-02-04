@@ -2087,13 +2087,12 @@ def plan_sentence(
         return "Lipid-lowering therapy is reasonable; timing is preference-sensitive."
 
     if level == 4:
-    # CAC 1–99 = subclinical disease; intensity is individualized, not reflex high-intensity
-    if therapy_on and at_tgt:
-        return "Continue lipid-lowering therapy at the current intensity."
-    if therapy_on and not at_tgt:
-        return "Optimize lipid-lowering intensity to achieve targets."
-    return "Lipid-lowering therapy appropriate; intensity individualized based on targets and risk profile."
-
+        # CAC 1–99 = subclinical disease; intensity is individualized, not reflex high-intensity
+        if therapy_on and at_tgt:
+            return "Continue lipid-lowering therapy at the current intensity."
+        if therapy_on and not at_tgt:
+            return "Optimize lipid-lowering intensity to achieve targets."
+        return "Lipid-lowering therapy appropriate; intensity individualized based on targets and risk profile."
 
     if therapy_on and at_tgt:
         return "Continue secondary-prevention intensity lipid lowering."
@@ -2238,38 +2237,36 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
 
     cac_val = evidence.get("cac_value", None)
 
-# Plaque assessed: CAC strata should drive posture before "missing clarifiers" logic.
-if isinstance(cac_val, int):
-    if cac_val >= 100:
-        actions += _action_line("Lipid-lowering therapy", "Appropriate (target-driven; plaque present)")
-        if therapy_on and not at_tgt:
+    # Plaque assessed: CAC strata should drive posture before "missing clarifiers" logic.
+    if isinstance(cac_val, int):
+        if cac_val >= 100:
+            actions += _action_line("Lipid-lowering therapy", "Appropriate (target-driven; plaque present)")
+            if therapy_on and not at_tgt:
+                actions += _action_line(
+                    "Therapy optimization",
+                    "Appropriate",
+                    "Above target on current therapy → assess tolerance/adherence and intensify to achieve targets.",
+                )
+            return actions
+
+        # CAC 1–99: guideline-aligned, non-mandatory intensity language
+        if 1 <= cac_val <= 99:
             actions += _action_line(
-                "Therapy optimization",
+                "Lipid-lowering therapy",
                 "Appropriate",
-                "Above target on current therapy → assess tolerance/adherence and intensify to achieve targets.",
+                "Intensity individualized based on targets and risk profile.",
             )
-        return actions
+            if therapy_on and not at_tgt:
+                actions += _action_line(
+                    "Therapy optimization",
+                    "Appropriate",
+                    "Above target on current therapy → assess tolerance/adherence and optimize intensity.",
+                )
+            return actions
 
-    # CAC 1–99: guideline-aligned, non-mandatory intensity language
-    if 1 <= cac_val <= 99:
-        actions += _action_line(
-            "Lipid-lowering therapy",
-            "Appropriate",
-            "Intensity individualized based on targets and risk profile.",
-        )
-        if therapy_on and not at_tgt:
-            actions += _action_line(
-                "Therapy optimization",
-                "Appropriate",
-                "Above target on current therapy → assess tolerance/adherence and optimize intensity.",
-            )
-        return actions
-
-    # CAC=0: do not force therapy; proceed to other biology/risk logic
-    if cac_val == 0:
-        # keep going — atherogenic biology may still justify treatment
-        pass
-
+        # CAC=0: do not force therapy; proceed to other biology/risk logic
+        if cac_val == 0:
+            pass
 
     # -----------------------------
     # 2) Missing key clarifiers (keep concise)
@@ -2555,14 +2552,14 @@ elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or
     dominant_action = True
 
 
-    # ---- FIX: label builder (no posture dependency) ----
+       # ---- FIX: label builder (no posture dependency) ----
     # Uses management label when sublevels exist (2A/2B/3A/3B).
     # Falls back safely if label helper was renamed elsewhere.
     try:
         label_txt = management_label(level, sublevel=sublevel)  # preferred
     except Exception:
         try:
-            label_txt = posture_label(level, sublevel=sublevel)   # backward-compat
+            label_txt = posture_label(level, sublevel=sublevel)  # backward-compat
         except Exception:
             # absolute fallback (never crash)
             base = LEVEL_LABELS.get(level, f"Level {level}")
@@ -2690,140 +2687,6 @@ elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
-
-    # ---- FIX: label builder (no posture dependency) ----
-    # Uses management label when sublevels exist (2A/2B/3A/3B).
-    # Falls back safely if label helper was renamed elsewhere.
-    try:
-        label_txt = management_label(level, sublevel=sublevel)  # preferred
-    except Exception:
-        try:
-            label_txt = posture_label(level, sublevel=sublevel)   # backward-compat
-        except Exception:
-            # absolute fallback (never crash)
-            base = LEVEL_LABELS.get(level, f"Level {level}")
-            if sublevel and level in (2, 3):
-                parts = base.split("—", 1)
-                label_txt = f"Level {sublevel} — {parts[1].strip()}" if len(parts) == 2 else base
-            else:
-                label_txt = base
-
-    levels_obj = {
-        "postureLevel": level,          # kept for backward compatibility
-        "managementLevel": level,
-        "sublevel": sublevel,
-        "label": label_txt,
-        "meaning": LEVEL_LABELS.get(level, f"Level {level}"),
-        "triggers": sorted(set(level_triggers or [])),
-
-        "managementPlan": plan,
-        "defaultPosture": plan,         # kept for backward compatibility
-
-        "decisionConfidence": dec_conf,
-        "decisionStability": stab_band,
-        "decisionStabilityNote": stab_note,
-
-        "plaqueEvidence": plaque.get("plaque_evidence", "—"),
-        "plaqueBurden": plaque.get("plaque_burden", "—"),
-
-        # NEW: aligns with app.py recommended_action_line()
-        "dominantAction": bool(dominant_action),
-
-        "evidence": {
-            "clinical_ascvd": bool(p.get("ascvd") is True),
-            "cac_status": plaque.get("plaque_evidence", "Unknown"),
-            "burden_band": plaque.get("plaque_burden", "Not quantified"),
-            "cac_value": plaque.get("cac_value"),
-        },
-
-        "anchorsSummary": {
-            "nearTerm": (anchors.get("nearTerm") or {}).get("summary", "—"),
-            "lifetime": (anchors.get("lifetime") or {}).get("summary", "—"),
-        },
-
-        "legend": levels_legend_compact(),
-        "trajectoryNote": trajectory_note(p, risk10),
-    }
-
-    disease_burden = "Unknown"
-    if p.get("ascvd") is True:
-        disease_burden = "Present (clinical ASCVD)"
-    elif plaque.get("plaque_present") is True and plaque.get("cac_value") is not None:
-        disease_burden = f"Present (CAC {int(plaque['cac_value'])})"
-    elif plaque.get("plaque_present") is False:
-        disease_burden = "Not detected (CAC=0)"
-    elif str(plaque.get("plaque_evidence", "")).startswith("Unknown"):
-        disease_burden = "Unknown (CAC not available)"
-
-    _clar = (cac_support.get("message") or "").strip()
-    _cclass = (cac_support.get("classification_message") or "").strip()
-    if _cclass:
-        _clar = (_clar + " " + _cclass).strip()
-
-    cac_copy = canonical_cac_copy(p, plaque, cac_support)
-
-    insights = {
-        "cac_decision_support": cac_support,  # keep for Details/Debug
-        "structural_clarification": _clar if _clar else None,
-
-        # Canonical CAC + aspirin language (UI + EMR should use this)
-        "cac_copy": cac_copy,
-        "aspirin_copy": asp_copy,
-
-        # Secondary insight (engine-gated)
-        "risk_driver_pattern": risk_driver,
-
-        "phenotype_label": None,
-        "phenotype_definition": None,
-
-        "decision_stability": stab_band,
-        "decision_stability_note": stab_note,
-        "decision_robustness": stab_band,
-        "decision_robustness_note": stab_note,
-
-        "pce_zone": pce_zone(risk10.get("risk_pct")),
-    }
-
-    out = {
-        "version": VERSION,
-        "system": SYSTEM_NAME,
-
-        "levels": levels_obj,
-
-        "riskSignal": {**rss, "drivers": drivers_top},
-
-        "pooledCohortEquations10yAscvdRisk": risk10,
-        "ascvdPce10yRisk": risk10,
-        "prevent10": prevent10,
-
-        "targets": targets,
-        "confidence": conf,
-        "diseaseBurden": disease_burden,
-
-        "drivers": drivers_top,
-        "drivers_all": drivers_all,
-
-        "nextActions": [],
-
-        "escGoals": esc_numeric_goals(
-            level,
-            clinical_ascvd=bool(p.get("ascvd") is True),
-        ),
-
-        "aspirin": asp,
-        "anchors": anchors,
-        "lpaInfo": lpa_info(p, trace),
-
-        "insights": insights,
-        "trace": trace,
-        "trajectoryNote": levels_obj.get("trajectoryNote"),
-    }
-
-    out["nextActions"] = compose_actions(p, out)
-
-    add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
-    return out
-
 
 # -------------------------------------------------------------------
 # Canonical EMR output (locked style) — direct: WHY → WHAT
@@ -3110,6 +2973,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
