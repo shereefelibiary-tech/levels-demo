@@ -953,6 +953,77 @@ def completeness(p: Patient) -> Dict[str, Any]:
         "missing": missing,
     }
 
+
+# -------------------------------------------------------------------
+# CKM context (Cardio–Kidney–Metabolic) — v0.1 (display-first)
+# -------------------------------------------------------------------
+def ckm_context(p: Patient) -> Dict[str, Any]:
+    """
+    CKM v0.1: minimal, defensible, display-first context.
+    Does NOT change level, targets, or actions (initially).
+    """
+    egfr = safe_float(p.get("egfr")) if p.has("egfr") else None
+    uacr = safe_float(p.get("uacr")) if p.has("uacr") else None
+    a1c = safe_float(p.get("a1c")) if p.has("a1c") else None
+    bmi = safe_float(p.get("bmi")) if p.has("bmi") else None
+    sbp = safe_float(p.get("sbp")) if p.has("sbp") else None
+
+    # --- Kidney ---
+    ckd_present = False
+    ckd_stage = "Unknown"
+    if egfr is not None or uacr is not None:
+        ckd_present = (egfr is not None and egfr < 60) or (uacr is not None and uacr >= 30)
+        if egfr is None:
+            ckd_stage = "CKD status indeterminate (eGFR missing)"
+        else:
+            if egfr >= 60:
+                ckd_stage = "No CKD" if (uacr is None or uacr < 30) else "CKD (albuminuric)"
+            elif egfr >= 45:
+                ckd_stage = "CKD G3a"
+            elif egfr >= 30:
+                ckd_stage = "CKD G3b"
+            else:
+                ckd_stage = "CKD G4–5"
+
+    # --- Metabolic ---
+    ms = a1c_status(p)  # uses your buffered thresholds
+    if ms is None:
+        metabolic_state = "Unknown"
+    elif ms == "normal":
+        metabolic_state = "Normal"
+    elif ms == "prediabetes":
+        metabolic_state = "Prediabetes"
+    elif ms == "near_diabetes_boundary":
+        metabolic_state = "Near diabetes threshold (6.2–6.4)"
+    else:
+        metabolic_state = "Diabetes"
+
+    metabolic_acceleration = bool(
+        (a1c is not None and a1c >= 6.2) or (p.get("diabetes") is True)
+    )
+
+    # --- Obesity ---
+    obesity_present = bool(bmi is not None and bmi >= 30)
+
+    # --- BP burden (minimal) ---
+    hypertension_burden = bool((sbp is not None and sbp >= 140) or (p.get("bp_treated") is True))
+
+    return {
+        "ckd_present": bool(ckd_present),
+        "ckd_stage": ckd_stage,
+        "metabolic_state": metabolic_state,
+        "metabolic_acceleration": bool(metabolic_acceleration),
+        "obesity_present": bool(obesity_present),
+        "hypertension_burden": bool(hypertension_burden),
+        "values": {
+            "egfr": (None if egfr is None else round(float(egfr), 0)),
+            "uacr": (None if uacr is None else round(float(uacr), 0)),
+            "a1c": (None if a1c is None else round(float(a1c), 1)),
+            "bmi": (None if bmi is None else round(float(bmi), 1)),
+            "sbp": (None if sbp is None else int(round(float(sbp)))),
+        },
+    }
+
 # -------------------------------------------------------------------
 # Risk Signal Score (RSS)
 # -------------------------------------------------------------------
@@ -2204,6 +2275,42 @@ def canonical_aspirin_copy(asp: Dict[str, Any]) -> Dict[str, Any]:
         "headline": "Aspirin: Not indicated.",
         "detail": None,
     }
+def canonical_ckm_copy(ckm: Dict[str, Any], decision_conf: str) -> Optional[Dict[str, Any]]:
+    """
+    Canonical CKM context language used by BOTH UI and EMR.
+    Display-first: does NOT direct therapy.
+    Returns None when not worth surfacing.
+    """
+    if str(decision_conf or "").strip().lower() not in ("high", "moderate"):
+        return None
+
+    if not ckm:
+        return None
+
+    contributors: List[str] = []
+    if ckm.get("ckd_present"):
+        contributors.append("kidney factors")
+    if ckm.get("metabolic_acceleration"):
+        contributors.append("metabolic factors")
+    if ckm.get("obesity_present"):
+        contributors.append("obesity-related risk")
+    if ckm.get("hypertension_burden"):
+        contributors.append("blood pressure burden")
+
+    if not contributors:
+        return None
+
+    headline = (
+        "CKM context: Cardiovascular risk may be influenced by kidney and/or metabolic factors "
+        "that can accelerate disease progression independent of plaque burden."
+    )
+    detail = "Contributors: " + ", ".join(contributors) + "."
+
+    return {
+        "headline": headline,
+        "detail": detail,
+        "contributors": contributors,
+    }
 
 
 # -------------------------------------------------------------------
@@ -2523,6 +2630,8 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
+    ckm = ckm_context(p)
+    ckm_copy = canonical_ckm_copy(ckm, decision_conf=dec_conf)
 
     # ------------------------------------------------------------
     # Secondary Insight: lifestyle vs biology driver pattern
@@ -2621,6 +2730,9 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         _clar = (_clar + " " + _cclass).strip()
 
     cac_copy = canonical_cac_copy(p, plaque, cac_support)
+    # CKM context (display-first; does not change level/actions)
+    ckm = ckm_context(p)
+    ckm_copy = canonical_ckm_copy(ckm, decision_conf=dec_conf)
 
     insights = {
         "cac_decision_support": cac_support,  # keep for Details/Debug
@@ -2629,6 +2741,11 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         # Canonical CAC + aspirin language (UI + EMR should use this)
         "cac_copy": cac_copy,
         "aspirin_copy": asp_copy,
+
+        # CKM context (UI + EMR can use this)
+        "ckm_context": ckm,
+        "ckm_copy": ckm_copy,
+
 
         # Secondary insight (engine-gated)
         "risk_driver_pattern": risk_driver,
@@ -2973,6 +3090,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
