@@ -1927,37 +1927,36 @@ with tab_report:
         unsafe_allow_html=True,
     )
 
-   # Secondary insights (engine-gated)
-rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
-if rd.get("should_surface"):
-    st.markdown(
-        f"""
+      # Secondary insights (engine-gated)
+    rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
+    if rd.get("should_surface"):
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Secondary insights</div>
   <div class="kvline compact">{_html.escape(rd.get("headline",""))}</div>
   <div class="kvline compact inline-muted">{_html.escape(rd.get("detail",""))}</div>
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
 
-# CKM context (engine-gated; display-only)
-ckm_copy = (out.get("insights") or {}).get("ckm_copy") or {}
-if ckm_copy.get("headline"):
-    st.markdown(
-        f"""
+    # CKM context (engine-gated; display-only)
+    if ckm_copy.get("headline"):
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">CKM context</div>
   <div class="kvline compact">{_html.escape(ckm_copy.get("headline",""))}</div>
   {f"<div class='kvline compact inline-muted'>{_html.escape(ckm_copy.get('detail',''))}</div>" if ckm_copy.get("detail") else ""}
 </div>
 """,
-        unsafe_allow_html=True,
-    )
+            unsafe_allow_html=True,
+        )
 
-st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
-col_t, col_m = st.columns([1.05, 1.35], gap="small")
+    col_t, col_m = st.columns([1.05, 1.35], gap="small")
 
 
     # Targets
@@ -2032,21 +2031,21 @@ col_t, col_m = st.columns([1.05, 1.35], gap="small")
             unsafe_allow_html=True,
         )
 
-    # EMR note
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("EMR note (copy/paste)")
-    note_for_emr = le.render_quick_text(patient, out)
-    note_for_emr = scrub_terms(note_for_emr)
-    note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
-    ckm_copy = insights.get("ckm_copy") or {}
-    if ckm_copy.get("headline"):
-        lines.append("")
-        lines.append("CKM context:")
-        lines.append(ckm_copy["headline"])
-        if ckm_copy.get("detail"):
-            lines.append(ckm_copy["detail"])
+   # EMR note
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+st.subheader("EMR note (copy/paste)")
 
-    emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+note_for_emr = le.render_quick_text(patient, out)
+note_for_emr = scrub_terms(note_for_emr)
+note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
+
+# Optional: append CKM context to EMR note (string-safe)
+if ckm_copy.get("headline"):
+    note_for_emr += "\n\nCKM context:\n" + str(ckm_copy.get("headline"))
+    if ckm_copy.get("detail"):
+        note_for_emr += "\n" + str(ckm_copy.get("detail"))
+
+emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
 
 
 # ------------------------------------------------------------
@@ -2157,8 +2156,7 @@ with tab_details:
     with st.expander("How Levels work (legend)", expanded=False):
         for item in legend:
             st.write(f"• {scrub_terms(item)}")
-with tab_details:
-    ...
+
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
     st.subheader("CKM context (detail)")
     ckm = (out.get("insights") or {}).get("ckm_context") or {}
@@ -2189,6 +2187,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
