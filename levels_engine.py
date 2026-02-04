@@ -209,23 +209,19 @@ LEVEL_DEFS = {
         "typical_pattern": [
             "Major actionable biologic driver present (ApoB/LDL, Lp(a), inflammatory disease/hsCRP context, diabetes-range, or smoking)",
             "Plaque may be unmeasured; CAC can be obtained to define disease burden when results would inform intensity/targets or downstream evaluation",
-
         ],
         "medication_action": "Lipid-lowering therapy is reasonable (3A) or generally favored (3B).",
     },
     4: {
-    "name": "Subclinical atherosclerosis present",
-    "definition": "Atherosclerotic disease is present on imaging without established clinical ASCVD events.",
-    "typical_pattern": [
-        "CAC >0 and <100",
-        "Treat as early disease with target-driven lipid lowering",
-    ],
-    # Guideline-aligned: do NOT mandate high-intensity for CAC 1–9
-    "medication_action": (
-        "Lipid-lowering therapy is appropriate; intensity individualized based on targets, risk profile, and tolerance."
-    ),
-},
-
+        "name": "Subclinical atherosclerosis present",
+        "definition": "Atherosclerotic disease is present on imaging without established clinical ASCVD events.",
+        "typical_pattern": [
+            "CAC >0 and <100",
+            "Treat as early disease with target-driven lipid lowering",
+        ],
+        "medication_action": (
+            "Lipid-lowering therapy is appropriate; intensity individualized based on targets, risk profile, and tolerance."
+        ),
     },
     5: {
         "name": "Very high risk / ASCVD intensity",
@@ -322,13 +318,11 @@ SUBLEVEL_DEFS = {
     },
 }
 
-
 CAC_RULE_TEXT = (
     "Coronary artery calcium (CAC) can be obtained to define atherosclerotic disease burden when plaque status is unmeasured. "
     "It is most useful when the result would change treatment intensity/targets or inform downstream evaluation. "
     "If CAC is already known (CAC=0 or CAC positive), CAC messaging is suppressed."
 )
-
 
 def get_level_definition_payload(level: int, sublevel: Optional[str] = None) -> Dict[str, Any]:
     lvl = int(level or 0)
@@ -355,7 +349,6 @@ def get_level_definition_payload(level: int, sublevel: Optional[str] = None) -> 
             })
     return payload
 
-
 def levels_legend_compact() -> List[str]:
     """
     UI legend lines that stay consistent with the locked definitions above.
@@ -370,7 +363,6 @@ def levels_legend_compact() -> List[str]:
         "Level 5: very high risk (CAC ≥100 or clinical ASCVD) → secondary-prevention intensity",
         "CAC: reasonable to obtain when plaque status is unmeasured; informs burden, intensity, and downstream evaluation",
     ]
-
 
 # =========================
 # CHUNK 2 / 6 — START
@@ -3118,6 +3110,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
