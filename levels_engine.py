@@ -214,13 +214,18 @@ LEVEL_DEFS = {
         "medication_action": "Lipid-lowering therapy is reasonable (3A) or generally favored (3B).",
     },
     4: {
-        "name": "Subclinical atherosclerosis present",
-        "definition": "Atherosclerotic disease is present on imaging without established clinical ASCVD events.",
-        "typical_pattern": [
-            "CAC >0 and <100",
-            "Treat as early disease with target-driven lipid lowering",
-        ],
-        "medication_action": "Target-driven lipid lowering; high-intensity therapy is generally appropriate depending on tolerance and goals.",
+    "name": "Subclinical atherosclerosis present",
+    "definition": "Atherosclerotic disease is present on imaging without established clinical ASCVD events.",
+    "typical_pattern": [
+        "CAC >0 and <100",
+        "Treat as early disease with target-driven lipid lowering",
+    ],
+    # Guideline-aligned: do NOT mandate high-intensity for CAC 1–9
+    "medication_action": (
+        "Lipid-lowering therapy is appropriate; intensity individualized based on targets, risk profile, and tolerance."
+    ),
+},
+
     },
     5: {
         "name": "Very high risk / ASCVD intensity",
@@ -361,7 +366,7 @@ def levels_legend_compact() -> List[str]:
         "Level 2B: emerging (converging) → clarify risk; treatment reasonable (preference-sensitive)",
         "Level 3A: actionable biology → therapy reasonable; timing preference-sensitive",
         "Level 3B: actionable biology + enhancers → therapy generally favored; CAC can define disease burden if unmeasured",
-        "Level 4: plaque present (CAC 1–99) → treat as early disease; target-driven therapy",
+        "Level 4: plaque present (CAC 1–99) → lipid-lowering appropriate; intensity individualized (target-driven)",
         "Level 5: very high risk (CAC ≥100 or clinical ASCVD) → secondary-prevention intensity",
         "CAC: reasonable to obtain when plaque status is unmeasured; informs burden, intensity, and downstream evaluation",
     ]
@@ -2090,9 +2095,13 @@ def plan_sentence(
         return "Lipid-lowering therapy is reasonable; timing is preference-sensitive."
 
     if level == 4:
-        if therapy_on and at_tgt:
-            return "Continue high-intensity lipid lowering."
-        return "High-intensity lipid lowering is appropriate."
+    # CAC 1–99 = subclinical disease; intensity is individualized, not reflex high-intensity
+    if therapy_on and at_tgt:
+        return "Continue lipid-lowering therapy at the current intensity."
+    if therapy_on and not at_tgt:
+        return "Optimize lipid-lowering intensity to achieve targets."
+    return "Lipid-lowering therapy appropriate; intensity individualized based on targets and risk profile."
+
 
     if therapy_on and at_tgt:
         return "Continue secondary-prevention intensity lipid lowering."
@@ -2236,7 +2245,10 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
         return actions
 
     cac_val = evidence.get("cac_value", None)
-    if isinstance(cac_val, int) and cac_val >= 100:
+
+# Plaque assessed: CAC strata should drive posture before "missing clarifiers" logic.
+if isinstance(cac_val, int):
+    if cac_val >= 100:
         actions += _action_line("Lipid-lowering therapy", "Appropriate (target-driven; plaque present)")
         if therapy_on and not at_tgt:
             actions += _action_line(
@@ -2245,6 +2257,27 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
                 "Above target on current therapy → assess tolerance/adherence and intensify to achieve targets.",
             )
         return actions
+
+    # CAC 1–99: guideline-aligned, non-mandatory intensity language
+    if 1 <= cac_val <= 99:
+        actions += _action_line(
+            "Lipid-lowering therapy",
+            "Appropriate",
+            "Intensity individualized based on targets and risk profile.",
+        )
+        if therapy_on and not at_tgt:
+            actions += _action_line(
+                "Therapy optimization",
+                "Appropriate",
+                "Above target on current therapy → assess tolerance/adherence and optimize intensity.",
+            )
+        return actions
+
+    # CAC=0: do not force therapy; proceed to other biology/risk logic
+    if cac_val == 0:
+        # keep going — atherogenic biology may still justify treatment
+        pass
+
 
     # -----------------------------
     # 2) Missing key clarifiers (keep concise)
@@ -2520,10 +2553,15 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     # NEW: dominantAction flag (consumed by app.py)
     dominant_action = False
-    if plaque.get("plaque_present") in (True, False) or p.get("ascvd") is True:
-        dominant_action = True
-    elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or "").strip().lower():
-        dominant_action = True
+
+# Dominant action should mean "treatment-forward today", not merely "plaque assessed".
+if p.get("ascvd") is True:
+    dominant_action = True
+elif int(level or 0) >= 4:
+    dominant_action = True
+elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or "").strip().lower():
+    dominant_action = True
+
 
     # ---- FIX: label builder (no posture dependency) ----
     # Uses management label when sublevels exist (2A/2B/3A/3B).
@@ -2831,7 +2869,7 @@ def recommended_action_line(out: Dict[str, Any]) -> str:
         if level >= 5:
             return "Continue secondary-prevention intensity lipid-lowering."
         if level == 4:
-            return "Target-driven lipid-lowering therapy is appropriate."
+            return "Lipid-lowering therapy appropriate; intensity individualized based on targets and risk profile."
         if dominant and level >= 3:
             return "Initiate treatment now."
         if level == 3 and sub == "3B":
@@ -3080,6 +3118,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
