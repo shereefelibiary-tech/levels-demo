@@ -1927,7 +1927,7 @@ with tab_report:
         unsafe_allow_html=True,
     )
 
-      # Secondary insights (engine-gated)
+    # Secondary insights (engine-gated)
     rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
     if rd.get("should_surface"):
         st.markdown(
@@ -1957,7 +1957,6 @@ with tab_report:
     st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
     col_t, col_m = st.columns([1.05, 1.35], gap="small")
-
 
     # Targets
     with col_t:
@@ -1999,10 +1998,10 @@ with tab_report:
     with col_m:
         rec_action = recommended_action_line_unified(out, fallback=plan_clean)
 
-        cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
-        cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
-        cac_det = _html.escape(cac_copy.get("detail") or "")
-        cac_ref = _html.escape(cac_copy.get("referral") or "")
+        cac_copy2 = (out.get("insights") or {}).get("cac_copy") or {}
+        cac_head = _html.escape(cac_copy2.get("headline") or "Coronary calcium: —")
+        cac_det = _html.escape(cac_copy2.get("detail") or "")
+        cac_ref = _html.escape(cac_copy2.get("referral") or "")
 
         cac_block = (
             f"<div class='kvline compact'>{cac_head}</div>"
@@ -2010,8 +2009,8 @@ with tab_report:
             + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
         )
 
-        asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
-        asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
+        asp_copy2 = (out.get("insights") or {}).get("aspirin_copy") or {}
+        asp_head = _html.escape(asp_copy2.get("headline") or f"Aspirin: {asp_line}")
 
         st.markdown(
             f"""
@@ -2031,21 +2030,22 @@ with tab_report:
             unsafe_allow_html=True,
         )
 
-   # EMR note
-st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-st.subheader("EMR note (copy/paste)")
+    # EMR note
+    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+    st.subheader("EMR note (copy/paste)")
 
-note_for_emr = le.render_quick_text(patient, out)
-note_for_emr = scrub_terms(note_for_emr)
-note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
+    note_for_emr = le.render_quick_text(patient, out)
+    note_for_emr = scrub_terms(note_for_emr)
+    note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
 
-# Optional: append CKM context to EMR note (string-safe)
-if ckm_copy.get("headline"):
-    note_for_emr += "\n\nCKM context:\n" + str(ckm_copy.get("headline"))
-    if ckm_copy.get("detail"):
-        note_for_emr += "\n" + str(ckm_copy.get("detail"))
+    # Optional: append CKM context to EMR note (string-safe)
+    if ckm_copy.get("headline"):
+        note_for_emr += "\n\nCKM context:\n" + str(ckm_copy.get("headline"))
+        if ckm_copy.get("detail"):
+            note_for_emr += "\n" + str(ckm_copy.get("detail"))
 
-emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+    emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+
 
 
 # ------------------------------------------------------------
@@ -2187,6 +2187,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
