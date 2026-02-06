@@ -2205,9 +2205,9 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
 
     return f"""
 <style>
-  /* ================= CKM CARD ================= */
-
   .ckm-card {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter,
+                 "Helvetica Neue", Arial, sans-serif;
     border: 1px solid rgba(31,41,55,0.14);
     border-radius: 16px;
     background: linear-gradient(180deg, #ffffff 0%, #fbfbfc 100%);
@@ -2218,7 +2218,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
   }}
 
   .ckm-header {{
-    font-weight: 950;
+    font-weight: 975;
     font-size: 0.96rem;
     letter-spacing: -0.01em;
     color: #111827;
@@ -2227,14 +2227,12 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
 
   .ckm-subheader {{
     font-size: 0.70rem;
-    font-weight: 800;
+    font-weight: 900;
     letter-spacing: 0.14em;
     color: rgba(31,41,55,0.55);
     margin-bottom: 12px;
     text-transform: uppercase;
   }}
-
-  /* ================= STAGE STACK ================= */
 
   .ckm-stack {{
     display: flex;
@@ -2248,8 +2246,8 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     content: "";
     position: absolute;
     left: 6px;
-    top: 6px;
-    bottom: 6px;
+    top: 8px;
+    bottom: 8px;
     width: 2px;
     background: rgba(31,41,55,0.18);
     border-radius: 2px;
@@ -2282,17 +2280,16 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
 
   .ckm-stage-name {{
     font-size: 0.86rem;
-    font-weight: 850;
+    font-weight: 900;
     color: rgba(31,41,55,0.70);
   }}
 
   .ckm-stage-desc {{
     font-size: 0.74rem;
+    font-weight: 700;
     color: rgba(31,41,55,0.55);
     margin-top: 2px;
   }}
-
-  /* ================= ACTIVE STATE ================= */
 
   .ckm-stage.is-active {{
     background: rgba(59,130,246,0.06);
@@ -2307,13 +2304,12 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
 
   .ckm-stage.is-active .ckm-stage-name {{
     color: #111827;
-    font-weight: 950;
+    font-weight: 975;
   }}
 
   .ckm-stage.is-active .ckm-stage-desc {{
     color: rgba(31,41,55,0.80);
   }}
-
 </style>
 
 <div class="ckm-card" role="group" aria-label="Cardio-Kidney-Metabolic syndrome stage">
@@ -2321,8 +2317,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
   <div class="ckm-subheader">Syndrome stage</div>
 
   <div class="ckm-stack">
-
-    <div class="{stage_class(3)}">
+    <div class="{stage_class(3)}" title="Stage 3: Clinical cardiovascular disease, heart failure, or advanced CKD.">
       <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 3</div>
@@ -2330,7 +2325,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
       </div>
     </div>
 
-    <div class="{stage_class(2)}">
+    <div class="{stage_class(2)}" title="Stage 2: Metabolic disease (e.g., diabetes) accelerating risk independent of plaque burden.">
       <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 2</div>
@@ -2338,7 +2333,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
       </div>
     </div>
 
-    <div class="{stage_class(1)}">
+    <div class="{stage_class(1)}" title="Stage 1: Risk factors such as obesity, elevated BP, or dysglycemia.">
       <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 1</div>
@@ -2346,17 +2341,17 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
       </div>
     </div>
 
-    <div class="{stage_class(0)}">
+    <div class="{stage_class(0)}" title="Stage 0: No CKM drivers identified.">
       <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 0</div>
         <div class="ckm-stage-desc">None identified</div>
       </div>
     </div>
-
   </div>
 </div>
 """
+
 
 
 
@@ -2379,7 +2374,7 @@ with tab_report:
     with left:
         st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
     with right:
-        components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=240)
+        components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=310)
 
 
     stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
@@ -2719,6 +2714,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
