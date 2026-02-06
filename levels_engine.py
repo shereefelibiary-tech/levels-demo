@@ -2872,7 +2872,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         # CKM context (UI + EMR can use this)
         "ckm_context": ckm,
         "ckm_copy": ckm_copy,
-
+        "ckd_copy": ckd_copy,
 
         # Secondary insight (engine-gated)
         "risk_driver_pattern": risk_driver,
@@ -3234,6 +3234,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
