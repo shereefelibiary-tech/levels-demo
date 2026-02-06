@@ -29,7 +29,7 @@ def _v4_to_legacy(v4: dict) -> dict:
 
     return {
         "levels": {
-            "managementLevel": v4.get("level_num"),
+            "managementLevel": v4.get("level_num") or 2,
             "sublevel": v4.get("sublevel"),
             "decisionConfidence": v4.get("decision_confidence", "—"),
             "decisionStability": v4.get("decision_stability", "—"),
