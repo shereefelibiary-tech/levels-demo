@@ -1869,7 +1869,39 @@ def render_criteria_table_compact(
 """
     return html
 
+# ============================================================
+# CKM Vertical Rail helpers
+# ============================================================
+import re
 
+def _extract_ckm_stage_num(out: dict) -> int | None:
+    """
+    Parses 'CKM: Stage X (...)' from insights.ckm_copy.headline.
+    Returns stage number or None.
+    """
+    try:
+        ins = out.get("insights") or {}
+        head = (ins.get("ckm_copy") or {}).get("headline") or ""
+        m = re.search(r"\bStage\s+(\d)\b", str(head))
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
+    def cls(stage: int) -> str:
+        return "ckm-stage is-active" if (active_stage is not None and stage == active_stage) else "ckm-stage"
+
+    return f"""
+    <!-- CKM Vertical Rail -->
+    <style>
+      /* (CSS exactly as provided earlier — keep unchanged) */
+    </style>
+
+    <div class="ckm-rail">
+      ...
+    </div>
+    """
 
 # ============================================================
 # Tabs
@@ -1882,11 +1914,21 @@ tab_report, tab_framework, tab_details, tab_debug = st.tabs(
 # REPORT TAB
 # ------------------------------------------------------------
 with tab_report:
-    st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
+    # --- CKM vertical rail + Risk Continuum bar (side-by-side) ---
+    active_ckm_stage = _extract_ckm_stage_num(out)
+
+    left, right = st.columns([3.2, 1.05], gap="small")
+    with left:
+        st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
+    with right:
+        components.html(
+            render_ckm_vertical_rail_html(active_ckm_stage),
+            height=185
+        )
 
     stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
 
-    # --- NEW: CKM/CKD inline line for Snapshot (v4 adapter provides ckm_copy + ckd_copy) ---
+    # --- CKM/CKD inline line for Snapshot (v4 adapter provides ckm_copy + ckd_copy) ---
     _ins = out.get("insights") or {}
     _ckm_head = ""
     try:
@@ -2227,6 +2269,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
