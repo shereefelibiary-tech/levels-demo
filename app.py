@@ -1886,160 +1886,168 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
 
 
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
+    """
+    Self-contained HTML+CSS CKM vertical rail.
+    Active stage highlighted when active_stage is 0/1/2/3.
+    """
+
     def cls(stage: int) -> str:
         return "ckm-stage is-active" if (active_stage is not None and stage == active_stage) else "ckm-stage"
 
     return f"""
 <style>
-  :root{{
-    --ckm-text: rgba(17,24,39,0.92);
+  .ckm-rail {{
+    --ckm-text: rgba(17,24,39,0.94);
     --ckm-muted: rgba(31,41,55,0.55);
     --ckm-line: rgba(31,41,55,0.18);
-    --ckm-fill: rgba(31,41,55,0.92);
-    --ckm-bg: rgba(249,250,251,0.65);
-  }}
+    --ckm-fill: rgba(17,24,39,0.94);
+    --ckm-bg: rgba(249,250,251,0.70);
 
-  .ckm-rail {{
-    width: 220px;
-    min-width: 200px;
+    width: 240px;
+    min-width: 220px;
     border: 1px solid var(--ckm-line);
     background: var(--ckm-bg);
-    border-radius: 14px;
-    padding: 10px 12px;
+    border-radius: 16px;
+    padding: 14px 14px 12px 14px;
     display: flex;
-    gap: 10px;
-    align-items: stretch;
+    gap: 12px;
     box-sizing: border-box;
   }}
 
-  .ckm-rail .ckm-head {{
+  /* Header */
+  .ckm-head {{
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    min-width: 44px;
-    align-items: center;
-  }}
-  .ckm-rail .ckm-title {{
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    font-size: 0.78rem;
-    color: var(--ckm-text);
-  }}
-  .ckm-rail .ckm-axis {{
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
-    font-size: 0.70rem;
-    color: var(--ckm-muted);
-    letter-spacing: 0.02em;
-    user-select: none;
+    align-items: flex-start;
+    min-width: 78px;
   }}
 
-  .ckm-rail .ckm-stack {{
+  .ckm-title {{
+    font-weight: 950;
+    letter-spacing: -0.01em;
+    font-size: 0.92rem;
+    line-height: 1.15;
+    color: var(--ckm-text);
+  }}
+
+  .ckm-subtitle {{
+    font-size: 0.70rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--ckm-muted);
+    margin-top: 4px;
+    text-transform: uppercase;
+  }}
+
+  /* Stage stack */
+  .ckm-stack {{
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     position: relative;
-    padding: 4px 0;
+    padding: 6px 0;
   }}
 
-  .ckm-rail .ckm-stack::before{{
+  .ckm-stack::before {{
     content: "";
     position: absolute;
-    left: 10px;
-    top: 8px;
-    bottom: 8px;
+    left: 9px;
+    top: 6px;
+    bottom: 6px;
     width: 2px;
     background: var(--ckm-line);
     border-radius: 2px;
   }}
 
-  .ckm-stage{{
+  .ckm-stage {{
     display: grid;
-    grid-template-columns: 24px 1fr;
+    grid-template-columns: 22px 1fr;
     gap: 10px;
     align-items: center;
     padding: 6px 6px;
     border-radius: 10px;
   }}
 
-  .ckm-dot{{
+  .ckm-dot {{
     width: 12px;
     height: 12px;
     border-radius: 999px;
     border: 2px solid var(--ckm-line);
-    background: white;
-    box-sizing: border-box;
-    margin-left: 4px;
+    background: #ffffff;
+    margin-left: 3px;
     z-index: 1;
   }}
 
-  .ckm-label{{
+  .ckm-label {{
     display: flex;
     flex-direction: column;
     line-height: 1.15;
   }}
-  .ckm-label .ckm-stage-name{{
-    font-size: 0.82rem;
+
+  .ckm-stage-name {{
+    font-size: 0.84rem;
+    font-weight: 700;
     color: var(--ckm-muted);
-    font-weight: 600;
   }}
-  .ckm-label .ckm-stage-desc{{
+
+  .ckm-stage-desc {{
     font-size: 0.74rem;
     color: var(--ckm-muted);
     margin-top: 2px;
   }}
 
-  .ckm-stage.is-active{{
-    background: rgba(255,255,255,0.8);
+  /* Active stage */
+  .ckm-stage.is-active {{
+    background: rgba(255,255,255,0.85);
     border: 1px solid var(--ckm-line);
   }}
-  .ckm-stage.is-active .ckm-dot{{
+
+  .ckm-stage.is-active .ckm-dot {{
     border-color: var(--ckm-fill);
     background: var(--ckm-fill);
-    box-shadow: 0 0 0 3px rgba(31,41,55,0.12);
+    box-shadow: 0 0 0 3px rgba(17,24,39,0.12);
   }}
-  .ckm-stage.is-active .ckm-stage-name{{
+
+  .ckm-stage.is-active .ckm-stage-name {{
     color: var(--ckm-text);
-    font-weight: 800;
-  }}
-  .ckm-stage.is-active .ckm-stage-desc{{
-    color: rgba(31,41,55,0.70);
+    font-weight: 900;
   }}
 
-  .ckm-stage[title]{{ cursor: help; }}
+  .ckm-stage.is-active .ckm-stage-desc {{
+    color: rgba(31,41,55,0.72);
+  }}
 
-  @media (max-width: 860px){{
-    .ckm-rail{{ width: 200px; }}
-    .ckm-label .ckm-stage-desc{{ display:none; }}
+  .ckm-stage[title] {{
+    cursor: help;
   }}
 </style>
 
-<div class="ckm-rail" role="group" aria-label="CKM vertical stage rail">
+<div class="ckm-rail" role="group" aria-label="Cardio-Kidney-Metabolic staging">
   <div class="ckm-head">
-    <div class="ckm-title">CKM</div>
-    <div class="ckm-axis">Acceleration</div>
+    <div class="ckm-title">Cardio-Kidney-Metabolic</div>
+    <div class="ckm-subtitle">Syndrome</div>
   </div>
 
   <div class="ckm-stack">
-    <div class="{cls(3)}" title="Stage 3: Clinical CVD / HF or advanced CKD.">
-      <div class="ckm-dot" aria-hidden="true"></div>
+    <div class="{cls(3)}" title="Stage 3: Clinical cardiovascular disease, heart failure, or advanced CKD.">
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 3</div>
-        <div class="ckm-stage-desc">Clinical CVD / HF / CKD</div>
+        <div class="ckm-stage-desc">Clinical disease / CKD</div>
       </div>
     </div>
 
-    <div class="{cls(2)}" title="Stage 2: Metabolic disease present (e.g., diabetes).">
-      <div class="ckm-dot" aria-hidden="true"></div>
+    <div class="{cls(2)}" title="Stage 2: Metabolic disease (e.g., diabetes) accelerating risk independent of plaque burden.">
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 2</div>
         <div class="ckm-stage-desc">Metabolic disease</div>
       </div>
     </div>
 
-    <div class="{cls(1)}" title="Stage 1: Risk factors present (e.g., obesity, elevated BP, dysglycemia).">
-      <div class="ckm-dot" aria-hidden="true"></div>
+    <div class="{cls(1)}" title="Stage 1: Risk factors such as obesity, elevated BP, or dysglycemia.">
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 1</div>
         <div class="ckm-stage-desc">Risk factors</div>
@@ -2047,15 +2055,16 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     </div>
 
     <div class="{cls(0)}" title="Stage 0: No CKM drivers identified.">
-      <div class="ckm-dot" aria-hidden="true"></div>
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 0</div>
-        <div class="ckm-stage-desc">None</div>
+        <div class="ckm-stage-desc">None identified</div>
       </div>
     </div>
   </div>
 </div>
 """
+
 
 # ============================================================
 # Tabs
@@ -2421,6 +2430,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
