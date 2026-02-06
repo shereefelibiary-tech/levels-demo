@@ -149,21 +149,42 @@ def derive_aspirin_status(legacy_out: Dict[str, Any]) -> str:
 def evaluate_v4(p: Patient) -> Dict[str, Any]:
     legacy_out = legacy.evaluate(p)
 
+    lvl = legacy_out.get("levels") or {}
+    ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+    ins = legacy_out.get("insights") or {}
+
     stage, drivers = derive_ckm_stage_and_drivers(p)
     ckm_text = render_ckm_text(stage, drivers)
     ckd_text = derive_ckd_text(p)
 
     enh = pick_enhancers(p, legacy_out)
-    enh_txt = f" ({', '.join(enh)})" if enh else ""
+
+    # Prefer v4-provided parenthetical when present; otherwise render from enhancers list.
+    enh_txt = ""
+    if isinstance(legacy_out, dict):
+        pass
+    if enh:
+        enh_txt = f" ({', '.join(enh)})"
+
+    asp_status = derive_aspirin_status(legacy_out)
 
     return {
-        "level_num": int(((legacy_out.get("levels") or {}).get("managementLevel")) or 2),
-        "sublevel": (legacy_out.get("levels") or {}).get("sublevel"),
+        # Core position
+        "level_num": int(lvl.get("managementLevel") or 2),
+        "sublevel": (lvl.get("sublevel") or None),
 
-        "plaque_status": ((legacy_out.get("levels") or {}).get("evidence") or {}).get("cac_status", "Unknown"),
-        "plaque_burden": ((legacy_out.get("levels") or {}).get("evidence") or {}).get("burden_band", "Not quantified"),
-        "clinical_ascvd": bool((((legacy_out.get("levels") or {}).get("evidence") or {}).get("clinical_ascvd"))),
+        # Plaque summary (for adapter + EMR)
+        "plaque_status": ev.get("cac_status", "Unknown"),
+        "plaque_burden": ev.get("burden_band", "Not quantified"),
+        "clinical_ascvd": bool(ev.get("clinical_ascvd", False)),
+        "cac_value": ev.get("cac_value", None),
 
+        # Decision status (to prevent "—" in report)
+        "decision_confidence": (lvl.get("decisionConfidence") or "—"),
+        "decision_stability": (lvl.get("decisionStability") or "—"),
+        "decision_stability_note": (lvl.get("decisionStabilityNote") or ""),
+
+        # Keep core model outputs so current app continues to render
         "riskSignal": legacy_out.get("riskSignal", {}),
         "pooledCohortEquations10yAscvdRisk": legacy_out.get("pooledCohortEquations10yAscvdRisk", {}),
         "prevent10": legacy_out.get("prevent10", {}),
@@ -172,6 +193,7 @@ def evaluate_v4(p: Patient) -> Dict[str, Any]:
         "nextActions": legacy_out.get("nextActions", []),
         "anchors": legacy_out.get("anchors", {}),
         "trace": legacy_out.get("trace", []),
+        "legend": lvl.get("legend", []) or [],
 
         # v4 display fields
         "enhancers": enh,
@@ -180,11 +202,17 @@ def evaluate_v4(p: Patient) -> Dict[str, Any]:
         "ckm_stage": stage,
         "ckm_drivers_min": drivers,
         "ckm_text": ckm_text,
+        "ckm_detail": "",
 
         "ckd_text": ckd_text,
+        "ckd_detail": "",
 
-        "aspirin_status": derive_aspirin_status(legacy_out),
-        "aspirin_copy": {"headline": f"Aspirin: {derive_aspirin_status(legacy_out)}"},
-        "cac_copy": (legacy_out.get("insights") or {}).get("cac_copy", {}),
+        # Aspirin wording (v4 choice)
+        "aspirin_status": asp_status,
+        "aspirin_copy": {"headline": f"Aspirin: {asp_status}"},
+        "aspirin_expl": "",
+        "aspirin_rationale": [],
+
+        # CAC copy (keep headline only in EMR renderer; full copy can still exist here)
+        "cac_copy": ins.get("cac_copy", {}) if isinstance(ins, dict) else {},
     }
-
