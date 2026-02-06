@@ -3008,9 +3008,8 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     p_total = prev.get("total_cvd_10y_pct", None)
     p_ascvd = prev.get("ascvd_10y_pct", None)
 
-    # Targets (only show if you want "Targets (if treated)" behavior; engine already sets targets dict)
+    # Targets
     targets = out.get("targets") or {}
-    # Use your intended label
     targets_label = "Targets (if treated)"
 
     # Aspirin / CAC canonical copy (single source of truth already exists)
@@ -3019,24 +3018,46 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
     cac_copy = insights.get("cac_copy") or {}
     cac_head = _normalize_space(str(cac_copy.get("headline") or ""))
-    cac_det = _normalize_space(str(cac_copy.get("detail") or ""))
-    cac_ref = _normalize_space(str(cac_copy.get("referral") or ""))
 
     # Build Plan from nextActions with dominance + dedup
     dominant = bool(lvl.get("dominantAction") is True)
     primary, rest = _pick_primary_action(out.get("nextActions") or [], dominant=dominant)
     plan_bullets = _action_to_plan_bullets(primary, rest)
 
+    # --- NEW: CKM + CKD inline (v4 adapter places these in insights) ---
+    ins = insights or {}
+
+    ckm_head = ""
+    try:
+        ckm_head = str((ins.get("ckm_copy") or {}).get("headline") or "").strip()
+    except Exception:
+        ckm_head = ""
+
+    ckd_head = ""
+    try:
+        ckd_head = str((ins.get("ckd_copy") or {}).get("headline") or "").strip()
+    except Exception:
+        ckd_head = ""
+
     # --- Report assembly (clinician voice, low redundancy) ---
     lines: List[str] = []
     lines.append("RISK CONTINUUM — CLINICAL REPORT")
     lines.append("-" * 60)
     lines.append(f"Level: {level_line}")
+
+    # Inline CKM/CKD directly under Level (when present)
+    if ckm_head or ckd_head:
+        if ckm_head and ckd_head:
+            lines.append(f"{ckm_head} | {ckd_head}")
+        else:
+            lines.append(ckm_head or ckd_head)
+
     lines.append(f"Plaque: {plaque_evidence} | Burden: {plaque_burden}")
     lines.append(f"Confidence: {dec_conf} | Stability: {stab_line}")
     lines.append("")
 
-    if drivers:
+    # If CKM is surfaced, suppress "Why (top drivers)" to avoid redundancy.
+    if (not ckm_head) and drivers:
         lines.append("Why (top drivers):")
         for d in drivers:
             lines.append(f"- {d}")
@@ -3056,7 +3077,6 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
 
     # Targets (if treated)
     if isinstance(targets, dict) and targets:
-        # Preserve your intended targets (ApoB/LDL ints)
         t_parts: List[str] = []
         if "ldl" in targets:
             t_parts.append(f"LDL-C <{int(targets['ldl'])} mg/dL")
@@ -3076,12 +3096,9 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     if asp_head:
         lines.append(f"- {asp_head}")
 
+    # CAC: keep headline only (avoid filler)
     if cac_head:
         lines.append(f"- {cac_head}")
-        if cac_det:
-            lines.append(f"  {cac_det}")
-        if cac_ref:
-            lines.append(f"- {cac_ref}")
 
     # Context anchors
     near = (anchors.get("nearTerm") or {}).get("summary", "—")
