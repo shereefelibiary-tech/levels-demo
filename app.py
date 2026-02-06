@@ -2395,7 +2395,7 @@ with tab_report:
     with left:
         st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
     with right:
-        components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=310)
+        components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=360)
 
 
     stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
@@ -2735,6 +2735,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
