@@ -2437,10 +2437,9 @@ with tab_report:
     with right:
         components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=360)
 
-
     stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
 
-       # --- CKM inline line for Snapshot (engine-independent; derived from stage + eGFR) ---
+    # --- CKM inline line for Snapshot (engine-independent; derived from stage + eGFR) ---
     _egfr_v = None
     try:
         _egfr_v = float(data.get("egfr")) if data.get("egfr") is not None else None
@@ -2464,6 +2463,10 @@ with tab_report:
 
         _ckm_label = f"Stage {_ckm_stage_num}" + (" (CKD-driven risk)" if _ckd_driven else "")
 
+    # Show CKD label ONLY when eGFR < 60 (avoid noisy CKD2 alongside Stage 1)
+    if not (_egfr_v is not None and float(_egfr_v) < 60):
+        _ckd_label = ""
+
     _ckmckd_line = ""
     if _ckm_label and _ckd_label:
         _ckmckd_line = f"{_ckm_label} | {_ckd_label}"
@@ -2472,6 +2475,14 @@ with tab_report:
     elif _ckd_label and _ckd_label != "CKD — unknown":
         _ckmckd_line = _ckd_label
 
+    # Suppress CKM once plaque is assessed or posture is plaque-driven (Level 4+)
+    try:
+        _plaque_assessed = (plaque_present in (True, False)) or (int(level or 0) >= 4)
+    except Exception:
+        _plaque_assessed = (int(level or 0) >= 4)
+
+    if _plaque_assessed:
+        _ckmckd_line = ""
 
     st.markdown(
         f"""
@@ -2482,7 +2493,7 @@ with tab_report:
     {level}{f" ({sub})" if sub else ""} — {LEVEL_NAMES.get(level,'—')}
   </div>
 
-    {f"<div class='kvline'><b>CKM:</b> {_ckmckd_line}</div>" if _ckmckd_line else ""}
+  {f"<div class='kvline'><b>CKM:</b> {_html.escape(_ckmckd_line)}</div>" if _ckmckd_line else ""}
 
   <div class="kvline">
     <b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))}
@@ -2787,6 +2798,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
