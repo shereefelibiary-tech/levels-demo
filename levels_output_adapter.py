@@ -15,7 +15,6 @@ def evaluate_unified(patient, engine_version: str = "legacy"):
         v4 = evaluate_v4(patient)
         return _v4_to_legacy(v4)
 
-    # default / legacy
     from levels_engine import evaluate
     return evaluate(patient)
 
@@ -23,13 +22,12 @@ def evaluate_unified(patient, engine_version: str = "legacy"):
 def _v4_to_legacy(v4: dict) -> dict:
     """
     Translate v4 payload into the legacy shape expected by app.py.
-    Keep this minimal and expand only as needed.
+    Minimal bridge; expand only when the app needs more.
     """
-
     level_num = int(v4.get("level_num") or 2)
-    sublevel = v4.get("sublevel")  # e.g. "2A"/"2B"/"3A"/"3B" or None
+    sublevel = v4.get("sublevel")  # "2A"/"2B"/"3A"/"3B" or None
+    enh_txt = v4.get("level_enhancers_text", "") or ""  # e.g. " (elevated Lp[a])"
 
-    # Base meanings (match app.py LEVEL_NAMES to keep UI consistent)
     LEVEL_MEANINGS = {
         1: "Minimal risk signal",
         2: "Emerging risk signals",
@@ -44,20 +42,20 @@ def _v4_to_legacy(v4: dict) -> dict:
         "3B": "Level 3B — Actionable biology + enhancers",
     }
 
-    # v4 may optionally pass a pre-rendered enhancer parenthetical like " (elevated Lp[a])"
-    enh_txt = v4.get("level_enhancers_text", "") or ""
-
-    # Build a safe label for legacy render_quick_text()
-    if sublevel and str(sublevel) in SUBLEVEL_LABELS:
-        label = SUBLEVEL_LABELS[str(sublevel)] + enh_txt
+    s = str(sublevel).strip().upper() if sublevel else None
+    if s and s in SUBLEVEL_LABELS:
+        label = SUBLEVEL_LABELS[s] + enh_txt
     else:
         label = f"Level {level_num} — {LEVEL_MEANINGS.get(level_num, '—')}" + enh_txt
 
     return {
+        "version": v4.get("version", {}),   # optional passthrough
+        "system": v4.get("system", "Risk Continuum"),
+
         "levels": {
-            "postureLevel": level_num,  # keep compat
+            "postureLevel": level_num,
             "managementLevel": level_num,
-            "sublevel": sublevel,
+            "sublevel": s if s else None,
             "label": label,
 
             "decisionConfidence": v4.get("decision_confidence", "—"),
@@ -65,10 +63,9 @@ def _v4_to_legacy(v4: dict) -> dict:
             "decisionStabilityNote": v4.get("decision_stability_note", ""),
 
             "evidence": {
+                "clinical_ascvd": bool(v4.get("clinical_ascvd", False)),
                 "cac_status": v4.get("plaque_status", "Unknown"),
                 "burden_band": v4.get("plaque_burden", "Not quantified"),
-                "clinical_ascvd": bool(v4.get("clinical_ascvd", False)),
-                # optional (safe if missing)
                 "cac_value": v4.get("cac_value", None),
             },
 
@@ -95,15 +92,17 @@ def _v4_to_legacy(v4: dict) -> dict:
                 "headline": v4.get("ckm_text", ""),
                 "detail": v4.get("ckm_detail", ""),
             },
-
-            # CKD (display-only insight; app can render later without breaking)
+            # CKD (display-only insight)
             "ckd_copy": {
-                "headline": v4.get("ckd_text", ""),   # e.g. "CKD3a (eGFR 52, UACR 68)"
+                "headline": v4.get("ckd_text", ""),
                 "detail": v4.get("ckd_detail", ""),
             },
 
+            # CAC + aspirin (canonical copy)
             "cac_copy": v4.get("cac_copy", {}),
             "aspirin_copy": v4.get("aspirin_copy", {}),
+
+            # Optional passthroughs
             "risk_driver_pattern": v4.get("risk_driver_pattern", {}),
             "cac_decision_support": v4.get("cac_decision_support", {}),
             "ckm_context": v4.get("ckm_context", {}),
@@ -113,6 +112,10 @@ def _v4_to_legacy(v4: dict) -> dict:
         "trace": v4.get("trace", []),
     }
 
+
+# -------------------------------------------------------------------
+# The TS-like contract generator (unchanged legacy helper)
+# -------------------------------------------------------------------
 
 def _fmt_num(x: Optional[float], unit: str = "", dp: int = 0) -> Optional[str]:
     if x is None:
@@ -162,9 +165,6 @@ def _plan_item(kind: str, text: str, timing: Optional[str] = None, priority: Opt
 
 
 def _get_level(engine_levels: dict, engine_out: dict) -> int:
-    """
-    Engine uses postureLevel/managementLevel; keep compatibility if future versions rename.
-    """
     lvl = (
         engine_levels.get("managementLevel")
         or engine_levels.get("postureLevel")
