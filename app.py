@@ -1475,12 +1475,6 @@ def _plaque_unmeasured(ev_dict: dict) -> bool:
     cs = str(ev_dict.get("cac_status", "")).strip().lower()
     return ("unknown" in cs) or ("no structural" in cs) or ("unmeasured" in cs)
 
-# ============================================================
-# Tight criteria table (with circles) — UPDATED (no drift)
-# - Patient value appears ONLY in the matching row (no duplication)
-# - Non-matching threshold rows show a blank patient cell (not "—")
-# - LDL section still behaves: shown as reference unless ApoB not measured
-# ============================================================
 def render_criteria_table_compact(
     *,
     apob_v,
@@ -1500,6 +1494,7 @@ def render_criteria_table_compact(
     - Explicit "Unmeasured" for missing key clarifiers (ApoB/LDL and Lp(a)).
     - Collapses normal/unused domains into a single "Other domains" line.
     - Adds a "Data gaps" line for missing key clarifiers.
+    - Adds an "Active signals" line (what is actually driving signal right now).
 
     No placeholders. Paste-ready.
     """
@@ -1708,7 +1703,7 @@ def render_criteria_table_compact(
         "key_clarifier": False,
     })
 
-    # Inflammation (hsCRP only; chronic inflammatory disease flags not passed here)
+    # Inflammation (hsCRP only)
     infl_measured = _is_num(hscrp_v)
     infl_status = "normal"
     infl_row = None
@@ -1755,7 +1750,7 @@ def render_criteria_table_compact(
         "key_clarifier": False,
     })
 
-    # Genetics (Lp(a))
+    # Genetics (Lp[a])
     lpa_measured = _is_num(lpa_v) and (str(lpa_unit_v or "").strip() in ("nmol/L", "mg/dL"))
     gen_status = "normal"
     gen_row = None
@@ -1801,7 +1796,7 @@ def render_criteria_table_compact(
         "note": None,
         "status": gen_status,
         "row": gen_row,
-        "key_clarifier": True,  # you treat Lp(a) as a clarifier
+        "key_clarifier": True,
     })
 
     # Smoking
@@ -1852,9 +1847,9 @@ def render_criteria_table_compact(
     # -----------------------------
     # Decide what to show
     # -----------------------------
-    shown = []
-    data_gaps = []
-    other = []
+    shown: list[dict] = []
+    data_gaps: list[str] = []
+    other: list[dict] = []
 
     for d in domains:
         if d["status"] == "unmeasured":
@@ -1868,17 +1863,10 @@ def render_criteria_table_compact(
         else:
             other.append(d)
 
-    # Reduce clutter: if a domain is normal and not key clarifier, collapse it.
-    # Also, avoid showing Smoking block when "No" unless nothing else is shown.
-    filtered_shown = []
-    for d in shown:
-        if d["name"] == "Smoking" and d["status"] == "normal":
-            continue
-        filtered_shown.append(d)
-    shown = filtered_shown
+    # Avoid showing Smoking block when "No"
+    shown = [d for d in shown if not (d["name"] == "Smoking" and d["status"] == "normal")]
 
-    # Ensure we always show at least atherogenic + glycemia blocks (they anchor the table),
-    # but keep to one row each.
+    # Always show at least Atherogenic + Glycemia
     def _ensure_present(name: str):
         if any(x["name"] == name for x in shown):
             return
@@ -1890,63 +1878,103 @@ def render_criteria_table_compact(
     _ensure_present("Atherogenic burden")
     _ensure_present("Glycemia")
 
-    # Order
+    # Order domains
     order = {"Atherogenic burden": 1, "Glycemia": 2, "Inflammation": 3, "Genetics": 4, "Smoking": 5}
     shown.sort(key=lambda x: order.get(x["name"], 99))
 
-    # Other domains summary line
-    other_bits = []
-    # If ApoB measured and LDL also measured, summarize LDL as context
-    if apob_measured and ldl_measured:
-        other_bits.append(f"LDL-C {_fmt_val_unit(_fmt_num(ldl_v, 0), 'mg/dL')} (ApoB preferred)")
-    # Add normal domains succinctly
-    for d in other:
-        r = d["row"]
-        if not r:
-            continue
-        if d["name"] == "Smoking":
-            if r["patient"] in ("No", "Unmeasured"):
-                other_bits.append(f"Smoking {r['patient']}")
-        if d["name"] == "Inflammation":
-            if r["patient"] in ("Unmeasured",) or (r["effect"] == "—"):
-                other_bits.append(f"hsCRP {r['patient']}")
-        if d["name"] == "Genetics":
-            if r["patient"] in ("Unmeasured",) or (r["effect"] == "—"):
-                other_bits.append(f"Lp(a) {r['patient']}")
-
-    # Deduplicate other bits (case-insensitive)
-    seen = set()
-    other_bits_clean = []
-    for s in other_bits:
-        k = str(s).strip().lower()
-        if not k or k in seen:
-            continue
-        seen.add(k)
-        other_bits_clean.append(s)
-
-    data_gaps_clean = []
-    seen_g = set()
+    # -----------------------------
+    # Data gaps line
+    # -----------------------------
+    data_gaps_clean: list[str] = []
+    _seen_g = set()
     for g in data_gaps:
         k = str(g).strip().lower()
-        if not k or k in seen_g:
-            continue
-        seen_g.add(k)
-        data_gaps_clean.append(g)
+        if k and k not in _seen_g:
+            _seen_g.add(k)
+            data_gaps_clean.append(g)
+
+    gaps_line = ""
+    if data_gaps_clean:
+        gaps_line = (
+            "<div class='rc2-inline-note'><b>Data gaps:</b> "
+            + _html.escape(", ".join(data_gaps_clean))
+            + "</div>"
+        )
+
+    # -----------------------------
+    # Other domains summary line
+    # -----------------------------
+    other_bits: list[str] = []
+    if apob_measured and ldl_measured:
+        other_bits.append(f"LDL-C {_fmt_val_unit(_fmt_num(ldl_v, 0), 'mg/dL')} (ApoB preferred)")
+
+    for d in other:
+        r = d.get("row") or {}
+        if d["name"] == "Smoking":
+            if r.get("patient") in ("No", "Unmeasured"):
+                other_bits.append(f"Smoking {r['patient']}")
+        if d["name"] == "Inflammation":
+            if r.get("patient") in ("Unmeasured",) or (r.get("effect") == "—"):
+                other_bits.append(f"hsCRP {r.get('patient')}")
+        if d["name"] == "Genetics":
+            if r.get("patient") in ("Unmeasured",) or (r.get("effect") == "—"):
+                other_bits.append(f"Lp(a) {r.get('patient')}")
+
+    other_bits_clean: list[str] = []
+    _seen_o = set()
+    for s in other_bits:
+        k = str(s).strip().lower()
+        if k and k not in _seen_o:
+            _seen_o.add(k)
+            other_bits_clean.append(s)
+
+    other_line = ""
+    if other_bits_clean:
+        other_line = (
+            "<div class='rc2-inline-note'><b>Other domains:</b> "
+            + _html.escape(" • ".join(other_bits_clean))
+            + "</div>"
+        )
+
+    # -----------------------------
+    # Active signals summary line (what is actually driving signal)
+    # -----------------------------
+    active_bits: list[str] = []
+    for d in shown:
+        r = d.get("row") or {}
+        eff = str(r.get("effect") or "").strip()
+        pat = str(r.get("patient") or "").strip()
+        if eff in ("Mild signal", "Major driver", "Near boundary") and pat and pat != "Unmeasured":
+            active_bits.append(f"{r.get('marker')} {pat} ({eff})")
+
+    active_bits_clean: list[str] = []
+    _seen_a = set()
+    for s in active_bits:
+        k = s.lower().strip()
+        if k and k not in _seen_a:
+            _seen_a.add(k)
+            active_bits_clean.append(s)
+
+    signal_summary = ""
+    if active_bits_clean:
+        signal_summary = (
+            "<div class='rc2-inline-note'><b>Active signals:</b> "
+            + _html.escape(" • ".join(active_bits_clean))
+            + "</div>"
+        )
 
     # -----------------------------
     # Active chip (single best signal)
     # -----------------------------
     def _chip_text() -> str:
-        # prefer atherogenic, then glycemia, then genetics, then inflammation, then smoking
         for name in ("Atherogenic burden", "Glycemia", "Genetics", "Inflammation", "Smoking"):
             for d in shown:
                 if d["name"] != name:
                     continue
-                r = d["row"]
-                if not r:
-                    continue
-                if r["patient"] and r["patient"] != "Unmeasured":
-                    return f"{r['marker']} {r['patient']}"
+                r = d.get("row") or {}
+                pat = str(r.get("patient") or "").strip()
+                if pat and pat != "Unmeasured":
+                    return f"{r.get('marker')} {pat}"
         return ""
 
     chip_txt = _chip_text()
@@ -1981,46 +2009,39 @@ def render_criteria_table_compact(
 """
 
     # Build rows
-    rows_html = []
+    rows_html: list[str] = []
     for d in shown:
-        r = d["row"]
+        r = d.get("row") or {}
         if not r:
             continue
-        rows_html.append(_domain_header(d["name"], d["note"], active=(d["status"] == "active")))
 
-        patient_text = r["patient"]
+        rows_html.append(_domain_header(d["name"], d.get("note"), active=(d.get("status") == "active")))
+
+        patient_text = str(r.get("patient") or "").strip()
         patient_is_unmeasured = (patient_text == "Unmeasured")
         patient_cell = _cell(
             (_html.escape(patient_text) if patient_text else "—"),
             muted=patient_is_unmeasured,
             ring=bool(r.get("ring") and (not patient_is_unmeasured)),
         )
-        # italicize "Unmeasured"
         if patient_is_unmeasured:
             patient_cell = patient_cell.replace("Unmeasured", "<i>Unmeasured</i>")
 
-        effect_text = _html.escape(r["effect"])
+        effect_text = _html.escape(str(r.get("effect") or "—"))
         effect = f"{effect_text} {_tag_html(r.get('tag'))}".strip()
 
         rows_html.append(f"""
 <div class="rc2-row">
-  {_cell(_html.escape(r["marker"]))}
-  {_cell(_html.escape(r["cond"]), muted=False)}
+  {_cell(_html.escape(str(r.get("marker") or "—")))}
+  {_cell(_html.escape(str(r.get("cond") or "—")))}
   {patient_cell}
   <div class="rc2-cell">{effect}</div>
 </div>
 """)
 
-    # Data gaps + other domains lines
-    gaps_line = ""
-    if data_gaps_clean:
-        gaps_line = "<div class='rc2-inline-note'><b>Data gaps:</b> " + _html.escape(", ".join(data_gaps_clean)) + "</div>"
-
-    other_line = ""
-    if other_bits_clean:
-        other_line = "<div class='rc2-inline-note'><b>Other domains:</b> " + _html.escape(" • ".join(other_bits_clean)) + "</div>"
-
+    # -----------------------------
     # Final HTML
+    # -----------------------------
     html = f"""
 <style>
   .rc2-wrap {{
@@ -2167,6 +2188,7 @@ def render_criteria_table_compact(
 
   <div class="fig-cap">Single-row-per-domain summary; “Unmeasured” indicates missing data.</div>
 
+  {signal_summary}
   {gaps_line}
   {other_line}
 
@@ -2178,7 +2200,6 @@ def render_criteria_table_compact(
 </div>
 """
     return html
-
 
 # ============================================================
 # CKM Vertical Rail helpers
@@ -2714,6 +2735,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
