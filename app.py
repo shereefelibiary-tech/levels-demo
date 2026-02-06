@@ -2283,12 +2283,6 @@ with tab_report:
     note_for_emr = scrub_terms(note_for_emr)
     note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
 
-    # Optional: append CKM context to EMR note (string-safe)
-    if ckm_copy.get("headline"):
-        note_for_emr += "\n\nCKM context:\n" + str(ckm_copy.get("headline"))
-        if ckm_copy.get("detail"):
-            note_for_emr += "\n" + str(ckm_copy.get("detail"))
-
     emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
 
 # ------------------------------------------------------------
@@ -2430,6 +2424,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
