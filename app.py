@@ -2482,7 +2482,7 @@ with tab_report:
     {level}{f" ({sub})" if sub else ""} — {LEVEL_NAMES.get(level,'—')}
   </div>
 
-  {f"<div class='kvline'><b>CKM/CKD:</b> {_html.escape(_ckmckd_line)}</div>" if _ckmckd_line else ""}
+    {f"<div class='kvline'><b>CKM:</b> {_html.escape(_ckmckd_line)}</div>" if _ckmckd_line else ""}
 
   <div class="kvline">
     <b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))}
@@ -2787,6 +2787,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
