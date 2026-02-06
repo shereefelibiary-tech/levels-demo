@@ -24,9 +24,17 @@ def _v4_to_legacy(v4: dict) -> dict:
     Translate v4 payload into the legacy shape expected by app.py.
     Minimal bridge; expand only when the app needs more.
     """
+
     level_num = int(v4.get("level_num") or 2)
-    sublevel = v4.get("sublevel")  # "2A"/"2B"/"3A"/"3B" or None
-    enh_txt = v4.get("level_enhancers_text", "") or ""  # e.g. " (elevated Lp[a])"
+    sublevel_raw = v4.get("sublevel")  # "2A"/"2B"/"3A"/"3B" or None
+    s = str(sublevel_raw).strip().upper() if sublevel_raw else None
+
+    enh_txt = str(v4.get("level_enhancers_text") or "").strip()
+    # ensure enhancer text formats as a parenthetical when present
+    if enh_txt and not enh_txt.startswith("("):
+        enh_txt = f"({enh_txt})"
+    if enh_txt and not enh_txt.startswith(" "):
+        enh_txt = " " + enh_txt
 
     LEVEL_MEANINGS = {
         1: "Minimal risk signal",
@@ -42,14 +50,16 @@ def _v4_to_legacy(v4: dict) -> dict:
         "3B": "Level 3B — Actionable biology + enhancers",
     }
 
-    s = str(sublevel).strip().upper() if sublevel else None
     if s and s in SUBLEVEL_LABELS:
         label = SUBLEVEL_LABELS[s] + enh_txt
     else:
         label = f"Level {level_num} — {LEVEL_MEANINGS.get(level_num, '—')}" + enh_txt
 
+    plaque_status = v4.get("plaque_status", "Unknown")
+    plaque_burden = v4.get("plaque_burden", "Not quantified")
+
     return {
-        "version": v4.get("version", {}),   # optional passthrough
+        "version": v4.get("version", {}),
         "system": v4.get("system", "Risk Continuum"),
 
         "levels": {
@@ -58,14 +68,18 @@ def _v4_to_legacy(v4: dict) -> dict:
             "sublevel": s if s else None,
             "label": label,
 
+            # Needed for EMR note render_quick_text()
+            "plaqueEvidence": plaque_status,
+            "plaqueBurden": plaque_burden,
+
             "decisionConfidence": v4.get("decision_confidence", "—"),
             "decisionStability": v4.get("decision_stability", "—"),
             "decisionStabilityNote": v4.get("decision_stability_note", ""),
 
             "evidence": {
                 "clinical_ascvd": bool(v4.get("clinical_ascvd", False)),
-                "cac_status": v4.get("plaque_status", "Unknown"),
-                "burden_band": v4.get("plaque_burden", "Not quantified"),
+                "cac_status": plaque_status,
+                "burden_band": plaque_burden,
                 "cac_value": v4.get("cac_value", None),
             },
 
@@ -87,22 +101,18 @@ def _v4_to_legacy(v4: dict) -> dict:
         },
 
         "insights": {
-            # CKM
             "ckm_copy": {
                 "headline": v4.get("ckm_text", ""),
                 "detail": v4.get("ckm_detail", ""),
             },
-            # CKD (display-only insight)
             "ckd_copy": {
                 "headline": v4.get("ckd_text", ""),
                 "detail": v4.get("ckd_detail", ""),
             },
 
-            # CAC + aspirin (canonical copy)
             "cac_copy": v4.get("cac_copy", {}),
             "aspirin_copy": v4.get("aspirin_copy", {}),
 
-            # Optional passthroughs
             "risk_driver_pattern": v4.get("risk_driver_pattern", {}),
             "cac_decision_support": v4.get("cac_decision_support", {}),
             "ckm_context": v4.get("ckm_context", {}),
@@ -111,7 +121,6 @@ def _v4_to_legacy(v4: dict) -> dict:
         "anchors": v4.get("anchors", {}),
         "trace": v4.get("trace", []),
     }
-
 
 # -------------------------------------------------------------------
 # The TS-like contract generator (unchanged legacy helper)
