@@ -1106,9 +1106,6 @@ ENGINE_CACHE_SALT = (
     + str(ENGINE_VERSION)
 )
 
-
-ENGINE_VERSION = "v4"  # switch here: "legacy" or "v4"
-
 def run_engine_uncached(data_json: str):
     data_in = json.loads(data_json)
     p = Patient(data_in)
@@ -1893,20 +1890,6 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
         return "ckm-stage is-active" if (active_stage is not None and stage == active_stage) else "ckm-stage"
 
     return f"""
-    <!-- CKM Vertical Rail -->
-    <style>
-      /* (CSS exactly as provided earlier — keep unchanged) */
-    </style>
-
-    <div class="ckm-rail">
-      ...
-    </div>
-    """
-def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
-    def cls(stage: int) -> str:
-        return "ckm-stage is-active" if (active_stage is not None and stage == active_stage) else "ckm-stage"
-
-    return f"""
 <style>
   :root{{
     --ckm-text: rgba(17,24,39,0.92);
@@ -2092,7 +2075,7 @@ with tab_report:
     with left:
         st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
     with right:
-        components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=210)
+        components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=240)
 
 
     stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
@@ -2438,6 +2421,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
