@@ -1492,379 +1492,693 @@ def render_criteria_table_compact(
     smoker_v,
     diabetes_v,
 ) -> str:
+    """
+    Compact, high-yield signal table (single-row-per-domain) with explicit "Unmeasured".
+
+    Design:
+    - One primary row per domain (Atherogenic, Glycemia, Inflammation, Genetics, Smoking).
+    - Explicit "Unmeasured" for missing key clarifiers (ApoB/LDL and Lp(a)).
+    - Collapses normal/unused domains into a single "Other domains" line.
+    - Adds a "Data gaps" line for missing key clarifiers.
+
+    No placeholders. Paste-ready.
+    """
+
     def _fmt_num(x, decimals=0):
         if x is None:
-            return "—"
+            return None
         try:
             fx = float(x)
         except Exception:
-            return "—"
+            return None
         if decimals <= 0:
             return str(int(round(fx)))
         return f"{fx:.{decimals}f}"
 
-    def _in_range(v, lo=None, hi=None):
-        if v is None:
-            return False
+    def _fmt_val_unit(num_str: str | None, unit: str | None) -> str | None:
+        if not num_str:
+            return None
+        u = (unit or "").strip()
+        return f"{num_str} {u}".strip() if u else num_str
+
+    def _is_num(x) -> bool:
         try:
-            v = float(v)
+            float(x)
+            return True
         except Exception:
             return False
-        if lo is not None and v < lo:
-            return False
-        if hi is not None and v > hi:
-            return False
-        return True
 
-    apob_measured = apob_v is not None
-    use_ldl = (not apob_measured) and (ldl_v is not None)
+    # -----------------------------
+    # Domain builders
+    # -----------------------------
+    domains = []
 
-    # ------------------------------------------------------------
-    # Atherogenic
-    # ------------------------------------------------------------
-    apob_mild  = apob_measured and _in_range(apob_v, 80, 99)
-    apob_major = apob_measured and _in_range(apob_v, 100, None)
+    # Atherogenic (ApoB preferred; LDL only if ApoB not measured)
+    apob_measured = _is_num(apob_v)
+    ldl_measured = _is_num(ldl_v)
+    athero_status = "normal"
+    athero_row = None
+    athero_note = "ApoB preferred"
 
-    ldl_mild  = use_ldl and _in_range(ldl_v, 100, 129)
-    ldl_major = use_ldl and _in_range(ldl_v, 130, None)
-
-    # ------------------------------------------------------------
-    # Glycemia
-    # ------------------------------------------------------------
-    a1c_mild1 = _in_range(a1c_v, 5.7, 6.1)
-    a1c_mild2 = _in_range(a1c_v, 6.2, 6.4)
-    a1c_major = bool(diabetes_v) or _in_range(a1c_v, 6.5, None)
-
-    # ------------------------------------------------------------
-    # Inflammation
-    # ------------------------------------------------------------
-    hscrp_mild = _in_range(hscrp_v, 2.0, None)
-
-    # ------------------------------------------------------------
-    # Genetics
-    # ------------------------------------------------------------
-    lpa_present = (lpa_v is not None and lpa_unit_v in ("nmol/L", "mg/dL"))
-    lpa_major = False
-    if lpa_present:
-        if lpa_unit_v == "nmol/L":
-            lpa_major = _in_range(lpa_v, 125, None)
+    if apob_measured:
+        ap = float(apob_v)
+        ap_txt = _fmt_val_unit(_fmt_num(ap, 0), "mg/dL")
+        if ap >= 100:
+            athero_status = "active"
+            athero_row = {
+                "marker": "ApoB",
+                "cond": "≥100 mg/dL",
+                "patient": ap_txt,
+                "effect": "Major driver",
+                "tag": "major",
+                "ring": True,
+            }
+        elif 80 <= ap <= 99:
+            athero_status = "active"
+            athero_row = {
+                "marker": "ApoB",
+                "cond": "80–99 mg/dL",
+                "patient": ap_txt,
+                "effect": "Mild signal",
+                "tag": "mild",
+                "ring": True,
+            }
         else:
-            lpa_major = _in_range(lpa_v, 50, None)
+            athero_status = "normal"
+            athero_row = {
+                "marker": "ApoB",
+                "cond": "<80 mg/dL",
+                "patient": ap_txt,
+                "effect": "—",
+                "tag": None,
+                "ring": False,
+            }
+    else:
+        # ApoB not measured; LDL can be used if available
+        if ldl_measured:
+            ld = float(ldl_v)
+            ld_txt = _fmt_val_unit(_fmt_num(ld, 0), "mg/dL")
+            if ld >= 130:
+                athero_status = "active"
+                athero_row = {
+                    "marker": "LDL-C",
+                    "cond": "≥130 mg/dL (ApoB unmeasured)",
+                    "patient": ld_txt,
+                    "effect": "Major driver",
+                    "tag": "major",
+                    "ring": True,
+                }
+                athero_note = "LDL used (ApoB unmeasured)"
+            elif 100 <= ld <= 129:
+                athero_status = "active"
+                athero_row = {
+                    "marker": "LDL-C",
+                    "cond": "100–129 mg/dL (ApoB unmeasured)",
+                    "patient": ld_txt,
+                    "effect": "Mild signal",
+                    "tag": "mild",
+                    "ring": True,
+                }
+                athero_note = "LDL used (ApoB unmeasured)"
+            else:
+                athero_status = "normal"
+                athero_row = {
+                    "marker": "LDL-C",
+                    "cond": "<100 mg/dL (ApoB unmeasured)",
+                    "patient": ld_txt,
+                    "effect": "—",
+                    "tag": None,
+                    "ring": False,
+                }
+                athero_note = "LDL used (ApoB unmeasured)"
+        else:
+            athero_status = "unmeasured"
+            athero_row = {
+                "marker": "ApoB/LDL-C",
+                "cond": "ApoB preferred (LDL proxy if ApoB unmeasured)",
+                "patient": "Unmeasured",
+                "effect": "Unmeasured",
+                "tag": None,
+                "ring": False,
+            }
 
-    # ------------------------------------------------------------
+    domains.append({
+        "name": "Atherogenic burden",
+        "note": athero_note,
+        "status": athero_status,
+        "row": athero_row,
+        "key_clarifier": (not apob_measured),
+    })
+
+    # Glycemia (A1c + diabetes flag)
+    gly_status = "normal"
+    gly_row = None
+    a1c_measured = _is_num(a1c_v)
+
+    if bool(diabetes_v) is True:
+        gly_status = "active"
+        val = _fmt_val_unit(_fmt_num(a1c_v, 1) if a1c_measured else None, "%")
+        gly_row = {
+            "marker": "A1c",
+            "cond": "≥6.5% or diabetes=true",
+            "patient": val if val else "Diabetes=true",
+            "effect": "Major driver",
+            "tag": "major",
+            "ring": bool(val is not None),
+        }
+    elif a1c_measured:
+        a = float(a1c_v)
+        a_txt = _fmt_val_unit(_fmt_num(a, 1), "%")
+        if a >= 6.5:
+            gly_status = "active"
+            gly_row = {
+                "marker": "A1c",
+                "cond": "≥6.5%",
+                "patient": a_txt,
+                "effect": "Major driver",
+                "tag": "major",
+                "ring": True,
+            }
+        elif 6.2 <= a <= 6.4:
+            gly_status = "active"
+            gly_row = {
+                "marker": "A1c",
+                "cond": "6.2–6.4%",
+                "patient": a_txt,
+                "effect": "Near boundary",
+                "tag": "mild",
+                "ring": True,
+            }
+        elif 5.7 <= a <= 6.1:
+            gly_status = "active"
+            gly_row = {
+                "marker": "A1c",
+                "cond": "5.7–6.1%",
+                "patient": a_txt,
+                "effect": "Mild signal",
+                "tag": "mild",
+                "ring": True,
+            }
+        else:
+            gly_status = "normal"
+            gly_row = {
+                "marker": "A1c",
+                "cond": "<5.7%",
+                "patient": a_txt,
+                "effect": "—",
+                "tag": None,
+                "ring": False,
+            }
+    else:
+        gly_status = "unmeasured"
+        gly_row = {
+            "marker": "A1c",
+            "cond": "—",
+            "patient": "Unmeasured",
+            "effect": "Unmeasured",
+            "tag": None,
+            "ring": False,
+        }
+
+    domains.append({
+        "name": "Glycemia",
+        "note": None,
+        "status": gly_status,
+        "row": gly_row,
+        "key_clarifier": False,
+    })
+
+    # Inflammation (hsCRP only; chronic inflammatory disease flags not passed here)
+    infl_measured = _is_num(hscrp_v)
+    infl_status = "normal"
+    infl_row = None
+
+    if infl_measured:
+        h = float(hscrp_v)
+        h_txt = _fmt_val_unit(_fmt_num(h, 1), "mg/L")
+        if h >= 2.0:
+            infl_status = "active"
+            infl_row = {
+                "marker": "hsCRP",
+                "cond": "≥2.0 mg/L",
+                "patient": h_txt,
+                "effect": "Mild signal",
+                "tag": "mild",
+                "ring": True,
+            }
+        else:
+            infl_status = "normal"
+            infl_row = {
+                "marker": "hsCRP",
+                "cond": "<2.0 mg/L",
+                "patient": h_txt,
+                "effect": "—",
+                "tag": None,
+                "ring": False,
+            }
+    else:
+        infl_status = "unmeasured"
+        infl_row = {
+            "marker": "hsCRP",
+            "cond": "—",
+            "patient": "Unmeasured",
+            "effect": "Unmeasured",
+            "tag": None,
+            "ring": False,
+        }
+
+    domains.append({
+        "name": "Inflammation",
+        "note": None,
+        "status": infl_status,
+        "row": infl_row,
+        "key_clarifier": False,
+    })
+
+    # Genetics (Lp(a))
+    lpa_measured = _is_num(lpa_v) and (str(lpa_unit_v or "").strip() in ("nmol/L", "mg/dL"))
+    gen_status = "normal"
+    gen_row = None
+
+    if lpa_measured:
+        val = float(lpa_v)
+        unit = str(lpa_unit_v).strip()
+        threshold = 125.0 if unit == "nmol/L" else 50.0
+        v_txt = _fmt_val_unit(_fmt_num(val, 0), unit)
+        if val >= threshold:
+            gen_status = "active"
+            gen_row = {
+                "marker": "Lp(a)",
+                "cond": f"≥{int(threshold)} {unit}",
+                "patient": v_txt,
+                "effect": "Major driver",
+                "tag": "major",
+                "ring": True,
+            }
+        else:
+            gen_status = "normal"
+            gen_row = {
+                "marker": "Lp(a)",
+                "cond": f"<{int(threshold)} {unit}",
+                "patient": v_txt,
+                "effect": "—",
+                "tag": None,
+                "ring": False,
+            }
+    else:
+        gen_status = "unmeasured"
+        gen_row = {
+            "marker": "Lp(a)",
+            "cond": "≥125 nmol/L or ≥50 mg/dL",
+            "patient": "Unmeasured",
+            "effect": "Unmeasured",
+            "tag": None,
+            "ring": False,
+        }
+
+    domains.append({
+        "name": "Genetics",
+        "note": None,
+        "status": gen_status,
+        "row": gen_row,
+        "key_clarifier": True,  # you treat Lp(a) as a clarifier
+    })
+
     # Smoking
-    # ------------------------------------------------------------
-    smoking_major = bool(smoker_v)
+    smoke_known = smoker_v is not None
+    smoke_yes = bool(smoker_v) if smoke_known else False
+    smoke_status = "normal"
+    smoke_row = None
 
-    dom_athero = bool(apob_mild or apob_major or ldl_mild or ldl_major)
-    dom_gly    = bool(a1c_mild1 or a1c_mild2 or a1c_major)
-    dom_infl   = bool(hscrp_mild)
-    dom_gen    = bool(lpa_major)
-    dom_smoke  = bool(smoking_major)
+    if smoke_known and smoke_yes:
+        smoke_status = "active"
+        smoke_row = {
+            "marker": "Smoking",
+            "cond": "Current smoking",
+            "patient": "Yes",
+            "effect": "Major driver",
+            "tag": "major",
+            "ring": True,
+        }
+    elif smoke_known and (not smoke_yes):
+        smoke_status = "normal"
+        smoke_row = {
+            "marker": "Smoking",
+            "cond": "Current smoking",
+            "patient": "No",
+            "effect": "—",
+            "tag": None,
+            "ring": False,
+        }
+    else:
+        smoke_status = "unmeasured"
+        smoke_row = {
+            "marker": "Smoking",
+            "cond": "Current smoking",
+            "patient": "Unmeasured",
+            "effect": "Unmeasured",
+            "tag": None,
+            "ring": False,
+        }
 
-    # ------------------------------------------------------------
-    # Cell builders
-    # ------------------------------------------------------------
-    def _cell(text, *, ring=False, muted=False, tag=None):
+    domains.append({
+        "name": "Smoking",
+        "note": None,
+        "status": smoke_status,
+        "row": smoke_row,
+        "key_clarifier": False,
+    })
+
+    # -----------------------------
+    # Decide what to show
+    # -----------------------------
+    shown = []
+    data_gaps = []
+    other = []
+
+    for d in domains:
+        if d["status"] == "unmeasured":
+            if d["key_clarifier"]:
+                data_gaps.append(d["row"]["marker"])
+                shown.append(d)
+            else:
+                other.append(d)
+        elif d["status"] == "active":
+            shown.append(d)
+        else:
+            other.append(d)
+
+    # Reduce clutter: if a domain is normal and not key clarifier, collapse it.
+    # Also, avoid showing Smoking block when "No" unless nothing else is shown.
+    filtered_shown = []
+    for d in shown:
+        if d["name"] == "Smoking" and d["status"] == "normal":
+            continue
+        filtered_shown.append(d)
+    shown = filtered_shown
+
+    # Ensure we always show at least atherogenic + glycemia blocks (they anchor the table),
+    # but keep to one row each.
+    def _ensure_present(name: str):
+        if any(x["name"] == name for x in shown):
+            return
+        for x in domains:
+            if x["name"] == name:
+                shown.append(x)
+                return
+
+    _ensure_present("Atherogenic burden")
+    _ensure_present("Glycemia")
+
+    # Order
+    order = {"Atherogenic burden": 1, "Glycemia": 2, "Inflammation": 3, "Genetics": 4, "Smoking": 5}
+    shown.sort(key=lambda x: order.get(x["name"], 99))
+
+    # Other domains summary line
+    other_bits = []
+    # If ApoB measured and LDL also measured, summarize LDL as context
+    if apob_measured and ldl_measured:
+        other_bits.append(f"LDL-C {_fmt_val_unit(_fmt_num(ldl_v, 0), 'mg/dL')} (ApoB preferred)")
+    # Add normal domains succinctly
+    for d in other:
+        r = d["row"]
+        if not r:
+            continue
+        if d["name"] == "Smoking":
+            if r["patient"] in ("No", "Unmeasured"):
+                other_bits.append(f"Smoking {r['patient']}")
+        if d["name"] == "Inflammation":
+            if r["patient"] in ("Unmeasured",) or (r["effect"] == "—"):
+                other_bits.append(f"hsCRP {r['patient']}")
+        if d["name"] == "Genetics":
+            if r["patient"] in ("Unmeasured",) or (r["effect"] == "—"):
+                other_bits.append(f"Lp(a) {r['patient']}")
+
+    # Deduplicate other bits (case-insensitive)
+    seen = set()
+    other_bits_clean = []
+    for s in other_bits:
+        k = str(s).strip().lower()
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        other_bits_clean.append(s)
+
+    data_gaps_clean = []
+    seen_g = set()
+    for g in data_gaps:
+        k = str(g).strip().lower()
+        if not k or k in seen_g:
+            continue
+        seen_g.add(k)
+        data_gaps_clean.append(g)
+
+    # -----------------------------
+    # Active chip (single best signal)
+    # -----------------------------
+    def _chip_text() -> str:
+        # prefer atherogenic, then glycemia, then genetics, then inflammation, then smoking
+        for name in ("Atherogenic burden", "Glycemia", "Genetics", "Inflammation", "Smoking"):
+            for d in shown:
+                if d["name"] != name:
+                    continue
+                r = d["row"]
+                if not r:
+                    continue
+                if r["patient"] and r["patient"] != "Unmeasured":
+                    return f"{r['marker']} {r['patient']}"
+        return ""
+
+    chip_txt = _chip_text()
+    chip_html = f"<span class='fig-chip'>{_html.escape(chip_txt)}</span>" if chip_txt else ""
+
+    # -----------------------------
+    # HTML rendering helpers
+    # -----------------------------
+    def _tag_html(tag: str | None) -> str:
+        if tag == "major":
+            return "<span class='rc2-tag'>major</span>"
+        if tag == "mild":
+            return "<span class='rc2-tag'>mild</span>"
+        return ""
+
+    def _cell(text: str, *, muted=False, ring=False) -> str:
         cls = "rc2-cell"
         if muted:
             cls += " rc2-muted"
         if ring:
             cls += " rc2-ring"
-        tag_html = f"<span class='rc2-tag'>{tag}</span>" if tag else ""
-        return f"<div class='{cls}'>{text}{tag_html}</div>"
+        return f"<div class='{cls}'>{text}</div>"
 
-    def _patient_cell(value_text: str, match: bool):
-        """
-        Show patient value only in the matching row.
-        Non-matching rows show a blank patient cell (reference-only),
-        which prevents the same value from appearing in multiple rows.
-        """
-        if match:
-            return _cell(value_text, ring=True, muted=False)
-        return _cell("&nbsp;", muted=True)  # blank but keeps row height stable
-
-    def _domain_header(name, active=False, right_note=""):
+    def _domain_header(name: str, note: str | None, active: bool) -> str:
         a = " rc2-domain-active" if active else ""
-        rn = f"<div class='rc2-domain-note'>{right_note}</div>" if right_note else "<div></div>"
+        rn = f"<div class='rc2-domain-note'>{_html.escape(note)}</div>" if note else "<div></div>"
         return f"""
 <div class="rc2-domain{a}">
-  <div class="rc2-domain-title">{name}</div>
+  <div class="rc2-domain-title">{_html.escape(name)}</div>
   {rn}
 </div>
 """
 
-    # ------------------------------------------------------------
-    # Active chip text: the strongest matching row
-    # ------------------------------------------------------------
-    def _active_chip_text() -> str:
-        if apob_measured and apob_v is not None and (apob_mild or apob_major):
-            return f"ApoB {_fmt_num(apob_v)} mg/dL"
-        if (not apob_measured) and (ldl_v is not None) and (ldl_mild or ldl_major):
-            return f"LDL-C {_fmt_num(ldl_v)} mg/dL"
+    # Build rows
+    rows_html = []
+    for d in shown:
+        r = d["row"]
+        if not r:
+            continue
+        rows_html.append(_domain_header(d["name"], d["note"], active=(d["status"] == "active")))
 
-        if a1c_v is not None and (a1c_mild1 or a1c_mild2 or a1c_major):
-            return f"A1c {_fmt_num(a1c_v, decimals=1)}%"
+        patient_text = r["patient"]
+        patient_is_unmeasured = (patient_text == "Unmeasured")
+        patient_cell = _cell(
+            (_html.escape(patient_text) if patient_text else "—"),
+            muted=patient_is_unmeasured,
+            ring=bool(r.get("ring") and (not patient_is_unmeasured)),
+        )
+        # italicize "Unmeasured"
+        if patient_is_unmeasured:
+            patient_cell = patient_cell.replace("Unmeasured", "<i>Unmeasured</i>")
 
-        if hscrp_v is not None and hscrp_mild:
-            return f"hsCRP {_fmt_num(hscrp_v, decimals=1)} mg/L"
+        effect_text = _html.escape(r["effect"])
+        effect = f"{effect_text} {_tag_html(r.get('tag'))}".strip()
 
-        if lpa_present and lpa_major:
-            return f"Lp(a) {_fmt_num(lpa_v)} {lpa_unit_v}"
-
-        if smoking_major:
-            return "Smoking: Yes"
-
-        # fallback context (measured values, no match)
-        if apob_measured and apob_v is not None:
-            return f"ApoB {_fmt_num(apob_v)} mg/dL"
-        if a1c_v is not None:
-            return f"A1c {_fmt_num(a1c_v, decimals=1)}%"
-        if lpa_present:
-            return f"Lp(a) {_fmt_num(lpa_v)} {lpa_unit_v}"
-        if hscrp_v is not None:
-            return f"hsCRP {_fmt_num(hscrp_v, decimals=1)} mg/L"
-        if smoker_v is not None:
-            return "Smoking: Yes" if smoker_v else "Smoking: No"
-        return ""
-
-    # ------------------------------------------------------------
-    # Figure header (title + chip + caption)
-    # ------------------------------------------------------------
-    active_txt = _active_chip_text()
-    chip_html = f"<span class='fig-chip'>{active_txt}</span>" if active_txt else ""
-
-    fig_header = f"""
-<div class="fig-title-row">
-  <div class="fig-title">Where this patient falls</div>
-  {chip_html}
-</div>
-<div class="fig-cap">Circled row shows the patient’s matching range; other rows are reference thresholds.</div>
-"""
-
-    # ------------------------------------------------------------
-    # ATHEROGENIC BURDEN
-    # ------------------------------------------------------------
-    athero_rows = []
-
-    if apob_measured:
-        apob_txt = f"{_fmt_num(apob_v)} mg/dL"
-        athero_rows.append(f"""
+        rows_html.append(f"""
 <div class="rc2-row">
-  {_cell("ApoB")}
-  {_cell("80–99 mg/dL")}
-  {_patient_cell(apob_txt, apob_mild)}
-  {_cell("Mild signal", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("≥100 mg/dL")}
-  {_patient_cell(apob_txt, apob_major)}
-  {_cell("Major driver", tag="major")}
-</div>
-""")
-    else:
-        athero_rows.append(f"""
-<div class="rc2-row">
-  {_cell("ApoB")}
-  {_cell("—")}
-  {_cell("—", muted=True)}
-  {_cell("Not measured", muted=True)}
+  {_cell(_html.escape(r["marker"]))}
+  {_cell(_html.escape(r["cond"]), muted=False)}
+  {patient_cell}
+  <div class="rc2-cell">{effect}</div>
 </div>
 """)
 
-    ldl_txt = f"{_fmt_num(ldl_v)} mg/dL" if ldl_v is not None else "—"
+    # Data gaps + other domains lines
+    gaps_line = ""
+    if data_gaps_clean:
+        gaps_line = "<div class='rc2-inline-note'><b>Data gaps:</b> " + _html.escape(", ".join(data_gaps_clean)) + "</div>"
 
-    if use_ldl:
-        athero_rows.append(f"""
-<div class="rc2-row">
-  {_cell("LDL-C")}
-  {_cell("100–129 mg/dL")}
-  {_patient_cell(ldl_txt, ldl_mild)}
-  {_cell("Mild signal", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("≥130 mg/dL")}
-  {_patient_cell(ldl_txt, ldl_major)}
-  {_cell("Major driver", tag="major")}
-</div>
-""")
-    else:
-        # ApoB measured OR LDL missing: show LDL as reference-only context
-        athero_rows.append(f"""
-<div class="rc2-row">
-  {_cell("LDL-C")}
-  {_cell("—")}
-  {_cell(ldl_txt if ldl_v is not None else "—", muted=True)}
-  {_cell("Used only if ApoB not measured", muted=True)}
-</div>
-""")
+    other_line = ""
+    if other_bits_clean:
+        other_line = "<div class='rc2-inline-note'><b>Other domains:</b> " + _html.escape(" • ".join(other_bits_clean)) + "</div>"
 
-    athero_block = _domain_header(
-        "Atherogenic burden",
-        active=dom_athero,
-        right_note=("ApoB preferred" if apob_measured else ("LDL used (ApoB not measured)" if ldl_v is not None else "ApoB preferred")),
-    ) + "\n".join(athero_rows)
-
-    # ------------------------------------------------------------
-    # GLYCEMIA
-    # ------------------------------------------------------------
-    a1c_txt = f"{_fmt_num(a1c_v, decimals=1)}%" if a1c_v is not None else "—"
-
-    gly_block = _domain_header("Glycemia", active=dom_gly) + f"""
-<div class="rc2-row">
-  {_cell("A1c")}
-  {_cell("5.7–6.1%")}
-  {_patient_cell(a1c_txt, a1c_mild1)}
-  {_cell("Mild signal", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("6.2–6.4%")}
-  {_patient_cell(a1c_txt, a1c_mild2)}
-  {_cell("Near boundary", tag="mild")}
-</div>
-<div class="rc2-row">
-  {_cell("")}
-  {_cell("≥6.5% or diabetes = true")}
-  {_patient_cell(a1c_txt, a1c_major)}
-  {_cell("Major driver", tag="major")}
-</div>
-"""
-
-    # ------------------------------------------------------------
-    # INFLAMMATION
-    # ------------------------------------------------------------
-    hscrp_txt = f"{_fmt_num(hscrp_v, decimals=1)} mg/L" if hscrp_v is not None else "—"
-
-    infl_block = _domain_header("Inflammation", active=dom_infl) + f"""
-<div class="rc2-row">
-  {_cell("hsCRP")}
-  {_cell("≥2.0 mg/L")}
-  {_patient_cell(hscrp_txt, hscrp_mild)}
-  {_cell("Mild signal", tag="mild")}
-</div>
-"""
-
-    # ------------------------------------------------------------
-    # GENETICS
-    # ------------------------------------------------------------
-    lpa_txt = f"{_fmt_num(lpa_v)} {lpa_unit_v}" if lpa_present else "—"
-
-    gen_block = _domain_header("Genetics", active=dom_gen) + f"""
-<div class="rc2-row">
-  {_cell("Lp(a)")}
-  {_cell("≥125 nmol/L or ≥50 mg/dL")}
-  {_patient_cell(lpa_txt, lpa_major)}
-  {_cell("Major driver", tag="major", muted=(not lpa_major))}
-</div>
-"""
-
-    # ------------------------------------------------------------
-    # SMOKING
-    # ------------------------------------------------------------
-    smoke_txt = "Yes" if smoking_major else "No"
-
-    smoke_block = _domain_header("Smoking", active=dom_smoke) + f"""
-<div class="rc2-row">
-  {_cell("Smoking")}
-  {_cell("Current smoking")}
-  {_cell(smoke_txt, ring=smoking_major, muted=(not smoking_major))}
-  {_cell("Major driver" if smoking_major else "—", tag=("major" if smoking_major else None), muted=(not smoking_major))}
-</div>
-"""
-
-    # ------------------------------------------------------------
-    # HTML + local CSS
-    # ------------------------------------------------------------
+    # Final HTML
     html = f"""
 <style>
   .rc2-wrap {{
-    border:1px solid rgba(31,41,55,0.12);
-    border-radius:12px;
-    background:#fff;
-    padding:12px 14px;
-    font-size:0.92rem;
-    line-height:1.25;
-    margin-top:10px;
+    border: 1px solid rgba(31,41,55,0.12);
+    border-radius: 12px;
+    background: #fff;
+    padding: 12px 14px;
+    font-size: 0.92rem;
+    line-height: 1.25;
+    margin-top: 10px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.06);
   }}
+
+  .rc2-inline-note {{
+    margin-top: 6px;
+    color: rgba(31,41,55,0.68);
+    font-size: 0.84rem;
+    line-height: 1.25;
+  }}
+  .rc2-inline-note b {{
+    font-weight: 900;
+    color: rgba(17,24,39,0.82);
+  }}
+
   .rc2-gridhead {{
-    display:grid;
-    grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
-    gap:8px;
-    padding:7px 0;
-    border-bottom:1px solid rgba(31,41,55,0.10);
-    color:rgba(31,41,55,0.65);
-    font-size:0.82rem;
-    font-weight:900;
+    display: grid;
+    grid-template-columns: 1.05fr 1.30fr 0.95fr 1.10fr;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(31,41,55,0.10);
+    color: rgba(31,41,55,0.65);
+    font-size: 0.82rem;
+    font-weight: 900;
+    margin-top: 8px;
   }}
+
   .rc2-domain {{
-    display:flex;
-    justify-content:space-between;
-    align-items:baseline;
-    margin-top:10px;
-    padding-top:8px;
-    border-top:1px solid rgba(31,41,55,0.08);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(31,41,55,0.08);
   }}
-  .rc2-domain-title {{ font-weight:950; color:#111827; font-size:0.88rem; }}
-  .rc2-domain-note {{ color:rgba(31,41,55,0.60); font-size:0.82rem; font-weight:800; }}
+  .rc2-domain-title {{
+    font-weight: 950;
+    color: #111827;
+    font-size: 0.88rem;
+  }}
+  .rc2-domain-note {{
+    color: rgba(31,41,55,0.60);
+    font-size: 0.82rem;
+    font-weight: 800;
+  }}
   .rc2-domain-active {{
     background: rgba(59,130,246,0.04);
-    border-radius:10px;
-    padding:6px 8px;
-    border:1px solid rgba(59,130,246,0.12);
+    border-radius: 10px;
+    padding: 6px 8px;
+    border: 1px solid rgba(59,130,246,0.12);
   }}
+
   .rc2-row {{
-    display:grid;
-    grid-template-columns: 1.05fr 1.15fr 0.95fr 1.25fr;
-    gap:8px;
-    padding:6px 0;
-    border-bottom:1px solid rgba(31,41,55,0.06);
-    align-items:start;
+    display: grid;
+    grid-template-columns: 1.05fr 1.30fr 0.95fr 1.10fr;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(31,41,55,0.06);
+    align-items: start;
   }}
-  .rc2-row:last-child {{ border-bottom:none; }}
-  .rc2-cell {{ margin:0; padding:0; color:#111827; }}
-  .rc2-muted {{ color:rgba(31,41,55,0.55); }}
+
+  .rc2-cell {{
+    margin: 0;
+    padding: 0;
+    color: #111827;
+  }}
+  .rc2-muted {{
+    color: rgba(31,41,55,0.55);
+  }}
+
   .rc2-ring {{
-    display:inline-block;
-    padding:2px 8px;
-    border-radius:999px;
-    border:2px solid rgba(59,130,246,0.85);
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 2px solid rgba(59,130,246,0.85);
     background: rgba(59,130,246,0.08);
-    font-weight:950;
+    font-weight: 950;
     width: fit-content;
   }}
+
   .rc2-tag {{
-    display:inline-block;
-    margin-left:6px;
-    font-size:0.74rem;
-    padding:2px 8px;
-    border-radius:999px;
-    border:1px solid rgba(31,41,55,0.16);
-    background:#fff;
-    font-weight:950;
-    color:rgba(31,41,55,0.80);
-    vertical-align:middle;
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 0.74rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(31,41,55,0.16);
+    background: #fff;
+    font-weight: 950;
+    color: rgba(31,41,55,0.80);
+    vertical-align: middle;
+  }}
+
+  .fig-title-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+  }}
+
+  .fig-title {{
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.14em;
+    font-weight: 975;
+    font-size: 1.08rem;
+    color: rgba(17,24,39,0.90);
+  }}
+
+  .fig-chip {{
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 2px solid rgba(59,130,246,0.85);
+    background: rgba(59,130,246,0.08);
+    font-weight: 950;
+    font-size: 0.84rem;
+    color: #111827;
+    white-space: nowrap;
+  }}
+
+  .fig-cap {{
+    margin: 0 0 8px 0;
+    color: rgba(17,24,39,0.62);
+    font-size: 0.84rem;
+    line-height: 1.25;
   }}
 </style>
 
 <div class="rc2-wrap">
-  {fig_header}
+  <div class="fig-title-row">
+    <div class="fig-title">Where this patient falls</div>
+    {chip_html}
+  </div>
+
+  <div class="fig-cap">Single-row-per-domain summary; “Unmeasured” indicates missing data.</div>
+
+  {gaps_line}
+  {other_line}
 
   <div class="rc2-gridhead">
     <div>Marker</div><div>Range / condition</div><div>Patient</div><div>Level effect</div>
   </div>
 
-  {athero_block}
-  {gly_block}
-  {infl_block}
-  {gen_block}
-  {smoke_block}
+  {''.join(rows_html)}
 </div>
 """
     return html
+
 
 # ============================================================
 # CKM Vertical Rail helpers
@@ -1886,181 +2200,164 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
 
 
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
-    """
-    Self-contained HTML+CSS CKM vertical rail.
-    Updates:
-      - Header is single-line: "Cardio-Kidney-Metabolic (CKM)" (no "SYNDROME" subtitle)
-      - Spine shortened (top/bottom padding increased) so it doesn't visually bleed downward
-      - Inactive stage text slightly stronger for readability
-    """
-    def cls(stage: int) -> str:
-        return "ckm-stage is-active" if (active_stage is not None and stage == active_stage) else "ckm-stage"
+    def stage_class(stage: int) -> str:
+        return "ckm-stage is-active" if active_stage == stage else "ckm-stage"
 
     return f"""
 <style>
-  .ckm-rail {{
-    --ckm-text: rgba(17,24,39,0.94);
-    --ckm-muted: rgba(31,41,55,0.55);
-    --ckm-line: rgba(31,41,55,0.18);
-    --ckm-fill: rgba(17,24,39,0.94);
-    --ckm-bg: rgba(249,250,251,0.70);
+  /* ================= CKM CARD ================= */
 
-    width: 240px;
-    min-width: 220px;
-    border: 1px solid var(--ckm-line);
-    background: var(--ckm-bg);
+  .ckm-card {{
+    border: 1px solid rgba(31,41,55,0.14);
     border-radius: 16px;
-    padding: 14px 14px 12px 14px;
-    display: flex;
-    gap: 12px;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfbfc 100%);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+    padding: 14px 16px;
+    width: 230px;
     box-sizing: border-box;
   }}
 
-  /* Header */
-  .ckm-head {{
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    min-width: 118px;
-  }}
-
-  .ckm-title {{
+  .ckm-header {{
     font-weight: 950;
+    font-size: 0.96rem;
     letter-spacing: -0.01em;
-    font-size: 0.90rem;
-    line-height: 1.15;
-    color: var(--ckm-text);
+    color: #111827;
+    margin-bottom: 10px;
   }}
 
-  /* Stage stack */
+  .ckm-subheader {{
+    font-size: 0.70rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    color: rgba(31,41,55,0.55);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+  }}
+
+  /* ================= STAGE STACK ================= */
+
   .ckm-stack {{
-    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 10px;
     position: relative;
-    padding: 6px 0;
+    padding-left: 18px;
   }}
 
   .ckm-stack::before {{
     content: "";
     position: absolute;
-    left: 9px;
-    top: 14px;
-    bottom: 14px;
+    left: 6px;
+    top: 6px;
+    bottom: 6px;
     width: 2px;
-    background: var(--ckm-line);
+    background: rgba(31,41,55,0.18);
     border-radius: 2px;
   }}
 
   .ckm-stage {{
-    display: grid;
-    grid-template-columns: 22px 1fr;
+    display: flex;
     gap: 10px;
     align-items: center;
-    padding: 6px 6px;
-    border-radius: 10px;
+    padding: 6px 8px;
+    border-radius: 12px;
   }}
 
   .ckm-dot {{
     width: 12px;
     height: 12px;
     border-radius: 999px;
-    border: 2px solid var(--ckm-line);
+    border: 2px solid rgba(31,41,55,0.35);
     background: #ffffff;
-    margin-left: 3px;
+    box-sizing: border-box;
     z-index: 1;
+    flex-shrink: 0;
   }}
 
   .ckm-label {{
     display: flex;
     flex-direction: column;
-    line-height: 1.15;
+    line-height: 1.2;
   }}
 
   .ckm-stage-name {{
-    font-size: 0.84rem;
-    font-weight: 750;
-    color: rgba(31,41,55,0.65);
+    font-size: 0.86rem;
+    font-weight: 850;
+    color: rgba(31,41,55,0.70);
   }}
 
   .ckm-stage-desc {{
     font-size: 0.74rem;
-    color: var(--ckm-muted);
+    color: rgba(31,41,55,0.55);
     margin-top: 2px;
   }}
 
-  /* Active stage */
+  /* ================= ACTIVE STATE ================= */
+
   .ckm-stage.is-active {{
-    background: rgba(255,255,255,0.85);
-    border: 1px solid var(--ckm-line);
+    background: rgba(59,130,246,0.06);
+    border: 1px solid rgba(59,130,246,0.22);
   }}
 
   .ckm-stage.is-active .ckm-dot {{
-    border-color: var(--ckm-fill);
-    background: var(--ckm-fill);
-    box-shadow: 0 0 0 3px rgba(17,24,39,0.12);
+    border-color: rgba(59,130,246,0.85);
+    background: rgba(59,130,246,0.85);
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.16);
   }}
 
   .ckm-stage.is-active .ckm-stage-name {{
-    color: var(--ckm-text);
-    font-weight: 900;
+    color: #111827;
+    font-weight: 950;
   }}
 
   .ckm-stage.is-active .ckm-stage-desc {{
-    color: rgba(31,41,55,0.72);
+    color: rgba(31,41,55,0.80);
   }}
 
-  .ckm-stage[title] {{
-    cursor: help;
-  }}
-
-  @media (max-width: 860px) {{
-    .ckm-rail {{ width: 220px; min-width: 200px; }}
-    .ckm-title {{ font-size: 0.86rem; }}
-  }}
 </style>
 
-<div class="ckm-rail" role="group" aria-label="Cardio-Kidney-Metabolic staging">
-  <div class="ckm-head">
-    <div class="ckm-title">Cardio-Kidney-Metabolic (CKM)</div>
-  </div>
+<div class="ckm-card" role="group" aria-label="Cardio-Kidney-Metabolic syndrome stage">
+  <div class="ckm-header">Cardio-Kidney-Metabolic (CKM)</div>
+  <div class="ckm-subheader">Syndrome stage</div>
 
   <div class="ckm-stack">
-    <div class="{cls(3)}" title="Stage 3: Clinical cardiovascular disease, heart failure, or advanced CKD.">
-      <div class="ckm-dot" aria-hidden="true"></div>
+
+    <div class="{stage_class(3)}">
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 3</div>
         <div class="ckm-stage-desc">Clinical disease / CKD</div>
       </div>
     </div>
 
-    <div class="{cls(2)}" title="Stage 2: Metabolic disease (e.g., diabetes) accelerating risk independent of plaque burden.">
-      <div class="ckm-dot" aria-hidden="true"></div>
+    <div class="{stage_class(2)}">
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 2</div>
         <div class="ckm-stage-desc">Metabolic disease</div>
       </div>
     </div>
 
-    <div class="{cls(1)}" title="Stage 1: Risk factors such as obesity, elevated BP, or dysglycemia.">
-      <div class="ckm-dot" aria-hidden="true"></div>
+    <div class="{stage_class(1)}">
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 1</div>
         <div class="ckm-stage-desc">Risk factors</div>
       </div>
     </div>
 
-    <div class="{cls(0)}" title="Stage 0: No CKM drivers identified.">
-      <div class="ckm-dot" aria-hidden="true"></div>
+    <div class="{stage_class(0)}">
+      <div class="ckm-dot"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 0</div>
         <div class="ckm-stage-desc">None identified</div>
       </div>
     </div>
+
   </div>
 </div>
 """
+
 
 
 
@@ -2422,6 +2719,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
