@@ -44,50 +44,79 @@ def extract_sex(raw: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Returns (sex, warning)
       sex: "M" | "F" | None
-    Supports:
-      - Sex: Male / Gender=f
-      - 57M / 63F / M57
-      - "57 yo male"
-      - "47 y/o M"
+
+    Priority order:
+      1) "Clinically relevant sex:" (Epic PCE block)
+      2) Explicit "Sex:" / "Gender:" / "Biological sex:" / "Sex assigned at birth:"
+      3) Compact forms: 57F, F57, "57 yo female", etc
+      4) Generic keywords as last resort
+
+    If both M and F appear, flags conflict only when high-signal evidence conflicts.
     """
     if not raw or not raw.strip():
         return None, "Sex not detected (empty text)"
 
     t = raw.lower()
-    hits: list[str] = []
 
-    explicit = re.findall(r"\b(sex|gender)\s*[:=]\s*(male|female|m|f|man|woman)\b", t)
-    for _, val in explicit:
-        hits.append(val)
+    def _norm(val: str) -> Optional[str]:
+        v = (val or "").strip().lower()
+        if v in ("m", "male", "man"):
+            return "M"
+        if v in ("f", "female", "woman"):
+            return "F"
+        return None
+
+    # 1) Highest priority: Epic-style field
+    m = re.search(
+        r"\bclinically\s+relevant\s+sex\s*:\s*(male|female|m|f|man|woman)\b",
+        t,
+        flags=re.I,
+    )
+    if m:
+        sex = _norm(m.group(1))
+        if sex:
+            return sex, None
+
+    # 2) High-signal explicit fields
+    explicit_fields = [
+        r"\bsex\s*assigned\s*at\s*birth\s*[:=]\s*(male|female|m|f|man|woman)\b",
+        r"\bbiological\s+sex\s*[:=]\s*(male|female|m|f|man|woman)\b",
+        r"\bsex\s*[:=]\s*(male|female|m|f|man|woman)\b",
+        r"\bgender\s*[:=]\s*(male|female|m|f|man|woman)\b",
+    ]
+    for pat in explicit_fields:
+        m = re.search(pat, t, flags=re.I)
+        if m:
+            sex = _norm(m.group(1))
+            if sex:
+                return sex, None
+
+    # 3) Medium-signal compact forms
+    hits: list[str] = []
 
     hits += re.findall(r"\b\d{1,3}\s*([mf])\b", t)
     hits += re.findall(r"\b([mf])\s*\d{1,3}\b", t)
     hits += re.findall(r"\b\d{1,3}\s*(?:yo|y/o|yr|yrs|year|years)\s*([mf])\b", t)
-
-    if re.search(r"\b(male|man)\b", t):
-        hits.append("male")
-    if re.search(r"\b(female|woman)\b", t):
-        hits.append("female")
+    hits += re.findall(r"\b\d{1,3}\s*(?:yo|y/o|yr|yrs|year|years)\s*(male|female)\b", t)
 
     norm: list[str] = []
     for h in hits:
-        if h in ("m", "male", "man"):
-            norm.append("M")
-        elif h in ("f", "female", "woman"):
-            norm.append("F")
+        sex = _norm(h)
+        if sex:
+            norm.append(sex)
 
-    if not norm:
-        # Fail-safe fallback: if a single explicit word is present anywhere, accept it.
-        if re.search(r"\bfemale\b", t):
-            return "F", None
-        if re.search(r"\bmale\b", t):
-            return "M", None
-        return None, "Sex not detected"
+    if norm:
+        if "M" in norm and "F" in norm:
+            return None, "Sex conflict detected (multiple formats suggest both M and F)"
+        return ("M" if "M" in norm else "F"), None
 
-    if "M" in norm and "F" in norm:
-        return None, "Sex conflict detected (both male and female found)"
+    # 4) Last resort keyword presence
+    if re.search(r"\bfemale\b", t):
+        return "F", None
+    if re.search(r"\bmale\b", t):
+        return "M", None
 
-    return ("M" if "M" in norm else "F"), None
+    return None, "Sex not detected"
 
 
 def extract_age(raw: str) -> Tuple[Optional[int], Optional[str]]:
@@ -268,7 +297,7 @@ def extract_bool_flags(raw: str) -> Dict[str, Optional[bool]]:
 
 def extract_lpa_unit(raw: str) -> Optional[str]:
     t = raw.lower()
-    m = re.search(r"(lp\(a\)|lpa|lipoprotein\s*\(a\)).{0,30}", t)
+    m = re.search(r"(lp\(a\)|lpa|lipoprotein\s*\(a\)|lipoa)\b.{0,40}", t)
     window = m.group(0) if m else t
 
     if re.search(r"\b(nmol\/l|nmol\s*\/\s*l)\b", window):
@@ -507,7 +536,16 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
 
     tg = _first_float(r"\b(?:triglycerides|trigs|tgs|tg)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
     apob = _first_float(r"\b(?:apo\s*b|apob)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+
+    # Lp(a) — robust: inline or Epic/LabCorp table component code (e.g., "LIPOA 96.1 (H) 12/22/2025")
     lpa = _first_float(r"\b(?:lp\(a\)|lpa|lipoprotein\s*\(a\))\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t)
+    if lpa is None:
+        lpa = _first_float(r"\blipoa\b[^\d]{0,20}(\d{1,6}(?:\.\d+)?)\b", t)
+    if lpa is None:
+        lpa = _first_float(
+            r"\blipoprotein\s*\(a\)\b[\s\S]{0,120}?\bvalue\b[\s\S]{0,60}?(\d{1,6}(?:\.\d+)?)\b",
+            t,
+        )
 
     a1c_table = _first_float(
         r"hemoglobin\s*a1c[\s\S]{0,300}?\b\d{1,2}/\d{1,2}/\d{2,4}\s+(\d{1,2}(?:\.\d+)?)\b",
