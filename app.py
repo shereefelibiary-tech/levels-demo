@@ -1888,9 +1888,11 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     """
     Self-contained HTML+CSS CKM vertical rail.
-    Active stage highlighted when active_stage is 0/1/2/3.
+    Updates:
+      - Header is single-line: "Cardio-Kidney-Metabolic (CKM)" (no "SYNDROME" subtitle)
+      - Spine shortened (top/bottom padding increased) so it doesn't visually bleed downward
+      - Inactive stage text slightly stronger for readability
     """
-
     def cls(stage: int) -> str:
         return "ckm-stage is-active" if (active_stage is not None and stage == active_stage) else "ckm-stage"
 
@@ -1919,24 +1921,15 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    min-width: 78px;
+    min-width: 118px;
   }}
 
   .ckm-title {{
     font-weight: 950;
     letter-spacing: -0.01em;
-    font-size: 0.92rem;
+    font-size: 0.90rem;
     line-height: 1.15;
     color: var(--ckm-text);
-  }}
-
-  .ckm-subtitle {{
-    font-size: 0.70rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: var(--ckm-muted);
-    margin-top: 4px;
-    text-transform: uppercase;
   }}
 
   /* Stage stack */
@@ -1953,8 +1946,8 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     content: "";
     position: absolute;
     left: 9px;
-    top: 6px;
-    bottom: 6px;
+    top: 14px;
+    bottom: 14px;
     width: 2px;
     background: var(--ckm-line);
     border-radius: 2px;
@@ -1987,8 +1980,8 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
 
   .ckm-stage-name {{
     font-size: 0.84rem;
-    font-weight: 700;
-    color: var(--ckm-muted);
+    font-weight: 750;
+    color: rgba(31,41,55,0.65);
   }}
 
   .ckm-stage-desc {{
@@ -2021,17 +2014,21 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
   .ckm-stage[title] {{
     cursor: help;
   }}
+
+  @media (max-width: 860px) {{
+    .ckm-rail {{ width: 220px; min-width: 200px; }}
+    .ckm-title {{ font-size: 0.86rem; }}
+  }}
 </style>
 
 <div class="ckm-rail" role="group" aria-label="Cardio-Kidney-Metabolic staging">
   <div class="ckm-head">
-    <div class="ckm-title">Cardio-Kidney-Metabolic</div>
-    <div class="ckm-subtitle">Syndrome</div>
+    <div class="ckm-title">Cardio-Kidney-Metabolic (CKM)</div>
   </div>
 
   <div class="ckm-stack">
     <div class="{cls(3)}" title="Stage 3: Clinical cardiovascular disease, heart failure, or advanced CKD.">
-      <div class="ckm-dot"></div>
+      <div class="ckm-dot" aria-hidden="true"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 3</div>
         <div class="ckm-stage-desc">Clinical disease / CKD</div>
@@ -2039,7 +2036,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     </div>
 
     <div class="{cls(2)}" title="Stage 2: Metabolic disease (e.g., diabetes) accelerating risk independent of plaque burden.">
-      <div class="ckm-dot"></div>
+      <div class="ckm-dot" aria-hidden="true"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 2</div>
         <div class="ckm-stage-desc">Metabolic disease</div>
@@ -2047,7 +2044,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     </div>
 
     <div class="{cls(1)}" title="Stage 1: Risk factors such as obesity, elevated BP, or dysglycemia.">
-      <div class="ckm-dot"></div>
+      <div class="ckm-dot" aria-hidden="true"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 1</div>
         <div class="ckm-stage-desc">Risk factors</div>
@@ -2055,7 +2052,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     </div>
 
     <div class="{cls(0)}" title="Stage 0: No CKM drivers identified.">
-      <div class="ckm-dot"></div>
+      <div class="ckm-dot" aria-hidden="true"></div>
       <div class="ckm-label">
         <div class="ckm-stage-name">Stage 0</div>
         <div class="ckm-stage-desc">None identified</div>
@@ -2064,6 +2061,7 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
   </div>
 </div>
 """
+
 
 
 # ============================================================
@@ -2424,6 +2422,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
