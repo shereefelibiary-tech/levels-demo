@@ -1886,6 +1886,27 @@ with tab_report:
 
     stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
 
+    # --- NEW: CKM/CKD inline line for Snapshot (v4 adapter provides ckm_copy + ckd_copy) ---
+    _ins = out.get("insights") or {}
+    _ckm_head = ""
+    try:
+        _ckm_head = str((_ins.get("ckm_copy") or {}).get("headline") or "").strip()
+    except Exception:
+        _ckm_head = ""
+    _ckd_head = ""
+    try:
+        _ckd_head = str((_ins.get("ckd_copy") or {}).get("headline") or "").strip()
+    except Exception:
+        _ckd_head = ""
+
+    _ckmckd_line = ""
+    if _ckm_head and _ckd_head:
+        _ckmckd_line = f"{_ckm_head} | {_ckd_head}"
+    elif _ckm_head:
+        _ckmckd_line = _ckm_head
+    elif _ckd_head:
+        _ckmckd_line = _ckd_head
+
     st.markdown(
         f"""
 <div class="block">
@@ -1894,6 +1915,8 @@ with tab_report:
   <div class="kvline"><b>Level:</b>
     {level}{f" ({sub})" if sub else ""} — {LEVEL_NAMES.get(level,'—')}
   </div>
+
+  {f"<div class='kvline'><b>CKM/CKD:</b> {_html.escape(_ckmckd_line)}</div>" if _ckmckd_line else ""}
 
   <div class="kvline">
     <b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))}
@@ -2204,6 +2227,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
