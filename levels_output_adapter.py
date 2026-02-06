@@ -4,22 +4,21 @@
 
 from typing import Any, Dict, List, Optional
 
-# levels_output_adapter.py
 
-def evaluate_unified(patient, engine_version="legacy"):
+def evaluate_unified(patient, engine_version: str = "legacy"):
     """
     Unified entry point for Risk Continuum evaluation.
     Keeps app insulated from engine refactors.
     """
-
     if engine_version == "v4":
         from levels_engine_v4 import evaluate_v4
         v4 = evaluate_v4(patient)
-        return _v4_to_legacy(v4)   # <-- this is the key change
+        return _v4_to_legacy(v4)
 
     # default / legacy
     from levels_engine import evaluate
     return evaluate(patient)
+
 
 def _v4_to_legacy(v4: dict) -> dict:
     """
@@ -27,18 +26,52 @@ def _v4_to_legacy(v4: dict) -> dict:
     Keep this minimal and expand only as needed.
     """
 
+    level_num = int(v4.get("level_num") or 2)
+    sublevel = v4.get("sublevel")  # e.g. "2A"/"2B"/"3A"/"3B" or None
+
+    # Base meanings (match app.py LEVEL_NAMES to keep UI consistent)
+    LEVEL_MEANINGS = {
+        1: "Minimal risk signal",
+        2: "Emerging risk signals",
+        3: "Actionable biologic risk",
+        4: "Subclinical atherosclerosis present",
+        5: "Very high risk / ASCVD intensity",
+    }
+    SUBLEVEL_LABELS = {
+        "2A": "Level 2A — Emerging (isolated / mild)",
+        "2B": "Level 2B — Emerging (converging / rising)",
+        "3A": "Level 3A — Actionable biology (limited enhancers)",
+        "3B": "Level 3B — Actionable biology + enhancers",
+    }
+
+    # v4 may optionally pass a pre-rendered enhancer parenthetical like " (elevated Lp[a])"
+    enh_txt = v4.get("level_enhancers_text", "") or ""
+
+    # Build a safe label for legacy render_quick_text()
+    if sublevel and str(sublevel) in SUBLEVEL_LABELS:
+        label = SUBLEVEL_LABELS[str(sublevel)] + enh_txt
+    else:
+        label = f"Level {level_num} — {LEVEL_MEANINGS.get(level_num, '—')}" + enh_txt
+
     return {
         "levels": {
-            "managementLevel": v4.get("level_num") or 2,
-            "sublevel": v4.get("sublevel"),
+            "postureLevel": level_num,  # keep compat
+            "managementLevel": level_num,
+            "sublevel": sublevel,
+            "label": label,
+
             "decisionConfidence": v4.get("decision_confidence", "—"),
             "decisionStability": v4.get("decision_stability", "—"),
             "decisionStabilityNote": v4.get("decision_stability_note", ""),
+
             "evidence": {
                 "cac_status": v4.get("plaque_status", "Unknown"),
                 "burden_band": v4.get("plaque_burden", "Not quantified"),
                 "clinical_ascvd": bool(v4.get("clinical_ascvd", False)),
+                # optional (safe if missing)
+                "cac_value": v4.get("cac_value", None),
             },
+
             "legend": v4.get("legend", []),
         },
 
@@ -57,16 +90,16 @@ def _v4_to_legacy(v4: dict) -> dict:
         },
 
         "insights": {
-            # CKM (already correct)
+            # CKM
             "ckm_copy": {
                 "headline": v4.get("ckm_text", ""),
                 "detail": v4.get("ckm_detail", ""),
             },
 
-            # ✅ ADD THIS: CKD as contextual insight
+            # CKD (display-only insight; app can render later without breaking)
             "ckd_copy": {
                 "headline": v4.get("ckd_text", ""),   # e.g. "CKD3a (eGFR 52, UACR 68)"
-                "detail": v4.get("ckd_detail", ""),   # optional
+                "detail": v4.get("ckd_detail", ""),
             },
 
             "cac_copy": v4.get("cac_copy", {}),
@@ -286,7 +319,6 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
             "why": "Best proxy for plaque-driving particle burden.",
         },
     ]
-    # Drop empty targets cleanly
     targets = [t for t in targets if t.get("target") is not None]
 
     # Plan (compact) — anchored to level + recommendation tag
@@ -311,7 +343,6 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         else:
             plan_items.append(_plan_item("lifestyle", "Maintain favorable trajectory; periodic reassessment.", "now", 1))
 
-    # Plan buckets
     plan = {
         "meds": [p for p in plan_items if p["kind"] == "med"],
         "tests": [p for p in plan_items if p["kind"] == "test"],
@@ -320,12 +351,10 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         "followup": [p for p in plan_items if p["kind"] == "followup"],
     }
 
-    # Title & summary lines (Risk Continuum branded)
     title = "RISK CONTINUUM — CV ACTION SUMMARY"
     level_name = level_label.split("—", 1)[-1].strip() if "—" in level_label else level_label
     summary_line = f"Current CV Level: Level {level}" + (f" ({sublevel})" if sublevel else "") + f" — {level_name}."
 
-    # Confidence / tag line
     confidence_line = f"Recommendation tag: {recommendation_tag}."
     if rss_score is not None:
         confidence_line += f" Risk Signal Score: {rss_score}/100."
@@ -336,16 +365,13 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         else:
             confidence_line += "."
 
-    # Patient-friendly translation
     patient_translation = (
         "This places you on a risk spectrum. The goal is to reduce plaque-driving particles (ApoB/LDL) and control major drivers "
         "(blood pressure, metabolic factors) over time."
     )
 
-    # Reassess line
     reassess_line = "Reassess after repeat labs and/or additional data (e.g., CAC) as indicated."
 
-    # PREVENT summary (optional)
     prevent_summary = None
     if prevent_total is not None or prevent_ascvd is not None:
         prevent_summary = {
@@ -364,7 +390,6 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         elif prevent_note:
             prevent_summary = {"totalCvd10yPct": None, "ascvd10yPct": None, "notes": prevent_note}
 
-    # Markdown (compact)
     md_parts = [
         title,
         summary_line,
@@ -387,41 +412,34 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
     markdown = "\n".join([x for x in md_parts if x is not None])
 
     return {
-        # Core
         "systemName": engineOut.get("system") or engineOut.get("version", {}).get("system") or "Risk Continuum",
         "level": level,
         "sublevel": sublevel,
         "title": title,
         "summaryLine": summary_line,
 
-        # Explainability
         "meaning": meaning,
         "levelExplainer": level_explainer,
         "legend": legend,
         "recommendationTag": recommendation_tag,
 
-        # Evidence
         "evidence": {
             "cacStatus": cac_status,
             "burdenBand": burden_band,
             "summary": evidence_summary,
         },
 
-        # Triggers / targets / plan
         "triggers": triggers,
         "targets": targets,
         "plan": plan,
 
-        # Narrative lines
         "confidenceLine": confidence_line,
         "patientTranslation": patient_translation,
         "reassessLine": reassess_line,
         "markdown": markdown,
 
-        # Metrics
         "riskSignalScore": {"score": rss_score, "band": rss_band},
         "pooledCohortEquations10yAscvdRisk": {"riskPct": pce_risk_pct, "category": pce_cat},
 
-        # PREVENT (optional comparator)
         "prevent10": prevent_summary,
     }
