@@ -1091,6 +1091,11 @@ with st.sidebar:
         st.rerun()
 
 # ============================================================
+# Engine version selector
+# ============================================================
+ENGINE_VERSION = "v4"  # options: "legacy" | "v4"
+
+# ============================================================
 # Engine call (dev-friendly caching)
 # ============================================================
 ENGINE_CACHE_SALT = (
@@ -1100,6 +1105,7 @@ ENGINE_CACHE_SALT = (
     + "|"
     + str(ENGINE_VERSION)
 )
+
 
 ENGINE_VERSION = "v4"  # switch here: "legacy" or "v4"
 
@@ -2198,6 +2204,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
