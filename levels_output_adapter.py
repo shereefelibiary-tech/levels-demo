@@ -14,11 +14,71 @@ def evaluate_unified(patient, engine_version="legacy"):
 
     if engine_version == "v4":
         from levels_engine_v4 import evaluate_v4
-        return evaluate_v4(patient)
+        v4 = evaluate_v4(patient)
+        return _v4_to_legacy(v4)   # <-- this is the key change
 
     # default / legacy
     from levels_engine import evaluate
     return evaluate(patient)
+def _v4_to_legacy(v4: dict) -> dict:
+    """
+    Translate v4 payload into the legacy shape expected by app.py.
+    Keep this minimal and expand only as needed.
+    """
+
+    return {
+        "levels": {
+            "managementLevel": v4.get("level_num"),
+            "sublevel": v4.get("sublevel"),
+            "decisionConfidence": v4.get("decision_confidence", "—"),
+            "decisionStability": v4.get("decision_stability", "—"),
+            "decisionStabilityNote": v4.get("decision_stability_note", ""),
+            "evidence": {
+                "cac_status": v4.get("plaque_status", "Unknown"),
+                "burden_band": v4.get("plaque_burden", "Not quantified"),
+                "clinical_ascvd": bool(v4.get("clinical_ascvd", False)),
+            },
+            "legend": v4.get("legend", []),
+        },
+
+        "riskSignal": v4.get("riskSignal", {}),
+        "pooledCohortEquations10yAscvdRisk": v4.get("pooledCohortEquations10yAscvdRisk", {}),
+        "prevent10": v4.get("prevent10", {}),
+        "targets": v4.get("targets", {}),
+
+        "drivers": v4.get("drivers", []),
+        "nextActions": v4.get("nextActions", []),
+
+        "aspirin": {
+            "status": v4.get("aspirin_status", "Not assessed"),
+            "explanation": v4.get("aspirin_expl", ""),
+            "rationale": v4.get("aspirin_rationale", []),
+        },
+
+        "insights": {
+            # CKM (already correct)
+            "ckm_copy": {
+                "headline": v4.get("ckm_text", ""),
+                "detail": v4.get("ckm_detail", ""),
+            },
+
+            # ✅ ADD THIS: CKD as contextual insight
+            "ckd_copy": {
+                "headline": v4.get("ckd_text", ""),   # e.g. "CKD3a (eGFR 52, UACR 68)"
+                "detail": v4.get("ckd_detail", ""),   # optional
+            },
+
+            "cac_copy": v4.get("cac_copy", {}),
+            "aspirin_copy": v4.get("aspirin_copy", {}),
+            "risk_driver_pattern": v4.get("risk_driver_pattern", {}),
+            "cac_decision_support": v4.get("cac_decision_support", {}),
+            "ckm_context": v4.get("ckm_context", {}),
+        },
+
+        "anchors": v4.get("anchors", {}),
+        "trace": v4.get("trace", []),
+    }
+
 
 def _fmt_num(x: Optional[float], unit: str = "", dp: int = 0) -> Optional[str]:
     if x is None:
