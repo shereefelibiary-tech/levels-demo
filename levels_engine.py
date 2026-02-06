@@ -2756,7 +2756,9 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
     ckm = ckm_context(p)
-    ckm_copy = canonical_ckm_copy(ckm, decision_conf=dec_conf)
+    ckm_copy = canonical_ckm_copy_stage(p, ckm, decision_conf=dec_conf)
+    ckd_copy = canonical_ckd_copy(p, decision_conf=dec_conf)
+
 
     # ------------------------------------------------------------
     # Secondary Insight: lifestyle vs biology driver pattern
@@ -3232,6 +3234,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
