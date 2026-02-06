@@ -20,7 +20,9 @@ import streamlit.components.v1 as components
 
 import levels_engine as le
 from smartphrase_ingest.parser import parse_smartphrase
-from levels_engine import Patient, evaluate, VERSION, short_why
+from levels_engine import Patient, VERSION, short_why
+from levels_output_adapter import evaluate_unified
+
 
 # ============================================================
 # Guardrails + scrubbing (must be defined before first use)
@@ -1095,18 +1097,23 @@ ENGINE_CACHE_SALT = (
     str(getattr(le, "PCE_DEBUG_SENTINEL", "no_sentinel"))
     + "|"
     + str(VERSION.get("levels", ""))
+    + "|"
+    + str(ENGINE_VERSION)
 )
+
+ENGINE_VERSION = "v4"  # switch here: "legacy" or "v4"
 
 def run_engine_uncached(data_json: str):
     data_in = json.loads(data_json)
     p = Patient(data_in)
-    return evaluate(p)
+    return evaluate_unified(p, engine_version=ENGINE_VERSION)
 
 @st.cache_data(ttl=300)
 def run_engine_cached(data_json: str, cache_salt: str):
     data_in = json.loads(data_json)
     p = Patient(data_in)
-    return evaluate(p)
+    return evaluate_unified(p, engine_version=ENGINE_VERSION)
+
 
 if st.session_state["demo_defaults_on"] and not st.session_state["demo_defaults_applied"]:
     apply_demo_defaults()
@@ -2191,6 +2198,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
