@@ -110,6 +110,8 @@ def short_why(items: List[str], max_items: int = 2) -> str:
         return ""
     cleaned = [str(x).strip() for x in items if str(x).strip()]
     return "; ".join(cleaned[:max_items])
+
+
 def risk_model_mismatch(risk10: Dict[str, Any], prevent10: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compare PCE vs PREVENT and return a conservative, clinician-safe interpretation.
@@ -132,7 +134,6 @@ def risk_model_mismatch(risk10: Dict[str, Any], prevent10: Dict[str, Any]) -> Di
 
     delta = round(pce_f - prev_f, 1)
 
-    # Conservative thresholds (tune later)
     if abs(delta) < 1.5:
         tag = "aligned"
         label = "Aligned"
@@ -170,6 +171,130 @@ def risk_model_mismatch(risk10: Dict[str, Any], prevent10: Dict[str, Any]) -> Di
         "explainer_kid": explainer_kid,
     }
 
+
+def _ckd_g_category(egfr: float) -> str:
+    if egfr >= 90:
+        return "1"
+    if egfr >= 60:
+        return "2"
+    if egfr >= 45:
+        return "3a"
+    if egfr >= 30:
+        return "3b"
+    if egfr >= 15:
+        return "4"
+    return "5"
+
+
+def _format_ckd_stage_headline(p: Patient) -> Optional[str]:
+    """
+    Returns "CKD3a (eGFR 59)" style headline, or None if eGFR missing.
+    """
+    if not p.has("egfr"):
+        return None
+    try:
+        egfr = float(safe_float(p.get("egfr")))
+    except Exception:
+        return None
+
+    g = _ckd_g_category(float(egfr))
+    egfr_int = int(round(float(egfr)))
+    return f"CKD{g} (eGFR {egfr_int})"
+
+
+def derive_ckm_stage_and_driver(p: Patient) -> Tuple[int, str]:
+    """
+    Returns (stage_num, stage_driver_label).
+    """
+    if p.get("ascvd") is True:
+        return 3, "ASCVD-driven risk"
+
+    egfr = None
+    if p.has("egfr"):
+        try:
+            egfr = float(safe_float(p.get("egfr")))
+        except Exception:
+            egfr = None
+    if egfr is not None and float(egfr) < 60:
+        return 3, "CKD-driven risk"
+
+    if p.get("diabetes") is True or a1c_status(p) == "diabetes_range":
+        return 2, "metabolic disease"
+
+    bmi = None
+    if p.has("bmi"):
+        try:
+            bmi = float(safe_float(p.get("bmi")))
+        except Exception:
+            bmi = None
+    if bmi is not None and float(bmi) >= 30:
+        return 1, "risk factors"
+
+    sbp = None
+    if p.has("sbp"):
+        try:
+            sbp = float(safe_float(p.get("sbp")))
+        except Exception:
+            sbp = None
+    if (sbp is not None and float(sbp) >= 130) or (p.get("bp_treated") is True):
+        return 1, "risk factors"
+
+    if a1c_status(p) in ("prediabetes", "near_diabetes_boundary"):
+        return 1, "risk factors"
+
+    if p.has("apob") or p.has("ldl"):
+        return 1, "risk factors"
+
+    return 0, "none identified"
+
+
+def canonical_ckd_copy(p: Patient, decision_conf: str) -> Optional[Dict[str, Any]]:
+    """
+    Canonical CKD headline used by BOTH UI and EMR.
+    Returns None if eGFR missing.
+    """
+    if str(decision_conf or "").strip().lower() not in ("high", "moderate"):
+        return None
+
+    head = _format_ckd_stage_headline(p)
+    if not head:
+        return None
+
+    return {"headline": head, "detail": None}
+
+
+def canonical_ckm_copy_stage(p: Patient, ckm: Dict[str, Any], decision_conf: str) -> Optional[Dict[str, Any]]:
+    """
+    Stage-based CKM headline used by BOTH UI and EMR.
+
+    Produces: "Stage 3 (CKD-driven risk)"
+    """
+    if str(decision_conf or "").strip().lower() not in ("high", "moderate"):
+        return None
+
+    stage, driver = derive_ckm_stage_and_driver(p)
+    headline = f"Stage {stage} ({driver})" if stage != 0 else "Stage 0 (none identified)"
+
+    contributors: List[str] = []
+    if isinstance(ckm, dict):
+        if ckm.get("ckd_present"):
+            contributors.append("kidney factors")
+        if ckm.get("metabolic_acceleration"):
+            contributors.append("metabolic factors")
+        if ckm.get("obesity_present"):
+            contributors.append("obesity-related risk")
+        if ckm.get("hypertension_burden"):
+            contributors.append("blood pressure burden")
+
+    detail = ("Contributors: " + ", ".join(contributors) + ".") if contributors else None
+
+    return {
+        "headline": headline,
+        "detail": detail,
+        "stage": stage,
+        "driver": driver,
+        "contributors": contributors,
+    }
 
 # ============================================================
 # Locked Definitions (single source of truth)
@@ -3107,6 +3232,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
