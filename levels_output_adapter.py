@@ -20,6 +20,7 @@ def evaluate_unified(patient, engine_version="legacy"):
     # default / legacy
     from levels_engine import evaluate
     return evaluate(patient)
+
 def _v4_to_legacy(v4: dict) -> dict:
     """
     Translate v4 payload into the legacy shape expected by app.py.
