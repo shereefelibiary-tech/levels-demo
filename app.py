@@ -2206,16 +2206,56 @@ def render_criteria_table_compact(
 # ============================================================
 import re
 
+def _format_ckd_stage_label_from_egfr(egfr_v: float | None) -> str:
+    """
+    Returns "CKD3a (eGFR 59)" using KDIGO G categories.
+    """
+    if egfr_v is None:
+        return "CKD — unknown"
+    try:
+        v = float(egfr_v)
+    except Exception:
+        return "CKD — unknown"
+
+    egfr_int = int(round(v))
+
+    if v >= 90:
+        stage = "CKD1"
+    elif v >= 60:
+        stage = "CKD2"
+    elif v >= 45:
+        stage = "CKD3a"
+    elif v >= 30:
+        stage = "CKD3b"
+    elif v >= 15:
+        stage = "CKD4"
+    else:
+        stage = "CKD5"
+
+    return f"{stage} (eGFR {egfr_int})"
+
+
 def _extract_ckm_stage_num(out: dict) -> int | None:
     """
-    Parses 'CKM: Stage X (...)' from insights.ckm_copy.headline.
+    Parses 'Stage X' from insights.ckm_copy.headline or from other CKM copy fields if present.
     Returns stage number or None.
     """
     try:
         ins = out.get("insights") or {}
+
+        # prefer headline
         head = (ins.get("ckm_copy") or {}).get("headline") or ""
         m = re.search(r"\bStage\s+(\d)\b", str(head))
-        return int(m.group(1)) if m else None
+        if m:
+            return int(m.group(1))
+
+        # fallback: sometimes stored under ckm_context/headline-like fields
+        head2 = (ins.get("ckm_context") or {}).get("headline") or ""
+        m2 = re.search(r"\bStage\s+(\d)\b", str(head2))
+        if m2:
+            return int(m2.group(1))
+
+        return None
     except Exception:
         return None
 
@@ -2400,26 +2440,38 @@ with tab_report:
 
     stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
 
-    # --- CKM/CKD inline line for Snapshot (v4 adapter provides ckm_copy + ckd_copy) ---
-    _ins = out.get("insights") or {}
-    _ckm_head = ""
+       # --- CKM inline line for Snapshot (engine-independent; derived from stage + eGFR) ---
+    _egfr_v = None
     try:
-        _ckm_head = str((_ins.get("ckm_copy") or {}).get("headline") or "").strip()
+        _egfr_v = float(data.get("egfr")) if data.get("egfr") is not None else None
     except Exception:
-        _ckm_head = ""
-    _ckd_head = ""
-    try:
-        _ckd_head = str((_ins.get("ckd_copy") or {}).get("headline") or "").strip()
-    except Exception:
-        _ckd_head = ""
+        _egfr_v = None
+
+    _ckd_label = _format_ckd_stage_label_from_egfr(_egfr_v)
+
+    _ckm_stage_num = active_ckm_stage  # already computed above via _extract_ckm_stage_num(out)
+
+    _ckm_label = ""
+    if _ckm_stage_num is None:
+        _ckm_label = ""
+    else:
+        # Add "(CKD-driven risk)" only when CKM Stage 3 is paired with CKD stage ≥3a (eGFR < 60).
+        _ckd_driven = False
+        try:
+            _ckd_driven = (_ckm_stage_num == 3) and (_egfr_v is not None) and (float(_egfr_v) < 60)
+        except Exception:
+            _ckd_driven = False
+
+        _ckm_label = f"Stage {_ckm_stage_num}" + (" (CKD-driven risk)" if _ckd_driven else "")
 
     _ckmckd_line = ""
-    if _ckm_head and _ckd_head:
-        _ckmckd_line = f"{_ckm_head} | {_ckd_head}"
-    elif _ckm_head:
-        _ckmckd_line = _ckm_head
-    elif _ckd_head:
-        _ckmckd_line = _ckd_head
+    if _ckm_label and _ckd_label:
+        _ckmckd_line = f"{_ckm_label} | {_ckd_label}"
+    elif _ckm_label:
+        _ckmckd_line = _ckm_label
+    elif _ckd_label and _ckd_label != "CKD — unknown":
+        _ckmckd_line = _ckd_label
+
 
     st.markdown(
         f"""
@@ -2735,6 +2787,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
