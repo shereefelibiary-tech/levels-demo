@@ -4,6 +4,21 @@
 
 from typing import Any, Dict, List, Optional
 
+# levels_output_adapter.py
+
+def evaluate_unified(patient, engine_version="legacy"):
+    """
+    Unified entry point for Risk Continuum evaluation.
+    Keeps app insulated from engine refactors.
+    """
+
+    if engine_version == "v4":
+        from levels_engine_v4 import evaluate_v4
+        return evaluate_v4(patient)
+
+    # default / legacy
+    from levels_engine import evaluate
+    return evaluate(patient)
 
 def _fmt_num(x: Optional[float], unit: str = "", dp: int = 0) -> Optional[str]:
     if x is None:
