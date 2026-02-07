@@ -3327,6 +3327,513 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """.strip()
 
+def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
+    """
+    Canonical criteria table HTML (engine-owned).
+    App must render this verbatim: out["insights"]["criteria_table_html"].
+    """
+    import html as _html
+
+    def _normalize_space(s: str) -> str:
+        return " ".join((s or "").strip().split())
+
+    def _fmt_num(x, decimals=0):
+        if x is None:
+            return None
+        try:
+            fx = float(x)
+        except Exception:
+            return None
+        if decimals <= 0:
+            return str(int(round(fx)))
+        return f"{fx:.{decimals}f}"
+
+    def _fmt_val_unit(num_str: str | None, unit: str | None) -> str | None:
+        if not num_str:
+            return None
+        u = (unit or "").strip()
+        return f"{num_str} {u}".strip() if u else num_str
+
+    def _truthy(x) -> bool:
+        return bool(x is True)
+
+    lvl = (out or {}).get("levels") or {}
+    sub = (lvl.get("sublevel") or "").strip()
+    triggers = lvl.get("triggers") or []
+    triggers = [str(t).strip() for t in triggers if str(t).strip()]
+
+    evidence = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+    plaque_status = str(evidence.get("cac_status") or "").strip().lower()
+    plaque_known = ("cac = 0" in plaque_status) or ("cac positive" in plaque_status) or (evidence.get("cac_value") is not None)
+
+    risk10 = (out or {}).get("ascvdPce10yRisk") or (out or {}).get("pooledCohortEquations10yAscvdRisk") or {}
+    rp = risk10.get("risk_pct")
+    try:
+        pce_pct = float(rp) if rp is not None else None
+    except Exception:
+        pce_pct = None
+
+    # -----------------------------
+    # Determine engine "signal class" from trigger strings
+    # (We only interpret engine trigger labels; no local reclassification.)
+    # -----------------------------
+    def _class_from_trigger(t: str) -> str:
+        tl = t.lower()
+
+        major_markers = (
+            "apob≥",
+            "ldl≥",
+            "lp(a) elevated",
+            "inflammation present",
+            "diabetes-range",
+            "smoking",
+            "clinical ascvd",
+            "cac ",
+        )
+        mild_markers = (
+            "apob 80",
+            "ldl 100",
+            "ldl 130–159",
+            "prediabetes",
+            "a1c 6.2–6.4",
+            "hscrp≥2",
+            "premature family history",
+        )
+
+        if any(m in tl for m in major_markers):
+            return "major"
+        if any(m in tl for m in mild_markers):
+            return "mild"
+        return "signal"
+
+    def _domain_for_trigger(t: str) -> str | None:
+        tl = t.lower()
+        if "apob" in tl or "ldl" in tl:
+            return "Atherogenic burden"
+        if "a1c" in tl or "prediabetes" in tl or "diabetes" in tl:
+            return "Glycemia"
+        if "hscrp" in tl or "inflammation" in tl or "ra" in tl or "psoriasis" in tl or "sle" in tl or "ibd" in tl or "hiv" in tl or "osa" in tl or "nafld" in tl:
+            return "Inflammation"
+        if "lp(a)" in tl or "lpa" in tl or "family history" in tl:
+            return "Genetics"
+        if "smoking" in tl:
+            return "Smoking"
+        if "cac" in tl:
+            return "Plaque"
+        return None
+
+    # Only triggers that map to our display domains
+    trig_by_domain: dict[str, list[str]] = {
+        "Atherogenic burden": [],
+        "Glycemia": [],
+        "Inflammation": [],
+        "Genetics": [],
+        "Smoking": [],
+    }
+    for t in triggers:
+        d = _domain_for_trigger(t)
+        if d in trig_by_domain:
+            trig_by_domain[d].append(t)
+
+    # -----------------------------
+    # Build per-domain display rows (values from Patient only)
+    # -----------------------------
+    apob_v = p.get("apob") if p.has("apob") else None
+    ldl_v = p.get("ldl") if p.has("ldl") else None
+    a1c_v = p.get("a1c") if p.has("a1c") else None
+    hscrp_v = p.get("hscrp") if p.has("hscrp") else None
+    lpa_v = p.get("lpa") if p.has("lpa") else None
+    lpa_unit = p.get("lpa_unit") if p.has("lpa_unit") else None
+    smoker_v = p.get("smoking") if p.has("smoking") else None
+    diabetes_v = p.get("diabetes") if p.has("diabetes") else None
+
+    def _cell(text: str, *, muted=False, ring=False) -> str:
+        cls = "rc2-cell"
+        if muted:
+            cls += " rc2-muted"
+        if ring:
+            cls += " rc2-ring"
+        return f"<div class='{cls}'>{text}</div>"
+
+    def _tag_html(tag: str | None) -> str:
+        if tag == "major":
+            return "<span class='rc2-tag'>major</span>"
+        if tag == "mild":
+            return "<span class='rc2-tag'>mild</span>"
+        if tag == "signal":
+            return "<span class='rc2-tag'>signal</span>"
+        return ""
+
+    def _domain_header(name: str, note: str | None, active: bool) -> str:
+        a = " rc2-domain-active" if active else ""
+        rn = f"<div class='rc2-domain-note'>{_html.escape(note)}</div>" if note else "<div></div>"
+        return f"""
+<div class="rc2-domain{a}">
+  <div class="rc2-domain-title">{_html.escape(name)}</div>
+  {rn}
+</div>
+"""
+
+    def _patient_value_text(domain: str) -> str:
+        if domain == "Atherogenic burden":
+            if apob_v is not None:
+                return _fmt_val_unit(_fmt_num(apob_v, 0), "mg/dL") or "—"
+            if ldl_v is not None:
+                return _fmt_val_unit(_fmt_num(ldl_v, 0), "mg/dL") or "—"
+            return "Unmeasured"
+        if domain == "Glycemia":
+            if _truthy(diabetes_v):
+                if a1c_v is not None:
+                    return _fmt_val_unit(_fmt_num(a1c_v, 1), "%") or "Diabetes=true"
+                return "Diabetes=true"
+            if a1c_v is not None:
+                return _fmt_val_unit(_fmt_num(a1c_v, 1), "%") or "—"
+            return "Unmeasured"
+        if domain == "Inflammation":
+            if hscrp_v is not None:
+                return _fmt_val_unit(_fmt_num(hscrp_v, 1), "mg/L") or "—"
+            return "Unmeasured"
+        if domain == "Genetics":
+            if lpa_v is not None and str(lpa_unit or "").strip() in ("nmol/L", "mg/dL"):
+                return _fmt_val_unit(_fmt_num(lpa_v, 0), str(lpa_unit).strip()) or "—"
+            return "Unmeasured"
+        if domain == "Smoking":
+            if smoker_v is True:
+                return "Yes"
+            if smoker_v is False:
+                return "No"
+            return "Unmeasured"
+        return "—"
+
+    def _domain_condition_text(domain: str) -> str:
+        if domain == "Atherogenic burden":
+            if apob_v is not None:
+                return "ApoB (preferred marker)"
+            return "LDL-C (ApoB unmeasured)"
+        if domain == "Glycemia":
+            return "A1c / diabetes status"
+        if domain == "Inflammation":
+            return "hsCRP (and inflammatory states)"
+        if domain == "Genetics":
+            return "Lp(a) / inherited risk"
+        if domain == "Smoking":
+            return "Current smoking"
+        return "—"
+
+    def _domain_effect(domain: str) -> tuple[str, str | None, bool]:
+        ts = trig_by_domain.get(domain) or []
+        if not ts:
+            return "—", None, False
+
+        cls_rank = {"major": 3, "mild": 2, "signal": 1}
+        best_cls = "signal"
+        best_rank = 0
+        for t in ts:
+            c = _class_from_trigger(t)
+            r = cls_rank.get(c, 0)
+            if r > best_rank:
+                best_rank = r
+                best_cls = c
+
+        if best_cls == "major":
+            return "Major driver", "major", True
+        if best_cls == "mild":
+            return "Mild signal", "mild", True
+        return "Signal", "signal", True
+
+    def _domain_note(domain: str) -> str | None:
+        if domain == "Atherogenic burden" and apob_v is None:
+            return "LDL used (ApoB unmeasured)"
+        if domain == "Genetics" and (lpa_v is None or str(lpa_unit or "").strip() not in ("nmol/L", "mg/dL")):
+            return None
+        return None
+
+    domains_order = ["Atherogenic burden", "Glycemia", "Inflammation", "Genetics", "Smoking"]
+
+    rows_html: list[str] = []
+
+    def _chip_text() -> str:
+        for d in domains_order:
+            if trig_by_domain.get(d):
+                pv = _patient_value_text(d)
+                if pv and pv != "Unmeasured" and pv != "—":
+                    if d == "Atherogenic burden":
+                        if apob_v is not None:
+                            return f"ApoB {pv}"
+                        if ldl_v is not None:
+                            return f"LDL-C {pv}"
+                    if d == "Glycemia":
+                        return f"A1c {pv}" if "Diabetes=true" not in pv else "Diabetes"
+                    if d == "Inflammation":
+                        return f"hsCRP {pv}"
+                    if d == "Genetics":
+                        return f"Lp(a) {pv}"
+                    if d == "Smoking":
+                        return "Smoking Yes" if pv == "Yes" else ""
+        if apob_v is not None:
+            return f"ApoB {_patient_value_text('Atherogenic burden')}"
+        if ldl_v is not None:
+            return f"LDL-C {_patient_value_text('Atherogenic burden')}"
+        return ""
+
+    chip_txt = _chip_text()
+    chip_html = f"<span class='fig-chip'>{_html.escape(chip_txt)}</span>" if chip_txt else ""
+
+    active_bits: list[str] = []
+    for d in domains_order:
+        ts = trig_by_domain.get(d) or []
+        if not ts:
+            continue
+        pv = _patient_value_text(d)
+        eff, tag, _ring = _domain_effect(d)
+        if pv and pv != "Unmeasured" and pv != "—":
+            label = ""
+            if d == "Atherogenic burden":
+                label = "ApoB" if apob_v is not None else "LDL-C"
+            elif d == "Glycemia":
+                label = "A1c" if "Diabetes=true" not in pv else "Diabetes"
+            elif d == "Inflammation":
+                label = "hsCRP"
+            elif d == "Genetics":
+                label = "Lp(a)"
+            elif d == "Smoking":
+                label = "Smoking"
+            eff_short = "Major driver" if tag == "major" else ("Mild signal" if tag == "mild" else "Signal")
+            if label:
+                active_bits.append(f"{label} {pv} ({eff_short})")
+
+    active_bits_clean: list[str] = []
+    seen_a = set()
+    for s in active_bits:
+        k = s.strip().lower()
+        if k and k not in seen_a:
+            seen_a.add(k)
+            active_bits_clean.append(s)
+
+    signal_summary = ""
+    if active_bits_clean:
+        signal_summary = (
+            "<div class='rc2-inline-note'><b>Active signals:</b> "
+            + _html.escape(" • ".join(active_bits_clean))
+            + "</div>"
+        )
+
+    other_bits: list[str] = []
+    if hscrp_v is not None and not trig_by_domain.get("Inflammation"):
+        other_bits.append(f"hsCRP {_fmt_val_unit(_fmt_num(hscrp_v, 1), 'mg/L')}")
+    if smoker_v is True and not trig_by_domain.get("Smoking"):
+        other_bits.append("Smoking Yes")
+
+    other_line = ""
+    if other_bits:
+        other_line = (
+            "<div class='rc2-inline-note'><b>Other domains:</b> "
+            + _html.escape(" • ".join(other_bits))
+            + "</div>"
+        )
+
+    def _should_show_domain(d: str) -> bool:
+        if d in ("Atherogenic burden", "Glycemia"):
+            return True
+        if trig_by_domain.get(d):
+            return True
+        pv = _patient_value_text(d)
+        return pv not in ("Unmeasured", "—")
+
+    for d in domains_order:
+        if not _should_show_domain(d):
+            continue
+
+        pv = _patient_value_text(d)
+        cond = _domain_condition_text(d)
+        eff, tag, ring = _domain_effect(d)
+        note = _domain_note(d)
+        active = bool(trig_by_domain.get(d))
+
+        rows_html.append(_domain_header(d, note, active=active))
+
+        patient_text = str(pv).strip()
+        patient_is_unmeasured = (patient_text == "Unmeasured")
+        patient_cell = _cell(
+            (_html.escape(patient_text) if patient_text else "—"),
+            muted=patient_is_unmeasured,
+            ring=bool(ring and (not patient_is_unmeasured)),
+        )
+        if patient_is_unmeasured:
+            patient_cell = patient_cell.replace("Unmeasured", "<i>Unmeasured</i>")
+
+        effect_text = _html.escape(str(eff or "—"))
+        effect = f"{effect_text} {_tag_html(tag)}".strip()
+
+        marker_label = "—"
+        if d == "Atherogenic burden":
+            marker_label = "ApoB" if apob_v is not None else "LDL-C"
+        elif d == "Glycemia":
+            marker_label = "A1c"
+        elif d == "Inflammation":
+            marker_label = "hsCRP"
+        elif d == "Genetics":
+            marker_label = "Lp(a)"
+        elif d == "Smoking":
+            marker_label = "Smoking"
+
+        rows_html.append(f"""
+<div class="rc2-row">
+  {_cell(_html.escape(marker_label))}
+  {_cell(_html.escape(cond))}
+  {patient_cell}
+  <div class="rc2-cell">{effect}</div>
+</div>
+""")
+
+    html = f"""
+<style>
+  .rc2-wrap {{
+    border: 1px solid rgba(31,41,55,0.12);
+    border-radius: 12px;
+    background: #fff;
+    padding: 12px 14px;
+    font-size: 0.92rem;
+    line-height: 1.25;
+    margin-top: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+  }}
+
+  .rc2-inline-note {{
+    margin-top: 6px;
+    color: rgba(31,41,55,0.68);
+    font-size: 0.84rem;
+    line-height: 1.25;
+  }}
+  .rc2-inline-note b {{
+    font-weight: 900;
+    color: rgba(17,24,39,0.82);
+  }}
+
+  .rc2-gridhead {{
+    display: grid;
+    grid-template-columns: 1.05fr 1.30fr 0.95fr 1.10fr;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(31,41,55,0.10);
+    color: rgba(31,41,55,0.65);
+    font-size: 0.82rem;
+    font-weight: 900;
+    margin-top: 8px;
+  }}
+
+  .rc2-domain {{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(31,41,55,0.08);
+  }}
+  .rc2-domain-title {{
+    font-weight: 950;
+    color: #111827;
+    font-size: 0.88rem;
+  }}
+  .rc2-domain-note {{
+    color: rgba(31,41,55,0.60);
+    font-size: 0.82rem;
+    font-weight: 800;
+  }}
+  .rc2-domain-active {{
+    background: rgba(59,130,246,0.04);
+    border-radius: 10px;
+    padding: 6px 8px;
+    border: 1px solid rgba(59,130,246,0.12);
+  }}
+
+  .rc2-row {{
+    display: grid;
+    grid-template-columns: 1.05fr 1.30fr 0.95fr 1.10fr;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(31,41,55,0.06);
+    align-items: start;
+  }}
+
+  .rc2-cell {{
+    margin: 0;
+    padding: 0;
+    color: #111827;
+  }}
+  .rc2-muted {{
+    color: rgba(31,41,55,0.55);
+  }}
+
+  .rc2-ring {{
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 2px solid rgba(59,130,246,0.85);
+    background: rgba(59,130,246,0.08);
+    font-weight: 950;
+    width: fit-content;
+  }}
+
+  .rc2-tag {{
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 0.74rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(31,41,55,0.16);
+    background: #fff;
+    font-weight: 950;
+    color: rgba(31,41,55,0.80);
+    vertical-align: middle;
+  }}
+
+  .fig-title-row {{
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+  }}
+
+  .fig-title {{
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.14em;
+    font-weight: 975;
+    font-size: 1.08rem;
+    color: rgba(17,24,39,0.90);
+  }}
+
+  .fig-chip {{
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 2px solid rgba(59,130,246,0.85);
+    background: rgba(59,130,246,0.08);
+    font-weight: 950;
+    font-size: 0.84rem;
+    color: #111827;
+    white-space: nowrap;
+  }}
+</style>
+
+<div class="rc2-wrap">
+  <div class="fig-title-row">
+    <div class="fig-title">Where this patient falls</div>
+    {chip_html}
+  </div>
+
+  {signal_summary}
+  {other_line}
+
+  <div class="rc2-gridhead">
+    <div>Marker</div><div>Context</div><div>Patient</div><div>Level effect</div>
+  </div>
+
+  {''.join(rows_html)}
+</div>
+"""
+    return html.strip()
 
 # -------------------------------------------------------------------
 # CANONICAL CLINICAL REPORT (polished; single source of truth)
@@ -3466,6 +3973,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
