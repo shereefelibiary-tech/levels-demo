@@ -115,8 +115,8 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
         seg_divs += f"""
 <div class="rssT-seg" style="height:{px}px; background:{_esc(s['color'])};"
      title="{_esc(s['label'])}: {_esc(s['points'])} points">
-  <div class="rssT-seg-label">{_esc(s['label'])}</div>
-  <div class="rssT-seg-pts">{_esc(s['points'])}</div>
+    <div class="rssT-seg-pts">{_esc(s['points'])}</div>
+
 </div>
 """.strip()
 
