@@ -3023,7 +3023,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     # NEW: teachable moment — PREVENT vs PCE divergence (engine-owned)
     insights["risk_model_mismatch"] = risk_model_mismatch(risk10, prevent10)
 
-    out = {
+       out = {
         "version": VERSION,
         "system": SYSTEM_NAME,
 
@@ -3058,8 +3058,8 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "trajectoryNote": levels_obj.get("trajectoryNote"),
     }
 
-    # NEW: canonical "Where this patient falls" table (engine-owned)
-    out["insights"]["where_patient_falls"] = canonical_where_patient_falls(p, out)
+    # NEW: engine-owned HTML for "Where this patient falls"
+    out["insights"]["where_patient_falls_html"] = canonical_where_patient_falls_html(p, out)
 
     out["nextActions"] = compose_actions(p, out)
 
@@ -3231,6 +3231,102 @@ def _action_to_plan_bullets(primary: Optional[str], rest: List[str]) -> List[str
     bullets.extend(keep)
     return _dedup_lines([f"- {b}" for b in bullets])
 
+def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
+    """
+    Engine-owned, fully rendered HTML for:
+      WHERE THIS PATIENT FALLS
+
+    App must render this verbatim (no interpretation).
+    """
+
+    lvl = out.get("levels") or {}
+    label = str(lvl.get("label") or "—").strip()
+    triggers = set((lvl.get("triggers") or []))
+
+    evidence = (lvl.get("evidence") or {})
+    cac_val = evidence.get("cac_value", None)
+    cac_known = isinstance(cac_val, int)
+
+    # ---- display values (engine-owned) ----
+    apob_disp = f"{fmt_int(p.get('apob'))} mg/dL" if p.has("apob") else "—"
+    a1c_disp = f"{fmt_1dp(p.get('a1c'))}%" if p.has("a1c") else "—"
+    smoke_disp = "Yes" if p.get("smoking") is True else ("No" if p.get("smoking") is False else "—")
+    cac_disp = "Unmeasured" if not cac_known else str(int(cac_val))
+
+    # ---- helpers ----
+    def _trigger_prefix(prefix: str) -> bool:
+        return any(str(t).startswith(prefix) for t in triggers)
+
+    def _trigger_exact(label_txt: str) -> bool:
+        return any(str(t) == label_txt for t in triggers)
+
+    # ---- level effect ----
+    if _trigger_prefix("ApoB"):
+        apob_effect = "Trigger (major driver)"
+    else:
+        apob_effect = "Supportive (targets/intensity)" if (cac_known and int(cac_val) > 0) else "—"
+
+    a1c_effect = "Trigger (major driver)" if _trigger_prefix("Diabetes") else "—"
+    smoke_effect = "Trigger (major driver)" if _trigger_exact("Smoking") else "—"
+
+    if cac_known:
+        if int(cac_val) >= CAC_LEVEL5_CUT:
+            cac_effect = "Trigger (Level 5: CAC ≥100)"
+        elif int(cac_val) >= CAC_LEVEL4_MIN:
+            cac_effect = "Trigger (Level 4: CAC 1–99)"
+        else:
+            cac_effect = "Reassuring (CAC=0)"
+    else:
+        cac_effect = "Unmeasured"
+
+    # ---- HTML escape (safe, no imports needed beyond stdlib) ----
+    import html as _html
+    esc = _html.escape
+
+    rows = [
+        ("Atherogenic burden", "ApoB", "ApoB (preferred marker)", apob_disp, apob_effect),
+        ("Glycemia", "A1c", "A1c / diabetes status", a1c_disp, a1c_effect),
+        ("Smoking", "Smoking", "Current smoking", smoke_disp, smoke_effect),
+        ("Plaque", "CAC", "Coronary calcium (plaque evidence)", cac_disp, cac_effect),
+    ]
+
+    tr_html = ""
+    for (domain, marker, context, patient, effect) in rows:
+        tr_html += (
+            "<tr>"
+            f"<td>{esc(domain)}</td>"
+            f"<td><b>{esc(marker)}</b></td>"
+            f"<td>{esc(context)}</td>"
+            f"<td>{esc(patient)}</td>"
+            f"<td>{esc(effect)}</td>"
+            "</tr>"
+        )
+
+    return f"""
+<div class="block compact">
+  <div class="fig-title-row">
+    <div class="fig-title">WHERE THIS PATIENT FALLS</div>
+    <div class="fig-chip">{esc(label)}</div>
+  </div>
+  <p class="fig-cap">Engine-derived thresholds and effects.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Domain</th>
+        <th>Marker</th>
+        <th>Cutoff / context</th>
+        <th>This patient</th>
+        <th>Level effect</th>
+      </tr>
+    </thead>
+    <tbody>
+      {tr_html}
+    </tbody>
+  </table>
+</div>
+""".strip()
+
 
 # -------------------------------------------------------------------
 # CANONICAL CLINICAL REPORT (polished; single source of truth)
@@ -3370,6 +3466,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
