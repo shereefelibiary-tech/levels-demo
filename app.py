@@ -1137,6 +1137,10 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         unsafe_allow_html=True,
     )
 
+    if st.session_state.get("clear_smartphrase_on_rerun", False):
+        st.session_state["smartphrase_raw"] = ""
+        st.session_state["clear_smartphrase_on_rerun"] = False
+
     smart_txt = st.text_area(
         "SmartPhrase text (de-identified)",
         height=220,
@@ -1164,7 +1168,7 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
 
     with c2:
         if st.button("Clear pasted text"):
-            st.session_state["smartphrase_raw"] = ""
+            st.session_state["clear_smartphrase_on_rerun"] = True
             st.session_state["parsed_preview_cache"] = {}
             st.session_state["last_applied_msg"] = ""
             st.session_state["last_missing_msg"] = ""
@@ -1190,7 +1194,6 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.success(st.session_state["last_applied_msg"])
     if st.session_state.get("last_missing_msg"):
         st.warning(st.session_state["last_missing_msg"])
-
 
 # ============================================================
 # Imaging (outside form)
@@ -2802,6 +2805,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
