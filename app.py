@@ -1436,6 +1436,17 @@ note_text = scrub_terms(note_text)
 
 lvl = out.get("levels", {}) or {}
 ev = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+# Plaque present flag (derived from engine evidence; app does not infer thresholds)
+plaque_present = None
+try:
+    cs = str(ev.get("cac_status", "")).strip().lower()
+    if "cac = 0" in cs:
+        plaque_present = False
+    elif "cac positive" in cs:
+        plaque_present = True
+except Exception:
+    plaque_present = None
+
 rs = out.get("riskSignal", {}) or {}
 risk10 = out.get("pooledCohortEquations10yAscvdRisk", {}) or {}
 prevent10 = out.get("prevent10", {}) or {}
@@ -2616,6 +2627,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
