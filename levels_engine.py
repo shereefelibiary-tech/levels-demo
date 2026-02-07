@@ -3174,9 +3174,20 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "trajectoryNote": levels_obj.get("trajectoryNote"),
     }
 
-    # NEW: engine-owned HTML blocks (render-only in app)
-    out["insights"]["where_patient_falls_html"] = canonical_where_patient_falls_html(p, out)
-    out["insights"]["criteria_table_html"] = canonical_criteria_table_html(p, out)
+        # NEW: engine-owned HTML blocks (render-only in app)
+    # Never allow HTML generation to break the engine output contract.
+    try:
+        out["insights"]["where_patient_falls_html"] = canonical_where_patient_falls_html(p, out)
+    except Exception as _e:
+        add_trace(trace, "HTML_where_patient_falls_error", str(_e), "where_patient_falls_html generation failed")
+        out["insights"]["where_patient_falls_html"] = ""
+
+    try:
+        out["insights"]["criteria_table_html"] = canonical_criteria_table_html(p, out)
+    except Exception as _e:
+        add_trace(trace, "HTML_criteria_table_error", str(_e), "criteria_table_html generation failed")
+        out["insights"]["criteria_table_html"] = ""
+
 
     out["nextActions"] = compose_actions(p, out)
 
@@ -4090,6 +4101,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
