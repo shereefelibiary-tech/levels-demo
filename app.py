@@ -1497,7 +1497,8 @@ def _plaque_unmeasured(ev_dict: dict) -> bool:
     cs = str(ev_dict.get("cac_status", "")).strip().lower()
     return ("unknown" in cs) or ("no structural" in cs) or ("unmeasured" in cs)
 
-def render_criteria_table_compact(*, out: dict, patient_data: dict) -> str:
+def _DEPRECATED_render_criteria_table_compact(*, out: dict, patient_data: dict) -> str:
+
     """
     Engine-driven criteria table (single source of truth = engine output).
     - Does NOT re-classify LDL/ApoB/A1c/hsCRP/Lp(a) locally.
@@ -2364,9 +2365,10 @@ with tab_report:
 
     # Tight criteria table (rings)
     st.markdown(
-        render_criteria_table_compact(out=out, patient_data=data),
+        (out.get("insights") or {}).get("criteria_table_html", ""),
         unsafe_allow_html=True,
     )
+
 
     # NEW: Where this patient falls (ENGINE-OWNED HTML; render-only)
     st.markdown(
@@ -2627,6 +2629,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
