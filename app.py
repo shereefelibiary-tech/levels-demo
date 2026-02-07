@@ -1009,6 +1009,7 @@ DEFAULTS = {
     "parsed_preview_cache": {},
     "last_applied_msg": "",
     "last_missing_msg": "",
+    "clear_smartphrase_on_rerun": False,
     "demo_defaults_on": True,
     "demo_defaults_applied": False,
 }
@@ -2801,6 +2802,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
