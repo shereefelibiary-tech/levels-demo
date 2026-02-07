@@ -1288,6 +1288,7 @@ def _rss_basis_and_missing(p: Patient) -> Dict[str, Any]:
     }
 
 
+```python
 def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     # ------------------------------------------------------------
     # Structural burden (dominant by design)
@@ -1379,6 +1380,17 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
     flags = _rss_basis_and_missing(p)
 
     # ------------------------------------------------------------
+    # Components (engine-truth; used by RSS tower renderer)
+    # ------------------------------------------------------------
+    components = [
+        {"key": "burden", "label": "Plaque / ASCVD", "points": int(burden)},
+        {"key": "athero", "label": "Atherogenic burden", "points": int(athero)},
+        {"key": "genetics", "label": "Genetics", "points": int(genetics)},
+        {"key": "inflammation", "label": "Inflammation", "points": int(infl)},
+        {"key": "metabolic", "label": "Metabolic / smoking", "points": int(metab)},
+    ]
+
+    # ------------------------------------------------------------
     # Total
     # ------------------------------------------------------------
     total = clamp(int(round(burden + athero + genetics + infl + metab)))
@@ -1397,6 +1409,7 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
             "missing": list(flags["rss_missing"]),
             "is_complete": bool(flags["rss_is_complete"]),
             "plaque_assessed": bool(flags["rss_plaque_assessed"]),
+            "components": components,
         },
         "RSS components computed (v1.1)",
     )
@@ -1414,7 +1427,11 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
         "plaque_assessed": bool(flags["rss_plaque_assessed"]),
         "missing": list(flags["rss_missing"]),             # e.g., ["ApoB", "Lp(a)", "CAC"]
         "version": "RSS v1.1",
+
+        # NEW: point contributors for tower rendering (engine-owned truth)
+        "components": components,
     }
+```
 
 # =========================
 # CHUNK 4 / 6 — END
@@ -4076,6 +4093,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
