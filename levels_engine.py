@@ -3060,8 +3060,10 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     # NEW: engine-owned HTML for "Where this patient falls"
     out["insights"]["where_patient_falls_html"] = canonical_where_patient_falls_html(p, out)
+    out["insights"]["criteria_table_html"] = canonical_criteria_table_html(p, out)
 
     out["nextActions"] = compose_actions(p, out)
+
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
@@ -3973,6 +3975,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
