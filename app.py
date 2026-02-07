@@ -1162,6 +1162,10 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
                 parsed = parse_smartphrase(raw_txt)
                 st.session_state["parsed_preview_cache"] = parsed
                 applied, missing = apply_parsed_to_session(parsed, raw_txt)
+
+                if parsed.get("uacr") is not None:
+                    st.session_state["uacr_val"] = float(parsed["uacr"])
+
                 st.session_state["last_applied_msg"] = "Applied: " + (", ".join(applied) if applied else "None")
                 st.session_state["last_missing_msg"] = "Missing/unparsed: " + (", ".join(missing) if missing else "All good!")
                 st.rerun()
@@ -2805,6 +2809,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
