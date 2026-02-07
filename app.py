@@ -22,6 +22,7 @@ import levels_engine as le
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, VERSION, short_why
 from levels_output_adapter import evaluate_unified
+from rc_viz.rss.rss_column import render_rss_column_html
 
 
 # ============================================================
@@ -2636,6 +2637,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
