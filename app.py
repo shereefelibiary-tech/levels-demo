@@ -850,8 +850,10 @@ TARGET_PARSE_FIELDS = [
     ("ascvd_10y", "ASCVD 10-year risk (if present)"),
     ("bmi", "BMI (PREVENT)"),
     ("egfr", "eGFR (PREVENT)"),
+    ("uacr", "UACR (PREVENT)"),
     ("lipidLowering", "Lipid-lowering therapy (PREVENT)"),
 ]
+
 
 def apply_parsed_to_session(parsed: dict, raw_txt: str):
     applied, missing = [], []
@@ -1187,6 +1189,7 @@ with st.expander("Paste Epic output to auto-fill fields", expanded=False):
         st.success(st.session_state["last_applied_msg"])
     if st.session_state.get("last_missing_msg"):
         st.warning(st.session_state["last_missing_msg"])
+
 
 # ============================================================
 # Imaging (outside form)
@@ -2798,6 +2801,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
