@@ -2357,6 +2357,11 @@ with tab_report:
         unsafe_allow_html=True,
     )
 
+    # NEW: Where this patient falls (ENGINE-OWNED HTML; render-only)
+    st.markdown(
+        (out.get("insights") or {}).get("where_patient_falls_html", ""),
+        unsafe_allow_html=True,
+    )
 
     # Secondary insights (engine-gated)
     rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
@@ -2470,6 +2475,7 @@ with tab_report:
     note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
 
     emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+
 
 # ------------------------------------------------------------
 # DECISION FRAMEWORK TAB (no giant second table)
@@ -2610,6 +2616,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
