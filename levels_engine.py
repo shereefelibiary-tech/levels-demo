@@ -1995,7 +1995,10 @@ def assign_level(
         # “Key clarifiers missing” used as convergence rule:
         # If only 1 mild signal but ApoB missing or Lp(a) missing => treat as converging (2B),
         # because stability is low until clarifiers are obtained.
-        clarifiers_missing = (not p.has("apob")) or (not p.has("lpa"))
+        clarifiers_missing = (
+            ((not p.has("apob")) or (not p.has("lpa")))
+            and plaque.get("plaque_present") is None
+        )
 
         converging = (len(ms) >= 2) or pce_intermediate or (len(ms) == 1 and clarifiers_missing)
         sub = "2B" if converging else "2A"
@@ -3270,6 +3273,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
