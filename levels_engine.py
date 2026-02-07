@@ -1844,7 +1844,7 @@ def _mild_signals(p: Patient) -> List[str]:
     return sig
 
 
-def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
+def _high_signals(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> List[str]:
     """
     Major actionable biologic drivers (Level 3 candidates).
 
@@ -1862,7 +1862,31 @@ def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
     if p.has("apob") and safe_float(p.get("apob")) >= MAJOR_APOB_CUT:
         sig.append(f"ApoB≥{int(MAJOR_APOB_CUT)}")
     elif (not p.has("apob")) and p.has("ldl") and safe_float(p.get("ldl")) >= MAJOR_LDL_CUT:
-        sig.append(f"LDL≥{int(MAJOR_LDL_CUT)} (ApoB not measured)")
+        # Guardrail: LDL-only major signal should not override CAC=0 + very low PCE
+        cac0 = False
+        try:
+            cac0 = p.has("cac") and int(safe_float(p.get("cac"), default=-1)) == 0
+        except Exception:
+            cac0 = False
+
+        rp = risk10.get("risk_pct") if isinstance(risk10, dict) else None
+        rp_f = None
+        try:
+            rp_f = float(rp) if rp is not None else None
+        except Exception:
+            rp_f = None
+
+        low_risk = (rp_f is not None and rp_f < PCE_HARD_NO_MAX)
+
+        if cac0 and low_risk:
+            add_trace(
+                trace,
+                "LDL_major_suppressed_CAC0_lowPCE",
+                {"ldl": p.get("ldl"), "pce": rp_f, "cac": 0},
+                "LDL-only major signal suppressed",
+            )
+        else:
+            sig.append(f"LDL≥{int(MAJOR_LDL_CUT)} (ApoB not measured)")
 
     # Genetics
     if lpa_elevated(p, trace):
@@ -1882,7 +1906,6 @@ def _high_signals(p: Patient, trace: List[Dict[str, Any]]) -> List[str]:
         sig.append("Smoking")
 
     return sig
-
 
 def assign_level(
     p: Patient,
@@ -1921,7 +1944,7 @@ def assign_level(
             return 4, None, triggers
 
     # Level 3: major actionable biology
-    hs = _high_signals(p, trace)
+    hs = _high_signals(p, risk10, trace)
     if hs:
         triggers.extend(hs)
 
@@ -3234,6 +3257,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
