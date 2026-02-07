@@ -2378,6 +2378,7 @@ with tab_report:
     st.write("DEBUG: insights keys =", sorted(list(_ins.keys())))
     st.write("DEBUG: criteria_table_html length =", len(_criteria_html))
     st.write("DEBUG: where_patient_falls_html length =", len(_falls_html))
+    st.write("DEBUG: trace tail =", (out.get("trace") or [])[-5:])
     st.write(
         "DEBUG: render_criteria_table_compact exists =",
         ("render_criteria_table_compact" in globals())
@@ -2713,6 +2714,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
