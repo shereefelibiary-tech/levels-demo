@@ -2385,6 +2385,9 @@ with tab_report:
     st.write("DEBUG: criteria_table_html length:", len((_ins.get("criteria_table_html") or "")) if isinstance(_ins, dict) else -1)
     st.write("DEBUG: where_patient_falls_html length:", len((_ins.get("where_patient_falls_html") or "")) if isinstance(_ins, dict) else -1)
     st.write("DEBUG: render_criteria_table_compact exists:", ("render_criteria_table_compact" in globals()) and callable(globals().get("render_criteria_table_compact")))
+    _ins = (out.get("insights") or {})
+    st.write("DEBUG: criteria_table_html length =", len((_ins.get("criteria_table_html") or "")))
+    st.write("DEBUG: where_patient_falls_html length =", len((_ins.get("where_patient_falls_html") or "")))
 
           # Tight criteria table (rings) + Where this patient falls
     # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
@@ -2715,6 +2718,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
