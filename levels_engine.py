@@ -2891,7 +2891,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     ckm_copy = canonical_ckm_copy_stage(p, ckm, decision_conf=dec_conf)
     ckd_copy = canonical_ckd_copy(p, decision_conf=dec_conf)
 
-
     # ------------------------------------------------------------
     # Secondary Insight: lifestyle vs biology driver pattern
     # ------------------------------------------------------------
@@ -2989,6 +2988,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         _clar = (_clar + " " + _cclass).strip()
 
     cac_copy = canonical_cac_copy(p, plaque, cac_support)
+
     # CKM context (display-first; does not change level/actions)
     ckm = ckm_context(p)
     ckm_copy = canonical_ckm_copy(ckm, decision_conf=dec_conf)
@@ -3023,7 +3023,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     # NEW: teachable moment — PREVENT vs PCE divergence (engine-owned)
     insights["risk_model_mismatch"] = risk_model_mismatch(risk10, prevent10)
 
-       out = {
+    out = {
         "version": VERSION,
         "system": SYSTEM_NAME,
 
@@ -3058,12 +3058,11 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "trajectoryNote": levels_obj.get("trajectoryNote"),
     }
 
-    # NEW: engine-owned HTML for "Where this patient falls"
+    # NEW: engine-owned HTML blocks (render-only in app)
     out["insights"]["where_patient_falls_html"] = canonical_where_patient_falls_html(p, out)
     out["insights"]["criteria_table_html"] = canonical_criteria_table_html(p, out)
 
     out["nextActions"] = compose_actions(p, out)
-
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
@@ -3975,6 +3974,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
