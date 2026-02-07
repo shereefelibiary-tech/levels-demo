@@ -35,7 +35,7 @@ PCE_DEBUG_SENTINEL = "PCE_EPIC_2019_ALIGNED_v3_1"
 VERSION = {
     "system": SYSTEM_NAME,
     "levels": "v3.1-risk-continuum-buffered",
-    "riskSignal": "RSS v1.0",
+    "riskSignal": "RSS v1.1 (monotonic glycemia tiers; completeness flags)",
     "riskCalc": "ASCVD PCE (ACC/AHA 2019 interpretation; Epic-aligned implementation)",
     "aspirin": "Aspirin v1.0 (CAC≥100 OR ASCVD PCE≥10%, age 40–69, low bleed risk)",
     "prevent": "PREVENT (AHA) population model 10y: total CVD + ASCVD",
@@ -4076,6 +4076,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
