@@ -2371,18 +2371,81 @@ with tab_report:
             unsafe_allow_html=True
         )
 
-    # Tight criteria table (rings)
-    st.markdown(
-        (out.get("insights") or {}).get("criteria_table_html", ""),
-        unsafe_allow_html=True,
-    )
+          # Tight criteria table (rings) + Where this patient falls
+    # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
+    _ins = (out.get("insights") or {})
 
+    def _call_with_supported_kwargs(fn, kwargs: dict):
+        import inspect
 
-    # NEW: Where this patient falls (ENGINE-OWNED HTML; render-only)
-    st.markdown(
-        (out.get("insights") or {}).get("where_patient_falls_html", ""),
-        unsafe_allow_html=True,
-    )
+        sig = inspect.signature(fn)
+        params = sig.parameters
+        accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if accepts_var_kw:
+            return fn(**kwargs)
+
+        filtered = {k: v for k, v in kwargs.items() if k in params}
+        return fn(**filtered)
+
+    _criteria_html = (_ins.get("criteria_table_html") or "").strip()
+    if _criteria_html:
+        st.markdown(_criteria_html, unsafe_allow_html=True)
+    else:
+        # Fallback renderer (older path) — safe kw filtering prevents TypeError drift.
+        _kw = {
+            "apob_v": data.get("apob"),
+            "ldl_v": data.get("ldl"),
+            "nonhdl_v": data.get("nonhdl"),
+            "hdl_v": data.get("hdl"),
+            "tc_v": data.get("tc"),
+            "tg_v": data.get("tg"),
+            "a1c_v": data.get("a1c"),
+            "sbp_v": data.get("sbp"),
+            "dbp_v": data.get("dbp"),
+            "egfr_v": data.get("egfr"),
+            "uacr_v": data.get("uacr"),
+            "bmi_v": data.get("bmi"),
+            "diabetes_v": bool(data.get("diabetes")),
+            "htn_v": bool(data.get("htn")),
+            "smoker_v": bool(data.get("smoker")),
+            "level": level,
+            "sub": sub,
+            "out": out,
+            "ev": ev,
+            "data": data,
+        }
+        try:
+            if "render_criteria_table_compact" in globals() and callable(globals()["render_criteria_table_compact"]):
+                _html_out = _call_with_supported_kwargs(globals()["render_criteria_table_compact"], _kw)
+                if isinstance(_html_out, str) and _html_out.strip():
+                    st.markdown(_html_out, unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        "<div class='compact-caption'>Criteria table unavailable (renderer returned empty).</div>",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.markdown(
+                    "<div class='compact-caption'>Criteria table unavailable (renderer function not found).</div>",
+                    unsafe_allow_html=True,
+                )
+        except Exception as _e:
+            st.markdown(
+                "<div class='compact-caption'>Criteria table unavailable (fallback renderer error).</div>",
+                unsafe_allow_html=True,
+            )
+            st.exception(_e)
+
+    _falls_html = (_ins.get("where_patient_falls_html") or "").strip()
+    if _falls_html:
+        st.markdown(_falls_html, unsafe_allow_html=True)
+    else:
+        # If the engine isn't emitting this yet, show a minimal hint (no crash).
+        st.markdown(
+            "<div class='compact-caption'>Where this patient falls: not available (engine HTML missing).</div>",
+            unsafe_allow_html=True,
+        )
+
 
     # Secondary insights (engine-gated)
     rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
@@ -2637,6 +2700,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
