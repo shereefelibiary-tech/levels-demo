@@ -2370,6 +2370,21 @@ with tab_report:
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
             unsafe_allow_html=True
         )
+    # ===== DEBUG MARKER (table section) =====
+    st.markdown(
+        """
+<div style="border:3px solid #ff2d55; padding:10px; border-radius:12px; font-weight:700;">
+  DEBUG: Reached table render section in Report tab ✅
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    _ins = (out.get("insights") or {})
+    st.write("DEBUG: insights keys:", sorted(list(_ins.keys())) if isinstance(_ins, dict) else type(_ins))
+    st.write("DEBUG: criteria_table_html length:", len((_ins.get("criteria_table_html") or "")) if isinstance(_ins, dict) else -1)
+    st.write("DEBUG: where_patient_falls_html length:", len((_ins.get("where_patient_falls_html") or "")) if isinstance(_ins, dict) else -1)
+    st.write("DEBUG: render_criteria_table_compact exists:", ("render_criteria_table_compact" in globals()) and callable(globals().get("render_criteria_table_compact")))
 
           # Tight criteria table (rings) + Where this patient falls
     # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
@@ -2700,6 +2715,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
