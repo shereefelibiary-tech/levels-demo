@@ -1,31 +1,39 @@
-def render_rss_column_html(out: dict) -> str:
+from __future__ import annotations
+
+from typing import Any, Dict, List
+import html
+
+
+def _esc(x: Any) -> str:
+    return html.escape(str(x), quote=True)
+
+
+def render_rss_column_html(out: Dict[str, Any]) -> str:
     """
-    RSS column (engine-owned values; UI-only rendering).
-    Shows: RSS score/band + basis + completeness + missing clarifiers.
-    Safe: does not infer, does not recompute, does not change actions.
+    RSS column (render-only).
+    Uses engine-owned values: riskSignal.score/band/note + basis/is_complete/missing/plaque_assessed.
+    Does not recompute RSS and does not infer actions.
     """
     rs = (out or {}).get("riskSignal") or {}
+
     score = rs.get("score", "—")
     band = rs.get("band", "—")
-    note = (rs.get("note") or "").strip()
+    note = str(rs.get("note") or "").strip() or "Biologic + plaque signal (not event probability)."
 
-    basis = (rs.get("basis") or "Unknown").strip()
+    basis = str(rs.get("basis") or "Unknown").strip()
     is_complete = bool(rs.get("is_complete") is True)
     plaque_assessed = bool(rs.get("plaque_assessed") is True)
-    missing = rs.get("missing") or []
-    missing = [str(x).strip() for x in missing if str(x).strip()]
 
-    # Title line
-    title = "Risk Signal Score (RSS)"
-    subtitle = "Biologic + plaque signal (not event probability)."
+    missing_raw = rs.get("missing") or []
+    missing: List[str] = [str(x).strip() for x in missing_raw if str(x).strip()]
 
-    # Completeness language (locked, non-judgmental)
+    # Status line (locked)
     if is_complete and plaque_assessed:
-        comp_line = "Status: Complete (tracking-ready) • Plaque assessed"
+        status_line = "Status: Complete (tracking-ready) • Plaque assessed"
     elif is_complete and (not plaque_assessed):
-        comp_line = "Status: Complete (tracking-ready) • Plaque unmeasured"
+        status_line = "Status: Complete (tracking-ready) • Plaque unmeasured"
     else:
-        comp_line = "Status: Provisional (key clarifiers missing)"
+        status_line = "Status: Provisional (key clarifiers missing)"
 
     # Basis line (prevents LDL→ApoB confusion)
     if basis == "ApoB":
@@ -35,20 +43,13 @@ def render_rss_column_html(out: dict) -> str:
     else:
         basis_line = "Basis: Unknown (ApoB/LDL unavailable)"
 
-    # Missing clarifiers list (only if present)
     missing_html = ""
     if missing:
-        # Keep it tight; users see this as a checklist
-        items = "".join(f"<li>{_html_escape(m)}</li>" for m in missing)
+        items = "".join(f"<li>{_esc(m)}</li>" for m in missing)
         missing_html = f"""
 <div class="rss-subhead">Missing clarifiers</div>
 <ul class="rss-list">{items}</ul>
 """.strip()
-
-    # Score display (big number + /100)
-    score_disp = _html_escape(str(score))
-    band_disp = _html_escape(str(band))
-    note_disp = _html_escape(note or subtitle)
 
     return f"""
 <style>
@@ -131,26 +132,21 @@ def render_rss_column_html(out: dict) -> str:
 </style>
 
 <div class="rss-card">
-  <div class="rss-title">{_html_escape(title)}</div>
+  <div class="rss-title">Risk Signal Score (RSS)</div>
 
   <div class="rss-score-row">
     <div>
-      <span class="rss-score">{score_disp}</span>
+      <span class="rss-score">{_esc(score)}</span>
       <span class="rss-outof">/100</span>
     </div>
-    <div class="rss-band">{band_disp}</div>
+    <div class="rss-band">{_esc(band)}</div>
   </div>
 
-  <div class="rss-note">{note_disp}</div>
+  <div class="rss-note">{_esc(note)}</div>
 
-  <div class="rss-meta"><b>{_html_escape(comp_line)}</b></div>
-  <div class="rss-meta">{_html_escape(basis_line)}</div>
+  <div class="rss-meta"><b>{_esc(status_line)}</b></div>
+  <div class="rss-meta">{_esc(basis_line)}</div>
 
   {missing_html}
 </div>
 """.strip()
-
-
-def _html_escape(s: str) -> str:
-    import html
-    return html.escape(str(s), quote=True)
