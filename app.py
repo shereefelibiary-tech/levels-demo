@@ -2386,9 +2386,34 @@ with tab_report:
         st.write("DEBUG: out['version'] error:", _e)
 
 
-          # Tight criteria table (rings) + Where this patient falls
+      # Tight criteria table (rings) + Where this patient falls
     # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
     _ins = (out.get("insights") or {})
+    if not isinstance(_ins, dict):
+        _ins = {}
+        out["insights"] = _ins
+
+    # If an adapter layer stripped engine-owned HTML/version, rehydrate from le.evaluate(patient) (only when missing).
+    _need_criteria = not bool((_ins.get("criteria_table_html") or "").strip())
+    _need_falls = not bool((_ins.get("where_patient_falls_html") or "").strip())
+    _need_version = not bool(out.get("version"))
+
+    if _need_criteria or _need_falls or _need_version:
+        try:
+            _engine_out = le.evaluate(patient)
+            if isinstance(_engine_out, dict):
+                _engine_ins = _engine_out.get("insights") or {}
+                if isinstance(_engine_ins, dict):
+                    if _need_criteria:
+                        _ins["criteria_table_html"] = str(_engine_ins.get("criteria_table_html") or "")
+                    if _need_falls:
+                        _ins["where_patient_falls_html"] = str(_engine_ins.get("where_patient_falls_html") or "")
+                if _need_version:
+                    _v = _engine_out.get("version")
+                    out["version"] = _v if isinstance(_v, dict) else {}
+        except Exception:
+            # Silent: do not break report rendering
+            pass
 
     def _call_with_supported_kwargs(fn, kwargs: dict):
         import inspect
@@ -2715,6 +2740,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
