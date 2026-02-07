@@ -384,8 +384,10 @@ def extract_fhx(raw: str) -> Tuple[Optional[bool], Optional[str]]:
     t = raw.lower()
 
     # explicit negative
-    if re.search(r"\b(family history|famhx)\b\s*[:=]\s*(none|no|negative)\b", t):
+    if re.search(r"\b(family history|famhx|fhx)\b\s*[:=]\s*(none|no|negative|denies)\b", t):
         return False, "None / Unknown"
+
+    event = r"(mi|heart\s*attack|cad|coronary|ascvd|stroke|pci|cabg|pad)"
 
     # broad string in your test case: "Family history: Father with premature ASCVD <55"
     if re.search(r"\bfather\b.*\b(premature|<\s*55)\b", t):
@@ -398,6 +400,32 @@ def extract_fhx(raw: str) -> Tuple[Optional[bool], Optional[str]]:
         return True, "Multiple first-degree relatives"
     if re.search(r"\bfamily history\b.*\bpremature\b", t):
         return True, "Other premature relative"
+
+    # Father event with age "at 49" / "age 49" / "49 yo"
+    m = re.search(rf"\bfather\b.*\b{event}\b.*\b(?:at|age)\s*([0-9]{{2}})\b", t)
+    if not m:
+        m = re.search(rf"\bfather\b.*\b{event}\b.*\b([0-9]{{2}})\s*(?:yo|y\.o\.|years\s*old)\b", t)
+    if m:
+        try:
+            a = int(m.group(1))
+        except Exception:
+            a = None
+        if a is not None and a < 55:
+            return True, "Father with premature ASCVD (MI/stroke/PCI/CABG/PAD) <55"
+        return True, "Family history of ASCVD (non-premature)"
+
+    # Mother event with age
+    m = re.search(rf"\bmother\b.*\b{event}\b.*\b(?:at|age)\s*([0-9]{{2}})\b", t)
+    if not m:
+        m = re.search(rf"\bmother\b.*\b{event}\b.*\b([0-9]{{2}})\s*(?:yo|y\.o\.|years\s*old)\b", t)
+    if m:
+        try:
+            a = int(m.group(1))
+        except Exception:
+            a = None
+        if a is not None and a < 65:
+            return True, "Mother with premature ASCVD (MI/stroke/PCI/CABG/PAD) <65"
+        return True, "Family history of ASCVD (non-premature)"
 
     return None, None
 
@@ -413,6 +441,54 @@ def extract_cac_not_done(raw: str) -> bool:
 # ----------------------------
 # PREVENT helpers: BMI, eGFR, lipid-lowering therapy
 # ----------------------------
+def extract_height_cm(raw: str) -> Optional[float]:
+    t = raw.lower()
+
+    m = re.search(r"\bheight\s*[:=]?\s*([0-9]{2,3}(?:\.\d+)?)\s*cm\b", t, flags=re.I)
+    if m:
+        return _to_float(m.group(1))
+
+    m = re.search(r"\b([4-7])\s*'\s*([0-9]{1,2})\s*(?:\"|in)?\b", t, flags=re.I)
+    if m:
+        try:
+            ft = int(m.group(1))
+            inch = int(m.group(2))
+            total_in = ft * 12 + inch
+            return round(total_in * 2.54, 1)
+        except Exception:
+            return None
+
+    m = re.search(r"\bheight\s*[:=]?\s*([0-9]{2}(?:\.\d+)?)\s*(?:in|inch|inches)\b", t, flags=re.I)
+    if m:
+        v = _to_float(m.group(1))
+        return None if v is None else round(v * 2.54, 1)
+
+    return None
+
+
+def extract_weight_kg(raw: str) -> Optional[float]:
+    t = raw.lower()
+
+    m = re.search(r"\bweight\s*[:=]?\s*([0-9]{2,3}(?:\.\d+)?)\s*kg\b", t, flags=re.I)
+    if m:
+        return _to_float(m.group(1))
+
+    m = re.search(r"\bweight\s*[:=]?\s*([0-9]{2,3}(?:\.\d+)?)\s*lb\b", t, flags=re.I)
+    if m:
+        v = _to_float(m.group(1))
+        return None if v is None else round(v * 0.45359237, 2)
+
+    return None
+
+
+def compute_bmi(height_cm: float, weight_kg: float) -> Optional[float]:
+    if height_cm <= 0 or weight_kg <= 0:
+        return None
+    h_m = height_cm / 100.0
+    bmi = weight_kg / (h_m * h_m)
+    return round(bmi, 1)
+
+
 def extract_bmi(raw: str) -> Optional[float]:
     t = raw.lower()
 
@@ -430,6 +506,12 @@ def extract_bmi(raw: str) -> Optional[float]:
     v = _first_float(r"\bestimated\s+body\s*mass\s*index\s+is\s+(\d{1,3}(?:\.\d+)?)\b", t)
     if v is not None:
         return v
+
+    # 4) Compute from height/weight if present
+    h = extract_height_cm(raw)
+    w = extract_weight_kg(raw)
+    if h is not None and w is not None:
+        return compute_bmi(h, w)
 
     return None
 
@@ -526,7 +608,8 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
         r"\b(?:total\s*(?:chol(?:esterol)?|tc)|chol(?:esterol)?|tc)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b",
         t
     )
-        # LDL — tolerant (covers "LDL Chol Calc", "LDL Calculated", "LDL (NIH Calc)", etc.)
+
+    # LDL — tolerant (covers "LDL Chol Calc", "LDL Calculated", "LDL (NIH Calc)", etc.)
     ldl = _first_float(
         r"\bldl\b(?:\s*[\-\s]*c\b)?(?:\s*chol(?:esterol)?)?"
         r"(?:\s*(?:calc|calculated|nih\s*calc|chol\s*calc|cholesterol\s*calc|chol\s*calculated))?"
@@ -542,7 +625,6 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
                     ldl = _to_float(m.group(1))
                     if ldl is not None:
                         break
-
 
     # HDL tolerance: allow high HDL values (parser should not reject >100).
     # We'll accept up to 300 as "tolerant" and let downstream logic clamp if needed.
