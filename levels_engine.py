@@ -2439,6 +2439,8 @@ def canonical_aspirin_copy(asp: Dict[str, Any]) -> Dict[str, Any]:
         "headline": "Aspirin: Not indicated.",
         "detail": None,
     }
+
+
 def canonical_ckm_copy(ckm: Dict[str, Any], decision_conf: str) -> Optional[Dict[str, Any]]:
     """
     Canonical CKM context language used by BOTH UI and EMR.
@@ -2476,6 +2478,97 @@ def canonical_ckm_copy(ckm: Dict[str, Any], decision_conf: str) -> Optional[Dict
         "contributors": contributors,
     }
 
+
+def canonical_where_patient_falls(
+    p: Patient,
+    out: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Canonical 'Where this patient falls' table used by BOTH UI and EMR.
+    Single source of truth: meaning comes from engine outputs (levels/triggers/plaque).
+    """
+
+    lvl = out.get("levels") or {}
+    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
+    triggers = set((lvl.get("triggers") or []))
+
+    evidence = (lvl.get("evidence") or {})
+    cac_val = evidence.get("cac_value", None)
+    cac_known = isinstance(cac_val, int)
+
+    # ---- display values (engine-owned) ----
+    apob_disp = f"{fmt_int(p.get('apob'))} mg/dL" if p.has("apob") else "—"
+    a1c_disp = f"{fmt_1dp(p.get('a1c'))}%" if p.has("a1c") else "—"
+    smoke_disp = "Yes" if p.get("smoking") is True else ("No" if p.get("smoking") is False else "—")
+    cac_disp = ("Unmeasured" if not cac_known else str(int(cac_val)))
+
+    # ---- helpers ----
+    def _trigger_prefix(prefix: str) -> bool:
+        return any(str(t).startswith(prefix) for t in triggers)
+
+    def _trigger_exact(label: str) -> bool:
+        return any(str(t) == label for t in triggers)
+
+    # ---- level effect ----
+    # ApoB
+    if _trigger_prefix("ApoB"):
+        apob_effect = "Trigger (major driver)"
+    else:
+        # If plaque already drives posture (Level 4/5), ApoB is supportive for targets/intensity.
+        apob_effect = "Supportive (targets/intensity)" if (cac_known and int(cac_val) > 0 and level >= 4) else "—"
+
+    # A1c
+    a1c_effect = "Trigger (major driver)" if _trigger_prefix("Diabetes") else "—"
+
+    # Smoking
+    smoke_effect = "Trigger (major driver)" if _trigger_exact("Smoking") else "—"
+
+    # CAC
+    if cac_known:
+        if int(cac_val) >= CAC_LEVEL5_CUT:
+            cac_effect = "Trigger (Level 5: CAC ≥100)"
+        elif int(cac_val) >= CAC_LEVEL4_MIN:
+            cac_effect = "Trigger (Level 4: CAC 1–99)"
+        else:
+            cac_effect = "Reassuring (CAC=0)"
+    else:
+        cac_effect = "Unmeasured"
+
+    rows = [
+        {
+            "group": "Atherogenic burden",
+            "marker": "ApoB",
+            "context": "ApoB (preferred marker)",
+            "patient": apob_disp,
+            "level_effect": apob_effect,
+        },
+        {
+            "group": "Glycemia",
+            "marker": "A1c",
+            "context": "A1c / diabetes status",
+            "patient": a1c_disp,
+            "level_effect": a1c_effect,
+        },
+        {
+            "group": "Smoking",
+            "marker": "Smoking",
+            "context": "Current smoking",
+            "patient": smoke_disp,
+            "level_effect": smoke_effect,
+        },
+        {
+            "group": "Plaque",
+            "marker": "CAC",
+            "context": "Coronary calcium (plaque evidence)",
+            "patient": cac_disp,
+            "level_effect": cac_effect,
+        },
+    ]
+
+    return {
+        "title": "WHERE THIS PATIENT FALLS",
+        "rows": rows,
+    }
 
 # -------------------------------------------------------------------
 # Authoritative action composer (WHY → WHAT)
@@ -3273,6 +3366,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
