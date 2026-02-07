@@ -1429,7 +1429,6 @@ def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]
         # NEW: point contributors for tower rendering (engine-owned truth)
         "components": components,
     }
-```
 
 # =========================
 # CHUNK 4 / 6 — END
@@ -4091,6 +4090,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
