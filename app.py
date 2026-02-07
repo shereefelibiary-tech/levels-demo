@@ -2260,16 +2260,23 @@ tab_report, tab_framework, tab_details, tab_debug = st.tabs(
 # REPORT TAB
 # ------------------------------------------------------------
 with tab_report:
-    # --- CKM vertical rail + Risk Continuum bar (side-by-side) ---
+    # --- CKM vertical rail + Risk Continuum bar + RSS (side-by-side) ---
     active_ckm_stage = _extract_ckm_stage_num(out)
 
-    left, right = st.columns([3.2, 1.05], gap="small")
+    left, mid, right = st.columns([3.2, 1.25, 1.05], gap="small")
+
     with left:
         st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
+
+    with mid:
+        st.markdown(render_rss_column_html(out), unsafe_allow_html=True)
+
     with right:
         components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=360)
 
-    stab_line = f"{decision_stability}" + (f" — {decision_stability_note}" if decision_stability_note else "")
+    stab_line = f"{decision_stability}" + (
+        f" — {decision_stability_note}" if decision_stability_note else ""
+    )
 
     # --- CKM inline line for Snapshot (engine-independent; derived from stage + eGFR) ---
     _egfr_v = None
@@ -2629,6 +2636,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
