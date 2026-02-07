@@ -273,7 +273,6 @@ def canonical_ckm_copy_stage(p: Patient, ckm: Dict[str, Any], decision_conf: str
         return None
 
     stage, driver = derive_ckm_stage_and_driver(p)
-    headline = f"Stage {stage} ({driver})" if stage != 0 else "Stage 0 (none identified)"
 
     contributors: List[str] = []
     if isinstance(ckm, dict):
@@ -286,6 +285,11 @@ def canonical_ckm_copy_stage(p: Patient, ckm: Dict[str, Any], decision_conf: str
         if ckm.get("hypertension_burden"):
             contributors.append("blood pressure burden")
 
+    # Suppress CKM copy when there are no CKM contributors (avoids "Stage 1 (dyslipidemia)" noise)
+    if not contributors:
+        return None
+
+    headline = f"Stage {stage} ({driver})" if stage != 0 else "Stage 0 (none identified)"
     detail = ("Contributors: " + ", ".join(contributors) + ".") if contributors else None
 
     return {
@@ -3266,6 +3270,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
