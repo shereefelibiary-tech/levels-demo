@@ -514,6 +514,48 @@ def extract_bmi(raw: str) -> Optional[float]:
         return compute_bmi(h, w)
 
     return None
+def extract_uacr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
+    """
+    Returns (uacr_mg_g, reason_if_missing_or_unreliable)
+
+    Accepts common formats:
+      - "UACR: 85 mg/g"
+      - "Urine albumin/creatinine ratio: 85"
+      - "Albumin/Creatinine Ratio 85 mg/g"
+      - "Microalb/Creat Ratio: 85"
+      - "ACR: 85" (guarded to avoid random "CR")
+    """
+    t = raw.lower()
+
+    # 1) Direct UACR / ACR labels
+    v = _first_float(
+        r"\b(?:uacr|urine\s+acr|albumin\/creatinine\s+ratio|albumin\s*\/\s*creatinine\s+ratio|"
+        r"urine\s+albumin\/creatinine\s+ratio|microalb\/creat(?:inine)?\s*ratio|microalbumin\/creat(?:inine)?\s*ratio|"
+        r"microalb(?:umin)?\s*\/\s*creat(?:inine)?\s*ratio)\b"
+        r"\s*[:=]?\s*(\d{1,5}(?:\.\d+)?)\b",
+        t,
+    )
+
+    # 2) Guarded "ACR" (avoid matching "Cr" or "Creatinine")
+    if v is None:
+        v = _first_float(r"\bacr\b\s*[:=]?\s*(\d{1,5}(?:\.\d+)?)\b", t)
+
+    if v is not None:
+        # sanity range (mg/g)
+        if v < 0 or v > 10000:
+            return v, "uacr_value_out_of_range_verify"
+        return v, None
+
+    # 3) Explicit “not available” / “no results”
+    if re.search(r"\b(uacr|acr|albumin\/creatinine\s+ratio)\b.*\b(no\s+results\s+found|not\s+available|unavailable)\b", t):
+        return None, "uacr_unavailable"
+
+    return None, None
+
+
+def extract_uacr(raw: str) -> Optional[float]:
+    v, _reason = extract_uacr_with_reason(raw)
+    return v
 
 
 def extract_egfr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
@@ -719,9 +761,15 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
 
     # PREVENT-related
     extracted["bmi"] = extract_bmi(raw)
+
     egfr_val, egfr_reason = extract_egfr_with_reason(raw)
     extracted["egfr"] = egfr_val
     extracted["egfr_reason"] = egfr_reason
+
+    uacr_val, uacr_reason = extract_uacr_with_reason(raw)
+    extracted["uacr"] = uacr_val
+    extracted["uacr_reason"] = uacr_reason
+
     extracted["lipidLowering"] = extract_lipid_lowering(raw)
 
     # Diabetes override: A1c >= 6.5 forces diabetes = True
@@ -747,6 +795,7 @@ def parse_ascvd_block_with_report(raw: str) -> ParseReport:
         ("a1c", "A1c"),
         ("bmi", "BMI (PREVENT)"),
         ("egfr", "eGFR (PREVENT)"),
+        ("uacr", "UACR (PREVENT)"),
     ]:
         if extracted.get(key) is None:
             warnings.append(f"{label} not detected")
