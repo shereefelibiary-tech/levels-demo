@@ -1160,70 +1160,262 @@ def clamp(x: int, lo: int = 0, hi: int = 100) -> int:
     return max(lo, min(hi, x))
 
 def rss_band(score: int) -> str:
-    if score <= 19: return "Low"
-    if score <= 39: return "Mild"
-    if score <= 59: return "Moderate"
-    if score <= 79: return "High"
+    if score <= 19:
+        return "Low"
+    if score <= 39:
+        return "Mild"
+    if score <= 59:
+        return "Moderate"
+    if score <= 79:
+        return "High"
     return "Very high"
 
+
+# ---- RSS governance constants (version-locked with RSS v1.1) ----
+A1C_PREDIABETES_MIN = 5.7
+A1C_PREDIABETES_MAX = 6.4
+
+A1C_DIABETES_MIN = 6.5
+A1C_DIABETES_TIER1_MAX = 7.9     # diabetes-range glycemia
+A1C_POOR_CONTROL_MIN = 8.0
+A1C_POOR_CONTROL_MAX = 9.4
+A1C_VERY_POOR_MIN = 9.5
+
+
+def _rss_glycemia_points(p: Patient) -> int:
+    """
+    Monotonic glycemia points (RSS v1.1):
+      - A1c <5.7 -> 0
+      - A1c 5.7–6.4 -> 1
+      - A1c 6.5–7.9 -> 6
+      - A1c 8.0–9.4 -> 8
+      - A1c >=9.5 -> 10 (cap)
+    If diabetes flag is True but A1c is missing/invalid, assigns baseline 6.
+    """
+    # Diabetes flag can establish baseline if A1c missing
+    dm_flag = bool(p.get("diabetes") is True)
+
+    if not p.has("a1c"):
+        return 6 if dm_flag else 0
+
+    a1c = safe_float(p.get("a1c"), default=float("nan"))
+    try:
+        if math.isnan(a1c):
+            return 6 if dm_flag else 0
+    except Exception:
+        # If math.isnan fails for some reason, fall back to dm flag
+        return 6 if dm_flag else 0
+
+    # Normal
+    if a1c < 5.7:
+        return 0
+
+    # Prediabetes (single low-weight signal to preserve longitudinal intuition)
+    if A1C_PREDIABETES_MIN <= a1c <= A1C_PREDIABETES_MAX:
+        return 1
+
+    # Diabetes-range tiers
+    if a1c >= A1C_VERY_POOR_MIN:
+        return 10
+    if A1C_POOR_CONTROL_MIN <= a1c <= A1C_POOR_CONTROL_MAX:
+        return 8
+    if A1C_DIABETES_MIN <= a1c <= A1C_DIABETES_TIER1_MAX:
+        return 6
+
+    # If A1c is between 6.41 and 6.49, treat as prediabetes-range signal (conservative)
+    # (rare rounding/entry artifacts; avoids discontinuity)
+    if 6.4 < a1c < 6.5:
+        return 1
+
+    # Fallback (should not be reached)
+    return 0
+
+
+def _rss_basis_and_missing(p: Patient) -> Dict[str, Any]:
+    """
+    RSS completeness + basis contract (Option 1):
+
+      rss_basis:
+        - "ApoB" if ApoB present
+        - "LDL" if ApoB missing but LDL present
+        - "Unknown" if neither present
+
+      rss_is_complete:
+        - True if ApoB present AND Lp(a) present AND ASCVD status is explicitly known (True/False)
+        - CAC is not required for completeness, but tracked in rss_missing and rss_plaque_assessed
+
+      rss_plaque_assessed:
+        - True if CAC measured OR ASCVD True
+        - False otherwise
+
+      rss_missing includes:
+        - "ApoB" if ApoB missing
+        - "Lp(a)" if Lp(a) missing
+        - "ASCVD status" if ascvd is neither True nor False
+        - "CAC" if CAC missing and ASCVD is not True
+    """
+    # Basis
+    if p.has("apob"):
+        rss_basis = "ApoB"
+    elif p.has("ldl"):
+        rss_basis = "LDL"
+    else:
+        rss_basis = "Unknown"
+
+    rss_missing: List[str] = []
+
+    if not p.has("apob"):
+        rss_missing.append("ApoB")
+    if not p.has("lpa"):
+        rss_missing.append("Lp(a)")
+
+    ascvd_val = p.get("ascvd")
+    ascvd_known = (ascvd_val is True) or (ascvd_val is False)
+    if not ascvd_known:
+        rss_missing.append("ASCVD status")
+
+    rss_plaque_assessed = bool(p.has("cac") or (ascvd_val is True))
+    if not rss_plaque_assessed:
+        rss_missing.append("CAC")
+
+    rss_is_complete = bool(p.has("apob") and p.has("lpa") and ascvd_known)
+
+    return {
+        "rss_basis": rss_basis,
+        "rss_missing": rss_missing,
+        "rss_is_complete": rss_is_complete,
+        "rss_plaque_assessed": rss_plaque_assessed,
+    }
+
+
 def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # ------------------------------------------------------------
+    # Structural burden (dominant by design)
+    # ------------------------------------------------------------
     burden = 0
     if p.get("ascvd") is True:
         burden = 55
     elif p.has("cac"):
         cac = safe_float(p.get("cac"), 0)
-        if cac == 0: burden = 0
-        elif cac <= 9: burden = 20
-        elif cac <= 99: burden = 30
-        elif cac <= 399: burden = 45
-        else: burden = 55
+        if cac == 0:
+            burden = 0
+        elif cac <= 9:
+            burden = 20
+        elif cac <= 99:
+            burden = 30
+        elif cac <= 399:
+            burden = 45
+        else:
+            burden = 55
 
+    # ------------------------------------------------------------
+    # Atherogenic burden (ApoB preferred; LDL fallback)
+    # ------------------------------------------------------------
     athero = 0
     if p.has("apob"):
         ap = safe_float(p.get("apob"))
-        if ap < 80: athero = 0
-        elif ap <= 99: athero = 8
-        elif ap <= 119: athero = 15
-        elif ap <= 149: athero = 20
-        else: athero = 25
+        if ap < 80:
+            athero = 0
+        elif ap <= 99:
+            athero = 8
+        elif ap <= 119:
+            athero = 15
+        elif ap <= 149:
+            athero = 20
+        else:
+            athero = 25
     elif p.has("ldl"):
         ld = safe_float(p.get("ldl"))
-        if ld < 100: athero = 0
-        elif ld <= 129: athero = 5
-        elif ld <= 159: athero = 10
-        elif ld <= 189: athero = 15
-        else: athero = 20
+        if ld < 100:
+            athero = 0
+        elif ld <= 129:
+            athero = 5
+        elif ld <= 159:
+            athero = 10
+        elif ld <= 189:
+            athero = 15
+        else:
+            athero = 20
 
+    # ------------------------------------------------------------
+    # Genetics (capped)
+    # ------------------------------------------------------------
     genetics = 0
-    if lpa_elevated(p, trace): genetics += 10
-    if p.get("fhx") is True: genetics += 5
+    if lpa_elevated(p, trace):
+        genetics += 10
+    if p.get("fhx") is True:
+        genetics += 5
     genetics = min(genetics, 15)
 
+    # ------------------------------------------------------------
+    # Inflammation (capped)
+    # ------------------------------------------------------------
     infl = 0
-    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2: infl += 5
-    if has_chronic_inflammatory_disease(p): infl += 5
+    if p.has("hscrp") and safe_float(p.get("hscrp")) >= 2:
+        infl += 5
+    if has_chronic_inflammatory_disease(p):
+        infl += 5
     infl = min(infl, 10)
 
+    # ------------------------------------------------------------
+    # Metabolic / behavioral (monotonic glycemia tiers; capped)
+    # ------------------------------------------------------------
     metab = 0
-    if p.get("diabetes") is True: metab += 6
-    if p.get("smoking") is True: metab += 4
 
-    a1s = a1c_status(p)
-    # Buffer: near diabetes boundary signals attention without labeling disease
-    if a1s == "near_diabetes_boundary":
-        metab += 1
-    elif a1s == "prediabetes":
-        metab += 2
+    # Glycemia severity (monotonic)
+    gly_pts = int(_rss_glycemia_points(p))
+    metab += gly_pts
+
+    # Smoking (independent accelerator)
+    if p.get("smoking") is True:
+        metab += 4
+
+    # Cap metabolic domain (prevents dominance)
     metab = min(metab, 10)
 
+    # ------------------------------------------------------------
+    # Completeness + basis flags
+    # ------------------------------------------------------------
+    flags = _rss_basis_and_missing(p)
+
+    # ------------------------------------------------------------
+    # Total
+    # ------------------------------------------------------------
     total = clamp(int(round(burden + athero + genetics + infl + metab)))
+
+    add_trace(
+        trace,
+        "RSS_components_v1_1",
+        {
+            "burden": int(burden),
+            "athero": int(athero),
+            "genetics": int(genetics),
+            "inflammation": int(infl),
+            "metabolic": int(metab),
+            "glycemia_points": int(gly_pts),
+            "basis": flags["rss_basis"],
+            "missing": list(flags["rss_missing"]),
+            "is_complete": bool(flags["rss_is_complete"]),
+            "plaque_assessed": bool(flags["rss_plaque_assessed"]),
+        },
+        "RSS components computed (v1.1)",
+    )
+
     add_trace(trace, "RSS_total", total, "RSS computed")
 
     return {
         "score": total,
         "band": rss_band(total),
         "note": "Biologic + plaque signal (not event probability).",
+
+        # NEW: completeness + basis contract (for longitudinal interpretability)
+        "basis": flags["rss_basis"],                       # "ApoB" | "LDL" | "Unknown"
+        "is_complete": bool(flags["rss_is_complete"]),     # True/False
+        "plaque_assessed": bool(flags["rss_plaque_assessed"]),
+        "missing": list(flags["rss_missing"]),             # e.g., ["ApoB", "Lp(a)", "CAC"]
+        "version": "RSS v1.1",
     }
+
 # =========================
 # CHUNK 4 / 6 — END
 # =========================
@@ -3884,6 +4076,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
