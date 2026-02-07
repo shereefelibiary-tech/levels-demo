@@ -2366,24 +2366,25 @@ with tab_report:
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
             unsafe_allow_html=True
         )
-      # ===== DEBUG: table HTML presence =====
-    _ins = (out.get("insights") or {})
-    if not isinstance(_ins, dict):
-        st.write("DEBUG: out['insights'] is not a dict:", type(_ins))
-        _ins = {}
+          # ===== DEBUG: which engine module is actually running? =====
+    try:
+        st.write("DEBUG: le module =", le)
+        st.write("DEBUG: le.__file__ =", getattr(le, "__file__", "NO __file__"))
+    except Exception as _e:
+        st.write("DEBUG: le module path error:", _e)
 
-    _criteria_html = _ins.get("criteria_table_html") or ""
-    _falls_html = _ins.get("where_patient_falls_html") or ""
+    try:
+        # If you also import levels_engine directly anywhere, show it too
+        import levels_engine as _lemod  # noqa: F401
+        st.write("DEBUG: levels_engine.__file__ =", getattr(_lemod, "__file__", "NO __file__"))
+    except Exception as _e:
+        st.write("DEBUG: direct import levels_engine failed:", _e)
 
-    st.write("DEBUG: insights keys =", sorted(list(_ins.keys())))
-    st.write("DEBUG: criteria_table_html length =", len(_criteria_html))
-    st.write("DEBUG: where_patient_falls_html length =", len(_falls_html))
-    st.write("DEBUG: trace tail =", (out.get("trace") or [])[-5:])
-    st.write(
-        "DEBUG: render_criteria_table_compact exists =",
-        ("render_criteria_table_compact" in globals())
-        and callable(globals().get("render_criteria_table_compact")),
-    )
+    try:
+        st.write("DEBUG: out['version'] =", out.get("version"))
+    except Exception as _e:
+        st.write("DEBUG: out['version'] error:", _e)
+
 
           # Tight criteria table (rings) + Where this patient falls
     # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
@@ -2714,6 +2715,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
