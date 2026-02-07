@@ -2353,18 +2353,10 @@ with tab_report:
 
     # Tight criteria table (rings)
     st.markdown(
-        render_criteria_table_compact(
-            apob_v=data.get("apob"),
-            ldl_v=data.get("ldl"),
-            a1c_v=data.get("a1c"),
-            hscrp_v=data.get("hscrp"),
-            lpa_v=data.get("lpa"),
-            lpa_unit_v=data.get("lpa_unit"),
-            smoker_v=bool(data.get("smoking")),
-            diabetes_v=bool(data.get("diabetes")),
-        ),
+        render_criteria_table_compact(out=out, patient_data=data),
         unsafe_allow_html=True,
     )
+
 
     # Secondary insights (engine-gated)
     rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
@@ -2618,6 +2610,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
