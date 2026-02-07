@@ -526,7 +526,23 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
         r"\b(?:total\s*(?:chol(?:esterol)?|tc)|chol(?:esterol)?|tc)\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b",
         t
     )
-    ldl = _first_float(r"\bldl(?:\s*-\s*c|\s*c|-c)?\s*(?:chol(?:esterol)?)?\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b", t)
+        # LDL — tolerant (covers "LDL Chol Calc", "LDL Calculated", "LDL (NIH Calc)", etc.)
+    ldl = _first_float(
+        r"\bldl\b(?:\s*[\-\s]*c\b)?(?:\s*chol(?:esterol)?)?"
+        r"(?:\s*(?:calc|calculated|nih\s*calc|chol\s*calc|cholesterol\s*calc|chol\s*calculated))?"
+        r"\s*[:=]?\s*(\d{1,4}(?:\.\d+)?)\b",
+        t,
+    )
+    if ldl is None:
+        # Fallback: catch table-style lines that contain LDL and a number later on the same line
+        for line in t.splitlines():
+            if re.search(r"\bldl\b|ldl[\-\s]*c|ldl\s*chol", line, flags=re.I):
+                m = re.search(r"(\d{1,4}(?:\.\d+)?)\b", line)
+                if m:
+                    ldl = _to_float(m.group(1))
+                    if ldl is not None:
+                        break
+
 
     # HDL tolerance: allow high HDL values (parser should not reject >100).
     # We'll accept up to 300 as "tolerant" and let downstream logic clamp if needed.
