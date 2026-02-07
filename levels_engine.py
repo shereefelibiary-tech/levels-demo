@@ -1287,8 +1287,6 @@ def _rss_basis_and_missing(p: Patient) -> Dict[str, Any]:
         "rss_plaque_assessed": rss_plaque_assessed,
     }
 
-
-```python
 def risk_signal_score(p: Patient, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     # ------------------------------------------------------------
     # Structural burden (dominant by design)
@@ -4093,6 +4091,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
