@@ -60,14 +60,33 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
         score_i = max(0, min(100, int(score_i)))
 
     if not comps:
-        return f"""
-<div style="border:1px solid rgba(31,41,55,0.14); border-radius:16px; background:#fff; padding:14px;">
-  <div style="font-variant-caps:all-small-caps; letter-spacing:0.14em; font-weight:975;">
-    Risk Signal Score (RSS)
-  </div>
-  <div style="margin-top:8px; color:rgba(31,41,55,0.72); font-size:0.9rem;">
-    Tower unavailable (RSS components not provided by engine).
-  </div>
+        return """
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&display=swap');
+  .rssEmpty-wrap{
+    font-family: "Source Sans 3", "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    border:1px solid rgba(31,41,55,0.14);
+    border-radius:16px;
+    background:#fff;
+    padding:14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+  }
+  .rssEmpty-title{
+    font-variant-caps:all-small-caps;
+    letter-spacing:0.14em;
+    font-weight:900;
+    color: rgba(17,24,39,0.90);
+  }
+  .rssEmpty-note{
+    margin-top:8px;
+    color:rgba(31,41,55,0.72);
+    font-size:0.9rem;
+    line-height:1.25;
+  }
+</style>
+<div class="rssEmpty-wrap">
+  <div class="rssEmpty-title">Risk Signal Score (RSS)</div>
+  <div class="rssEmpty-note">Tower unavailable (RSS components not provided by engine).</div>
 </div>
 """.strip()
 
@@ -94,7 +113,7 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
 
     # Convert show_points -> pixels. Guarantee min pixel height for non-zero show_points.
     # If min heights overflow the tower, we scale them down proportionally.
-    raw_px = []
+    raw_px: List[int] = []
     for s in segs:
         if s["show_points"] <= 0:
             raw_px.append(0)
@@ -107,7 +126,7 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
         scale = tower_height_px / float(sum_px)
         raw_px = [int(max(1, round(px * scale))) if px > 0 else 0 for px in raw_px]
 
-    # Build segment divs from bottom to top
+    # Build segment divs from bottom to top (points only in segment; labels live in legend)
     seg_divs = ""
     for s, px in zip(reversed(segs), reversed(raw_px)):
         if px <= 0:
@@ -115,8 +134,7 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
         seg_divs += f"""
 <div class="rssT-seg" style="height:{px}px; background:{_esc(s['color'])};"
      title="{_esc(s['label'])}: {_esc(s['points'])} points">
-    <div class="rssT-seg-pts">{_esc(s['points'])}</div>
-
+  <div class="rssT-seg-pts">{_esc(s['points'])}</div>
 </div>
 """.strip()
 
@@ -133,7 +151,14 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
 
     return f"""
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;800;900&display=swap');
+
+  :root {{
+    --rc-font: "Source Sans 3", "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }}
+
   .rssT-wrap {{
+    font-family: var(--rc-font);
     border: 1px solid rgba(31,41,55,0.14);
     border-radius: 16px;
     background: linear-gradient(180deg, #ffffff 0%, #fbfbfc 100%);
@@ -150,15 +175,17 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
   }}
 
   .rssT-title {{
+    font-family: var(--rc-font);
     font-variant-caps: all-small-caps;
     letter-spacing: 0.14em;
-    font-weight: 975;
+    font-weight: 900;
     font-size: 0.98rem;
     color: rgba(17,24,39,0.90);
   }}
 
   .rssT-chip {{
-    font-weight: 950;
+    font-family: var(--rc-font);
+    font-weight: 800;
     font-size: 0.86rem;
     padding: 3px 10px;
     border-radius: 999px;
@@ -169,15 +196,17 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
   }}
 
   .rssT-score {{
+    font-family: var(--rc-font);
     margin-top: 2px;
-    font-weight: 975;
+    font-weight: 900;
     font-size: 2.0rem;
     line-height: 1.0;
     color: #111827;
   }}
 
   .rssT-score small {{
-    font-weight: 900;
+    font-family: var(--rc-font);
+    font-weight: 700;
     font-size: 0.9rem;
     color: rgba(31,41,55,0.62);
     margin-left: 6px;
@@ -200,38 +229,29 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.9);
   }}
 
   .rssT-seg {{
     width: 100%;
-    border-top: 1px solid rgba(255,255,255,0.35);
+    border-top: 1px solid rgba(255,255,255,0.26);
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     padding: 0 10px;
     box-sizing: border-box;
   }}
 
-  .rssT-seg-label {{
-    font-size: 0.82rem;
-    font-weight: 950;
-    color: rgba(255,255,255,0.95);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 175px;
-    text-shadow: 0 1px 0 rgba(0,0,0,0.15);
-  }}
-
   .rssT-seg-pts {{
-    font-size: 0.82rem;
-    font-weight: 950;
-    color: rgba(255,255,255,0.95);
-    margin-left: 10px;
-    text-shadow: 0 1px 0 rgba(0,0,0,0.15);
+    font-family: var(--rc-font);
+    font-size: 0.78rem;
+    font-weight: 900;
+    color: rgba(255,255,255,0.96);
+    text-shadow: 0 1px 0 rgba(0,0,0,0.16);
   }}
 
   .rssT-legend {{
+    font-family: var(--rc-font);
     border: 1px solid rgba(31,41,55,0.10);
     border-radius: 12px;
     background: #ffffff;
@@ -239,9 +259,10 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
   }}
 
   .rssT-legend-title {{
+    font-family: var(--rc-font);
     font-variant-caps: all-small-caps;
     letter-spacing: 0.10em;
-    font-weight: 975;
+    font-weight: 900;
     font-size: 0.82rem;
     color: rgba(17,24,39,0.82);
     margin-bottom: 8px;
@@ -266,7 +287,7 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
     gap: 8px;
     font-size: 0.84rem;
     color: rgba(17,24,39,0.86);
-    font-weight: 900;
+    font-weight: 800;
     min-width: 0;
   }}
 
@@ -279,9 +300,10 @@ def render_rss_column_html(out: Dict[str, Any]) -> str:
   }}
 
   .rssT-legend-pts {{
+    font-family: var(--rc-font);
     font-size: 0.84rem;
     color: rgba(31,41,55,0.72);
-    font-weight: 950;
+    font-weight: 900;
     flex: 0 0 auto;
   }}
 </style>
