@@ -2270,7 +2270,7 @@ with tab_report:
         st.markdown(render_risk_continuum_bar(level, sub), unsafe_allow_html=True)
 
     with mid:
-        st.markdown(render_rss_column_html(out), unsafe_allow_html=True)
+        components.html(render_rss_column_html(out), height=360)
 
     with right:
         components.html(render_ckm_vertical_rail_html(active_ckm_stage), height=360)
@@ -2637,6 +2637,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
