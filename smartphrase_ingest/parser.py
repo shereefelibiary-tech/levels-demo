@@ -514,6 +514,7 @@ def extract_bmi(raw: str) -> Optional[float]:
         return compute_bmi(h, w)
 
     return None
+
 def extract_uacr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
     """
     Returns (uacr_mg_g, reason_if_missing_or_unreliable)
