@@ -828,12 +828,14 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
         "a1c",
         "smoker", "diabetes",
         "bpTreated", "africanAmerican",
-        "bmi", "egfr", "lipidLowering",
+        "bmi", "egfr", "uacr", "lipidLowering",
         # additive keys:
         "fhx", "fhx_text", "cac_not_done",
         "egfr_reason",
         "dm_meds_raw",
+        "uacr_reason",
     )
+
 
     for k in keys:
         if x.get(k) is not None:
