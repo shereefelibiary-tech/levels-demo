@@ -1825,6 +1825,16 @@ def _mild_signals(p: Patient) -> List[str]:
             ld = safe_float(p.get("ldl"))
             if MILD_LDL_MIN <= ld <= MILD_LDL_MAX:
                 sig.append(f"LDL {int(MILD_LDL_MIN)}–{int(MILD_LDL_MAX)} (ApoB not measured)")
+            else:
+                # Guardrail: when CAC=0 and ApoB is unmeasured, LDL 130–159 behaves as a mild signal
+                # (avoid false Level 1 when LDL is slightly above major cut but plaque is absent and near-term risk is very low)
+                cac0 = False
+                try:
+                    cac0 = p.has("cac") and int(safe_float(p.get("cac"), default=-1)) == 0
+                except Exception:
+                    cac0 = False
+                if cac0 and 130 <= ld <= 159:
+                    sig.append("LDL 130–159 (CAC=0; ApoB not measured)")
 
     # Glycemia mild / near-boundary (uses your a1c_status)
     a1s = a1c_status(p)
@@ -1842,7 +1852,6 @@ def _mild_signals(p: Patient) -> List[str]:
         sig.append("Premature family history")
 
     return sig
-
 
 def _high_signals(p: Patient, risk10: Dict[str, Any], trace: List[Dict[str, Any]]) -> List[str]:
     """
@@ -3257,6 +3266,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
