@@ -161,14 +161,15 @@ def evaluate_v4(p: Patient) -> Dict[str, Any]:
 
     # Prefer v4-provided parenthetical when present; otherwise render from enhancers list.
     enh_txt = ""
-    if isinstance(legacy_out, dict):
-        pass
     if enh:
         enh_txt = f" ({', '.join(enh)})"
 
     asp_status = derive_aspirin_status(legacy_out)
 
     return {
+        "version": legacy.VERSION,
+        "system": legacy.SYSTEM_NAME,
+
         # Core position
         "level_num": int(lvl.get("managementLevel") or 2),
         "sublevel": (lvl.get("sublevel") or None),
