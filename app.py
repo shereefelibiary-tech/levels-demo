@@ -2388,105 +2388,114 @@ except Exception as _e:
 
 
 
-      # Tight criteria table (rings) + Where this patient falls
-    # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
-    _ins = (out.get("insights") or {})
-    if not isinstance(_ins, dict):
-        _ins = {}
-        out["insights"] = _ins
+# Tight criteria table (rings) + Where this patient falls
+# Prefer engine-owned HTML, but fall back to in-app renderers if missing.
+_ins = (out.get("insights") or {})
+if not isinstance(_ins, dict):
+    _ins = {}
+    out["insights"] = _ins
 
-    # If an adapter layer stripped engine-owned HTML/version, rehydrate from le.evaluate(patient) (only when missing).
-    _need_criteria = not bool((_ins.get("criteria_table_html") or "").strip())
-    _need_falls = not bool((_ins.get("where_patient_falls_html") or "").strip())
-    _need_version = not bool(out.get("version"))
+# ===== DEBUG: tables + EMR note presence =====
+try:
+    st.write("DEBUG: criteria_table_html length =", len(str(_ins.get("criteria_table_html") or "")))
+    st.write("DEBUG: where_patient_falls_html length =", len(str(_ins.get("where_patient_falls_html") or "")))
+    st.write("DEBUG: note_for_emr length =", len(str(note_for_emr or "")))
+    st.write("DEBUG: out keys =", sorted(list(out.keys())))
+except Exception:
+    pass
 
-    if _need_criteria or _need_falls or _need_version:
-        try:
-            _engine_out = le.evaluate(patient)
-            if isinstance(_engine_out, dict):
-                _engine_ins = _engine_out.get("insights") or {}
-                if isinstance(_engine_ins, dict):
-                    if _need_criteria:
-                        _ins["criteria_table_html"] = str(_engine_ins.get("criteria_table_html") or "")
-                    if _need_falls:
-                        _ins["where_patient_falls_html"] = str(_engine_ins.get("where_patient_falls_html") or "")
-                if _need_version:
-                    _v = _engine_out.get("version")
-                    out["version"] = _v if isinstance(_v, dict) else {}
-        except Exception:
-            # Silent: do not break report rendering
-            pass
+# If an adapter layer stripped engine-owned HTML/version, rehydrate from le.evaluate(patient) (only when missing).
+_need_criteria = not bool((_ins.get("criteria_table_html") or "").strip())
+_need_falls = not bool((_ins.get("where_patient_falls_html") or "").strip())
+_need_version = not bool(out.get("version"))
 
-    def _call_with_supported_kwargs(fn, kwargs: dict):
-        import inspect
+if _need_criteria or _need_falls or _need_version:
+    try:
+        _engine_out = le.evaluate(patient)
+        if isinstance(_engine_out, dict):
+            _engine_ins = _engine_out.get("insights") or {}
+            if isinstance(_engine_ins, dict):
+                if _need_criteria:
+                    _ins["criteria_table_html"] = str(_engine_ins.get("criteria_table_html") or "")
+                if _need_falls:
+                    _ins["where_patient_falls_html"] = str(_engine_ins.get("where_patient_falls_html") or "")
+            if _need_version:
+                _v = _engine_out.get("version")
+                out["version"] = _v if isinstance(_v, dict) else {}
+    except Exception:
+        # Silent: do not break report rendering
+        pass
 
-        sig = inspect.signature(fn)
-        params = sig.parameters
-        accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
-        if accepts_var_kw:
-            return fn(**kwargs)
+def _call_with_supported_kwargs(fn, kwargs: dict):
+    import inspect
 
-        filtered = {k: v for k, v in kwargs.items() if k in params}
-        return fn(**filtered)
+    sig = inspect.signature(fn)
+    params = sig.parameters
+    accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    if accepts_var_kw:
+        return fn(**kwargs)
 
-    _criteria_html = (_ins.get("criteria_table_html") or "").strip()
-    if _criteria_html:
-        st.markdown(_criteria_html, unsafe_allow_html=True)
-    else:
-        # Fallback renderer (older path) — safe kw filtering prevents TypeError drift.
-        _kw = {
-            "apob_v": data.get("apob"),
-            "ldl_v": data.get("ldl"),
-            "nonhdl_v": data.get("nonhdl"),
-            "hdl_v": data.get("hdl"),
-            "tc_v": data.get("tc"),
-            "tg_v": data.get("tg"),
-            "a1c_v": data.get("a1c"),
-            "sbp_v": data.get("sbp"),
-            "dbp_v": data.get("dbp"),
-            "egfr_v": data.get("egfr"),
-            "uacr_v": data.get("uacr"),
-            "bmi_v": data.get("bmi"),
-            "diabetes_v": bool(data.get("diabetes")),
-            "htn_v": bool(data.get("htn")),
-            "smoker_v": bool(data.get("smoker")),
-            "level": level,
-            "sub": sub,
-            "out": out,
-            "ev": ev,
-            "data": data,
-        }
-        try:
-            if "render_criteria_table_compact" in globals() and callable(globals()["render_criteria_table_compact"]):
-                _html_out = _call_with_supported_kwargs(globals()["render_criteria_table_compact"], _kw)
-                if isinstance(_html_out, str) and _html_out.strip():
-                    st.markdown(_html_out, unsafe_allow_html=True)
-                else:
-                    st.markdown(
-                        "<div class='compact-caption'>Criteria table unavailable (renderer returned empty).</div>",
-                        unsafe_allow_html=True,
-                    )
+    filtered = {k: v for k, v in kwargs.items() if k in params}
+    return fn(**filtered)
+
+_criteria_html = (_ins.get("criteria_table_html") or "").strip()
+if _criteria_html:
+    st.markdown(_criteria_html, unsafe_allow_html=True)
+else:
+    # Fallback renderer (older path) — safe kw filtering prevents TypeError drift.
+    _kw = {
+        "apob_v": data.get("apob"),
+        "ldl_v": data.get("ldl"),
+        "nonhdl_v": data.get("nonhdl"),
+        "hdl_v": data.get("hdl"),
+        "tc_v": data.get("tc"),
+        "tg_v": data.get("tg"),
+        "a1c_v": data.get("a1c"),
+        "sbp_v": data.get("sbp"),
+        "dbp_v": data.get("dbp"),
+        "egfr_v": data.get("egfr"),
+        "uacr_v": data.get("uacr"),
+        "bmi_v": data.get("bmi"),
+        "diabetes_v": bool(data.get("diabetes")),
+        "htn_v": bool(data.get("htn")),
+        "smoker_v": bool(data.get("smoker")),
+        "level": level,
+        "sub": sub,
+        "out": out,
+        "ev": ev,
+        "data": data,
+    }
+    try:
+        if "render_criteria_table_compact" in globals() and callable(globals()["render_criteria_table_compact"]):
+            _html_out = _call_with_supported_kwargs(globals()["render_criteria_table_compact"], _kw)
+            if isinstance(_html_out, str) and _html_out.strip():
+                st.markdown(_html_out, unsafe_allow_html=True)
             else:
                 st.markdown(
-                    "<div class='compact-caption'>Criteria table unavailable (renderer function not found).</div>",
+                    "<div class='compact-caption'>Criteria table unavailable (renderer returned empty).</div>",
                     unsafe_allow_html=True,
                 )
-        except Exception as _e:
+        else:
             st.markdown(
-                "<div class='compact-caption'>Criteria table unavailable (fallback renderer error).</div>",
+                "<div class='compact-caption'>Criteria table unavailable (renderer function not found).</div>",
                 unsafe_allow_html=True,
             )
-            st.exception(_e)
-
-    _falls_html = (_ins.get("where_patient_falls_html") or "").strip()
-    if _falls_html:
-        st.markdown(_falls_html, unsafe_allow_html=True)
-    else:
-        # If the engine isn't emitting this yet, show a minimal hint (no crash).
+    except Exception as _e:
         st.markdown(
-            "<div class='compact-caption'>Where this patient falls: not available (engine HTML missing).</div>",
+            "<div class='compact-caption'>Criteria table unavailable (fallback renderer error).</div>",
             unsafe_allow_html=True,
         )
+        st.exception(_e)
+
+_falls_html = (_ins.get("where_patient_falls_html") or "").strip()
+if _falls_html:
+    st.markdown(_falls_html, unsafe_allow_html=True)
+else:
+    # If the engine isn't emitting this yet, show a minimal hint (no crash).
+    st.markdown(
+        "<div class='compact-caption'>Where this patient falls: not available (engine HTML missing).</div>",
+        unsafe_allow_html=True,
+    )
 
 
     # Secondary insights (engine-gated)
@@ -2742,6 +2751,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
