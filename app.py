@@ -2605,6 +2605,9 @@ else:
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 st.subheader("EMR note (copy/paste)")
 
+# Ensure rec_action exists here (Action card computes it too, but later)
+rec_action = recommended_action_line_unified(out, fallback=plan_clean)
+
 note_for_emr = ""
 _note_err = None
 
@@ -2638,6 +2641,7 @@ if not str(note_for_emr).strip():
         st.exception(_note_err)
 
 emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+
 
 
 
@@ -2780,6 +2784,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
