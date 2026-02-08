@@ -2602,14 +2602,43 @@ else:
         )
 
     # EMR note  ✅ MUST stay inside tab_report
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-    st.subheader("EMR note (copy/paste)")
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+st.subheader("EMR note (copy/paste)")
 
-    note_for_emr = le.render_quick_text(patient, out)
-    note_for_emr = scrub_terms(note_for_emr)
-    note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
+note_for_emr = ""
+_note_err = None
 
-    emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+# 1) Try to render from the current (possibly v4-adapted) output
+try:
+    note_for_emr = le.render_quick_text(patient, out) or ""
+except Exception as _e:
+    _note_err = _e
+    note_for_emr = ""
+
+# 2) If empty or failed, rehydrate from the legacy engine output (same strategy as tables)
+if not str(note_for_emr).strip():
+    try:
+        _engine_out_for_note = le.evaluate(patient)
+        note_for_emr = le.render_quick_text(patient, _engine_out_for_note) or ""
+    except Exception as _e2:
+        _note_err = _note_err or _e2
+        note_for_emr = ""
+
+# 3) Final formatting + unified Management line injection
+note_for_emr = scrub_terms(note_for_emr)
+note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
+
+# 4) Debug visibility if still empty (do not break rendering)
+if not str(note_for_emr).strip():
+    st.markdown(
+        "<div class='compact-caption'>EMR note unavailable (render_quick_text returned empty).</div>",
+        unsafe_allow_html=True,
+    )
+    if _note_err is not None:
+        st.exception(_note_err)
+
+emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
+
 
 
 # ------------------------------------------------------------
@@ -2751,6 +2780,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
