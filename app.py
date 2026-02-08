@@ -2395,14 +2395,7 @@ if not isinstance(_ins, dict):
     _ins = {}
     out["insights"] = _ins
 
-# ===== DEBUG: tables + EMR note presence =====
-try:
-    st.write("DEBUG: criteria_table_html length =", len(str(_ins.get("criteria_table_html") or "")))
-    st.write("DEBUG: where_patient_falls_html length =", len(str(_ins.get("where_patient_falls_html") or "")))
-    st.write("DEBUG: note_for_emr length =", len(str(note_for_emr or "")))
-    st.write("DEBUG: out keys =", sorted(list(out.keys())))
-except Exception:
-    pass
+
 
 # If an adapter layer stripped engine-owned HTML/version, rehydrate from le.evaluate(patient) (only when missing).
 _need_criteria = not bool((_ins.get("criteria_table_html") or "").strip())
@@ -2425,6 +2418,13 @@ if _need_criteria or _need_falls or _need_version:
     except Exception:
         # Silent: do not break report rendering
         pass
+# ===== DEBUG: tables presence (post-rehydration) =====
+try:
+    st.write("DEBUG: criteria_table_html length =", len(str(_ins.get("criteria_table_html") or "")))
+    st.write("DEBUG: where_patient_falls_html length =", len(str(_ins.get("where_patient_falls_html") or "")))
+    st.write("DEBUG: out keys =", sorted(list(out.keys())))
+except Exception:
+    pass
 
 def _call_with_supported_kwargs(fn, kwargs: dict):
     import inspect
@@ -2631,6 +2631,12 @@ if not str(note_for_emr).strip():
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
 
+# ===== DEBUG: EMR note presence (post-render) =====
+try:
+    st.write("DEBUG: note_for_emr length =", len(str(note_for_emr or "")))
+except Exception:
+    pass
+
 # 4) Debug visibility if still empty (do not break rendering)
 if not str(note_for_emr).strip():
     st.markdown(
@@ -2784,6 +2790,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
