@@ -2366,24 +2366,26 @@ with tab_report:
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
             unsafe_allow_html=True
         )
-          # ===== DEBUG: which engine module is actually running? =====
-    try:
-        st.write("DEBUG: le module =", le)
-        st.write("DEBUG: le.__file__ =", getattr(le, "__file__", "NO __file__"))
-    except Exception as _e:
-        st.write("DEBUG: le module path error:", _e)
+         # ===== DEBUG: which engine module is actually running? =====
+try:
+    st.write("DEBUG: engine module name =", getattr(le, "__name__", "—"))
+    st.write("DEBUG: engine module file =", getattr(le, "__file__", "NO __file__"))
+except Exception as _e:
+    st.write("DEBUG: engine module error:", _e)
 
-    try:
-        # If you also import levels_engine directly anywhere, show it too
-        import levels_engine as _lemod  # noqa: F401
-        st.write("DEBUG: levels_engine.__file__ =", getattr(_lemod, "__file__", "NO __file__"))
-    except Exception as _e:
-        st.write("DEBUG: direct import levels_engine failed:", _e)
+try:
+    # If levels_engine is imported separately anywhere, confirm it resolves to the same file
+    import levels_engine as _lemod  # noqa: F401
+    st.write("DEBUG: levels_engine file =", getattr(_lemod, "__file__", "NO __file__"))
+except Exception as _e:
+    st.write("DEBUG: direct import levels_engine failed:", _e)
 
-    try:
-        st.write("DEBUG: out['version'] =", out.get("version"))
-    except Exception as _e:
-        st.write("DEBUG: out['version'] error:", _e)
+try:
+    st.write("DEBUG: out['version'] (raw):")
+    st.json(out.get("version"))
+except Exception as _e:
+    st.write("DEBUG: out['version'] error:", _e)
+
 
 
       # Tight criteria table (rings) + Where this patient falls
@@ -2740,6 +2742,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
