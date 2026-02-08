@@ -88,6 +88,7 @@ def _v4_to_legacy(v4: dict) -> dict:
 
         "riskSignal": v4.get("riskSignal", {}),
         "pooledCohortEquations10yAscvdRisk": v4.get("pooledCohortEquations10yAscvdRisk", {}),
+        "ascvdPce10yRisk": v4.get("pooledCohortEquations10yAscvdRisk", {}),
         "prevent10": v4.get("prevent10", {}),
         "targets": v4.get("targets", {}),
 
@@ -116,6 +117,10 @@ def _v4_to_legacy(v4: dict) -> dict:
             "risk_driver_pattern": v4.get("risk_driver_pattern", {}),
             "cac_decision_support": v4.get("cac_decision_support", {}),
             "ckm_context": v4.get("ckm_context", {}),
+
+            # Engine-owned HTML tables (restored)
+            "criteria_table_html": v4.get("criteria_table_html", ""),
+            "where_patient_falls_html": v4.get("where_patient_falls_html", ""),
         },
 
         "anchors": v4.get("anchors", {}),
