@@ -2395,8 +2395,6 @@ if not isinstance(_ins, dict):
     _ins = {}
     out["insights"] = _ins
 
-
-
 # If an adapter layer stripped engine-owned HTML/version, rehydrate from le.evaluate(patient) (only when missing).
 _need_criteria = not bool((_ins.get("criteria_table_html") or "").strip())
 _need_falls = not bool((_ins.get("where_patient_falls_html") or "").strip())
@@ -2418,6 +2416,7 @@ if _need_criteria or _need_falls or _need_version:
     except Exception:
         # Silent: do not break report rendering
         pass
+
 # ===== DEBUG: tables presence (post-rehydration) =====
 try:
     st.write("DEBUG: criteria_table_html length =", len(str(_ins.get("criteria_table_html") or "")))
@@ -2439,6 +2438,13 @@ def _call_with_supported_kwargs(fn, kwargs: dict):
     return fn(**filtered)
 
 _criteria_html = (_ins.get("criteria_table_html") or "").strip()
+
+# ===== DEBUG: which renderer is actually being used? =====
+try:
+    st.write("DEBUG: criteria source =", "engine_html" if _criteria_html else "fallback_renderer")
+except Exception:
+    pass
+
 if _criteria_html:
     st.markdown(_criteria_html, unsafe_allow_html=True)
 else:
@@ -2488,6 +2494,13 @@ else:
         st.exception(_e)
 
 _falls_html = (_ins.get("where_patient_falls_html") or "").strip()
+
+# ===== DEBUG: which renderer is actually being used? =====
+try:
+    st.write("DEBUG: falls source =", "engine_html" if _falls_html else "missing")
+except Exception:
+    pass
+
 if _falls_html:
     st.markdown(_falls_html, unsafe_allow_html=True)
 else:
@@ -2496,7 +2509,6 @@ else:
         "<div class='compact-caption'>Where this patient falls: not available (engine HTML missing).</div>",
         unsafe_allow_html=True,
     )
-
 
     # Secondary insights (engine-gated)
     rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
@@ -2790,6 +2802,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
