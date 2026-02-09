@@ -73,6 +73,20 @@ class Patient:
     def has(self, k) -> bool:
         return (k in self.data) and (self.data[k] is not None)
 
+    def has_nonzero(self, k) -> bool:
+        """
+        True only if key exists AND value is numeric AND > 0.
+        Use for labs where 0 means missing/invalid entry (ApoB, Lp(a)).
+        """
+        if not self.has(k):
+            return False
+        v = self.data.get(k)
+        try:
+            f = float(v)
+        except Exception:
+            return False
+        return f > 0.0
+
 # -------------------------------------------------------------------
 # Trace helper
 # -------------------------------------------------------------------
@@ -2760,10 +2774,11 @@ def compose_actions(p: Patient, out: Dict[str, Any]) -> List[str]:
     # 2) Missing key clarifiers (keep concise)
     # -----------------------------
     missing: List[str] = []
-    if not p.has("apob"):
+    if not p.has_nonzero("apob"):
         missing.append("ApoB")
-    if not p.has("lpa"):
+    if not p.has_nonzero("lpa"):
         missing.append("Lp(a)")
+
 
     if missing:
         actions += _action_line(
@@ -4439,6 +4454,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
