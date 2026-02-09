@@ -3105,10 +3105,6 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     cac_copy = canonical_cac_copy(p, plaque, cac_support)
 
-    # CKM context (display-first; does not change level/actions)
-    ckm = ckm_context(p)
-    ckm_copy = canonical_ckm_copy(ckm, decision_conf=dec_conf)
-
     insights = {
         "cac_decision_support": cac_support,  # keep for Details/Debug
         "structural_clarification": _clar if _clar else None,
@@ -4108,6 +4104,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
