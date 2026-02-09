@@ -2493,70 +2493,56 @@ else:
         )
         st.exception(_e)
 
-_falls_html = (_ins.get("where_patient_falls_html") or "").strip()
+# NOTE: Second table intentionally suppressed (do not render where_patient_falls_html).
+# (It can still exist in out["insights"] for debugging or future use.)
 
-# ===== DEBUG: which renderer is actually being used? =====
-try:
-    st.write("DEBUG: falls source =", "engine_html" if _falls_html else "missing")
-except Exception:
-    pass
-
-if _falls_html:
-    st.markdown(_falls_html, unsafe_allow_html=True)
-else:
-    # If the engine isn't emitting this yet, show a minimal hint (no crash).
+# Secondary insights (engine-gated)
+rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
+if rd.get("should_surface"):
     st.markdown(
-        "<div class='compact-caption'>Where this patient falls: not available (engine HTML missing).</div>",
-        unsafe_allow_html=True,
-    )
-
-    # Secondary insights (engine-gated)
-    rd = (out.get("insights") or {}).get("risk_driver_pattern") or {}
-    if rd.get("should_surface"):
-        st.markdown(
-            f"""
+        f"""
 <div class="block compact">
   <div class="block-title compact">Secondary insights</div>
   <div class="kvline compact">{_html.escape(rd.get("headline",""))}</div>
   <div class="kvline compact inline-muted">{_html.escape(rd.get("detail",""))}</div>
 </div>
 """,
-            unsafe_allow_html=True,
-        )
+        unsafe_allow_html=True,
+    )
 
-    # CKM context (engine-gated; display-only)
-    if ckm_copy.get("headline"):
-        st.markdown(
-            f"""
+# CKM context (engine-gated; display-only)
+if ckm_copy.get("headline"):
+    st.markdown(
+        f"""
 <div class="block compact">
   <div class="block-title compact">CKM context</div>
   <div class="kvline compact">{_html.escape(ckm_copy.get("headline",""))}</div>
   {f"<div class='kvline compact inline-muted'>{_html.escape(ckm_copy.get('detail',''))}</div>" if ckm_copy.get("detail") else ""}
 </div>
 """,
-            unsafe_allow_html=True,
+        unsafe_allow_html=True,
+    )
+
+st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+col_t, col_m = st.columns([1.05, 1.35], gap="small")
+
+# Targets
+with col_t:
+    if primary:
+        lipid_targets_line = f"{primary[0]} {primary[1]}"
+        if apob_line:
+            lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
+
+        anchor = guideline_anchor_note(level, clinical_ascvd)
+        apob_note = (
+            "ApoB not measured — optional add-on if discordance suspected."
+            if apob_line and not apob_measured
+            else ""
         )
 
-    st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
-
-    col_t, col_m = st.columns([1.05, 1.35], gap="small")
-
-    # Targets
-    with col_t:
-        if primary:
-            lipid_targets_line = f"{primary[0]} {primary[1]}"
-            if apob_line:
-                lipid_targets_line += f" • {apob_line[0]} {apob_line[1]}"
-
-            anchor = guideline_anchor_note(level, clinical_ascvd)
-            apob_note = (
-                "ApoB not measured — optional add-on if discordance suspected."
-                if apob_line and not apob_measured
-                else ""
-            )
-
-            st.markdown(
-                f"""
+        st.markdown(
+            f"""
 <div class="block compact">
   <div class="block-title compact">Targets (if treated)</div>
   <div class="kvline compact"><b>Targets:</b> {_html.escape(lipid_targets_line)}</div>
@@ -2564,39 +2550,39 @@ else:
   {f"<div class='compact-caption'>{_html.escape(apob_note)}</div>" if apob_note else ""}
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                """
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
 <div class="block compact">
   <div class="block-title compact">Targets (if treated)</div>
   <div class="kvline compact"><b>Targets:</b> —</div>
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-
-    # Action
-    with col_m:
-        rec_action = recommended_action_line_unified(out, fallback=plan_clean)
-
-        cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
-        cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
-        cac_det = _html.escape(cac_copy.get("detail") or "")
-        cac_ref = _html.escape(cac_copy.get("referral") or "")
-
-        cac_block = (
-            f"<div class='kvline compact'>{cac_head}</div>"
-            + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
-            + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
+            unsafe_allow_html=True,
         )
 
-        asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
-        asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
+# Action
+with col_m:
+    rec_action = recommended_action_line_unified(out, fallback=plan_clean)
 
-        st.markdown(
-            f"""
+    cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
+    cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
+    cac_det = _html.escape(cac_copy.get("detail") or "")
+    cac_ref = _html.escape(cac_copy.get("referral") or "")
+
+    cac_block = (
+        f"<div class='kvline compact'>{cac_head}</div>"
+        + (f"<div class='kvline compact inline-muted'>{cac_det}</div>" if cac_det else "")
+        + (f"<div class='kvline compact inline-muted'>{cac_ref}</div>" if cac_ref else "")
+    )
+
+    asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
+    asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
+
+    st.markdown(
+        f"""
 <div class="block compact">
   <div class="block-title compact">Action</div>
 
@@ -2610,8 +2596,8 @@ else:
   <div class="kvline compact">{asp_head}</div>
 </div>
 """,
-            unsafe_allow_html=True,
-        )
+        unsafe_allow_html=True,
+    )
 
     # EMR note  ✅ MUST stay inside tab_report
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
@@ -2802,6 +2788,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
