@@ -3146,6 +3146,8 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "phenotype_label": None,
         "phenotype_definition": None,
 
+        "criteria_signals": criteria_signals(p),
+
         "decision_stability": stab_band,
         "decision_stability_note": stab_note,
         "decision_robustness": stab_band,
@@ -3860,6 +3862,83 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
     triggers = lvl.get("triggers") or []
     triggers = [str(t).strip() for t in triggers if str(t).strip()]
 
+    # Prefer structured engine-owned criteria signals (stable) over parsing level triggers (fragile)
+    try:
+        _ins = (out or {}).get("insights") or {}
+        _sig = _ins.get("criteria_signals")
+    except Exception:
+        _sig = None
+
+    if isinstance(_sig, dict) and isinstance(_sig.get("domains"), dict):
+        _domains = _sig.get("domains") or {}
+        triggers = []
+
+        def _sev(dname: str) -> str:
+            try:
+                return str((_domains.get(dname) or {}).get("severity") or "")
+            except Exception:
+                return ""
+
+        def _marker(dname: str) -> str:
+            try:
+                return str((_domains.get(dname) or {}).get("marker") or "")
+            except Exception:
+                return ""
+
+        # Atherogenic burden
+        a_sev = _sev("Atherogenic burden")
+        a_marker = _marker("Atherogenic burden")
+        if a_sev == "major":
+            if a_marker == "ApoB":
+                triggers.append("ApoB≥100")
+            else:
+                triggers.append("LDL≥130 (ApoB not measured)")
+        elif a_sev == "mild":
+            if a_marker == "ApoB":
+                triggers.append("ApoB 80–99")
+            else:
+                triggers.append("LDL 100–129 (ApoB not measured)")
+
+        # Glycemia
+        g_sev = _sev("Glycemia")
+        if g_sev == "major":
+            triggers.append("Diabetes-range")
+        elif g_sev == "mild":
+            # Your table recognizes both “Prediabetes” and “A1c 6.2–6.4”
+            try:
+                _a1s = a1c_status(p)
+            except Exception:
+                _a1s = None
+            if _a1s == "near_diabetes_boundary":
+                triggers.append("A1c 6.2–6.4")
+            else:
+                triggers.append("Prediabetes")
+
+        # Inflammation
+        i_sev = _sev("Inflammation")
+        if i_sev == "major":
+            triggers.append("Inflammation present")
+        elif i_sev == "mild":
+            triggers.append("hsCRP≥2")
+
+        # Genetics (Lp(a))
+        l_sev = _sev("Genetics (Lp(a))")
+        if l_sev == "major":
+            triggers.append("Lp(a) elevated")
+
+        # Family history
+        f_sev = _sev("Family history")
+        if f_sev == "mild":
+            triggers.append("Premature family history")
+
+        # Smoking
+        s_sev = _sev("Smoking")
+        if s_sev == "major":
+            triggers.append("Smoking")
+
+        triggers = [str(t).strip() for t in triggers if str(t).strip()]
+
+
     # -----------------------------
     # Determine engine "signal class" from trigger strings
     # (Interpret engine labels only; do not reclassify from raw labs.)
@@ -4360,6 +4439,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
