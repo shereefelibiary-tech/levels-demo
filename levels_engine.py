@@ -3494,24 +3494,12 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
         return bool(x is True)
 
     lvl = (out or {}).get("levels") or {}
-    sub = (lvl.get("sublevel") or "").strip()
     triggers = lvl.get("triggers") or []
     triggers = [str(t).strip() for t in triggers if str(t).strip()]
 
-    evidence = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
-    plaque_status = str(evidence.get("cac_status") or "").strip().lower()
-    plaque_known = ("cac = 0" in plaque_status) or ("cac positive" in plaque_status) or (evidence.get("cac_value") is not None)
-
-    risk10 = (out or {}).get("ascvdPce10yRisk") or (out or {}).get("pooledCohortEquations10yAscvdRisk") or {}
-    rp = risk10.get("risk_pct")
-    try:
-        pce_pct = float(rp) if rp is not None else None
-    except Exception:
-        pce_pct = None
-
     # -----------------------------
     # Determine engine "signal class" from trigger strings
-    # (We only interpret engine trigger labels; no local reclassification.)
+    # (Interpret engine labels only; do not reclassify from raw labs.)
     # -----------------------------
     def _class_from_trigger(t: str) -> str:
         tl = t.lower()
@@ -3542,28 +3530,43 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
             return "mild"
         return "signal"
 
+    # NOTE: split family history vs Lp(a) so we don't label Lp(a) with fhx triggers.
     def _domain_for_trigger(t: str) -> str | None:
         tl = t.lower()
+
         if "apob" in tl or "ldl" in tl:
             return "Atherogenic burden"
         if "a1c" in tl or "prediabetes" in tl or "diabetes" in tl:
             return "Glycemia"
-        if "hscrp" in tl or "inflammation" in tl or "ra" in tl or "psoriasis" in tl or "sle" in tl or "ibd" in tl or "hiv" in tl or "osa" in tl or "nafld" in tl:
+        if (
+            "hscrp" in tl
+            or "inflammation" in tl
+            or "ra" in tl
+            or "psoriasis" in tl
+            or "sle" in tl
+            or "ibd" in tl
+            or "hiv" in tl
+            or "osa" in tl
+            or "nafld" in tl
+        ):
             return "Inflammation"
-        if "lp(a)" in tl or "lpa" in tl or "family history" in tl:
-            return "Genetics"
+
+        if "family history" in tl:
+            return "Family history"
+        if "lp(a)" in tl or "lpa" in tl:
+            return "Genetics (Lp(a))"
+
         if "smoking" in tl:
             return "Smoking"
-        if "cac" in tl:
-            return "Plaque"
+
         return None
 
-    # Only triggers that map to our display domains
     trig_by_domain: dict[str, list[str]] = {
         "Atherogenic burden": [],
         "Glycemia": [],
         "Inflammation": [],
-        "Genetics": [],
+        "Genetics (Lp(a))": [],
+        "Family history": [],
         "Smoking": [],
     }
     for t in triggers:
@@ -3572,7 +3575,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
             trig_by_domain[d].append(t)
 
     # -----------------------------
-    # Build per-domain display rows (values from Patient only)
+    # Patient values (display only)
     # -----------------------------
     apob_v = p.get("apob") if p.has("apob") else None
     ldl_v = p.get("ldl") if p.has("ldl") else None
@@ -3582,6 +3585,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
     lpa_unit = p.get("lpa_unit") if p.has("lpa_unit") else None
     smoker_v = p.get("smoking") if p.has("smoking") else None
     diabetes_v = p.get("diabetes") if p.has("diabetes") else None
+    fhx_v = p.get("fhx") if p.has("fhx") else None
 
     def _cell(text: str, *, muted=False, ring=False) -> str:
         cls = "rc2-cell"
@@ -3617,6 +3621,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
             if ldl_v is not None:
                 return _fmt_val_unit(_fmt_num(ldl_v, 0), "mg/dL") or "—"
             return "Unmeasured"
+
         if domain == "Glycemia":
             if _truthy(diabetes_v):
                 if a1c_v is not None:
@@ -3625,20 +3630,31 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
             if a1c_v is not None:
                 return _fmt_val_unit(_fmt_num(a1c_v, 1), "%") or "—"
             return "Unmeasured"
+
         if domain == "Inflammation":
             if hscrp_v is not None:
                 return _fmt_val_unit(_fmt_num(hscrp_v, 1), "mg/L") or "—"
             return "Unmeasured"
-        if domain == "Genetics":
+
+        if domain == "Genetics (Lp(a))":
             if lpa_v is not None and str(lpa_unit or "").strip() in ("nmol/L", "mg/dL"):
                 return _fmt_val_unit(_fmt_num(lpa_v, 0), str(lpa_unit).strip()) or "—"
             return "Unmeasured"
+
+        if domain == "Family history":
+            if fhx_v is True:
+                return "Yes"
+            if fhx_v is False:
+                return "No"
+            return "Unmeasured"
+
         if domain == "Smoking":
             if smoker_v is True:
                 return "Yes"
             if smoker_v is False:
                 return "No"
             return "Unmeasured"
+
         return "—"
 
     def _domain_condition_text(domain: str) -> str:
@@ -3650,8 +3666,10 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
             return "A1c / diabetes status"
         if domain == "Inflammation":
             return "hsCRP (and inflammatory states)"
-        if domain == "Genetics":
+        if domain == "Genetics (Lp(a))":
             return "Lp(a) / inherited risk"
+        if domain == "Family history":
+            return "Premature family history"
         if domain == "Smoking":
             return "Current smoking"
         return "—"
@@ -3680,11 +3698,16 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
     def _domain_note(domain: str) -> str | None:
         if domain == "Atherogenic burden" and apob_v is None:
             return "LDL used (ApoB unmeasured)"
-        if domain == "Genetics" and (lpa_v is None or str(lpa_unit or "").strip() not in ("nmol/L", "mg/dL")):
-            return None
         return None
 
-    domains_order = ["Atherogenic burden", "Glycemia", "Inflammation", "Genetics", "Smoking"]
+    domains_order = [
+        "Atherogenic burden",
+        "Glycemia",
+        "Inflammation",
+        "Genetics (Lp(a))",
+        "Family history",
+        "Smoking",
+    ]
 
     rows_html: list[str] = []
 
@@ -3692,7 +3715,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
         for d in domains_order:
             if trig_by_domain.get(d):
                 pv = _patient_value_text(d)
-                if pv and pv != "Unmeasured" and pv != "—":
+                if pv and pv not in ("Unmeasured", "—"):
                     if d == "Atherogenic burden":
                         if apob_v is not None:
                             return f"ApoB {pv}"
@@ -3702,8 +3725,10 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
                         return f"A1c {pv}" if "Diabetes=true" not in pv else "Diabetes"
                     if d == "Inflammation":
                         return f"hsCRP {pv}"
-                    if d == "Genetics":
+                    if d == "Genetics (Lp(a))":
                         return f"Lp(a) {pv}"
+                    if d == "Family history":
+                        return "Family history Yes" if pv == "Yes" else ""
                     if d == "Smoking":
                         return "Smoking Yes" if pv == "Yes" else ""
         if apob_v is not None:
@@ -3722,7 +3747,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
             continue
         pv = _patient_value_text(d)
         eff, tag, _ring = _domain_effect(d)
-        if pv and pv != "Unmeasured" and pv != "—":
+        if pv and pv not in ("Unmeasured", "—"):
             label = ""
             if d == "Atherogenic burden":
                 label = "ApoB" if apob_v is not None else "LDL-C"
@@ -3730,8 +3755,10 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
                 label = "A1c" if "Diabetes=true" not in pv else "Diabetes"
             elif d == "Inflammation":
                 label = "hsCRP"
-            elif d == "Genetics":
+            elif d == "Genetics (Lp(a))":
                 label = "Lp(a)"
+            elif d == "Family history":
+                label = "Family history"
             elif d == "Smoking":
                 label = "Smoking"
             eff_short = "Major driver" if tag == "major" else ("Mild signal" if tag == "mild" else "Signal")
@@ -3757,8 +3784,6 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
     other_bits: list[str] = []
     if hscrp_v is not None and not trig_by_domain.get("Inflammation"):
         other_bits.append(f"hsCRP {_fmt_val_unit(_fmt_num(hscrp_v, 1), 'mg/L')}")
-    if smoker_v is True and not trig_by_domain.get("Smoking"):
-        other_bits.append("Smoking Yes")
 
     other_line = ""
     if other_bits:
@@ -3808,8 +3833,10 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
             marker_label = "A1c"
         elif d == "Inflammation":
             marker_label = "hsCRP"
-        elif d == "Genetics":
+        elif d == "Genetics (Lp(a))":
             marker_label = "Lp(a)"
+        elif d == "Family history":
+            marker_label = "Family history"
         elif d == "Smoking":
             marker_label = "Smoking"
 
@@ -3971,144 +3998,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 """
     return html.strip()
 
-# -------------------------------------------------------------------
-# CANONICAL CLINICAL REPORT (polished; single source of truth)
-# -------------------------------------------------------------------
-def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
-    lvl = out.get("levels") or {}
-    rs = out.get("riskSignal") or {}
-    risk10 = out.get("ascvdPce10yRisk") or out.get("pooledCohortEquations10yAscvdRisk") or {}
-    prev = out.get("prevent10") or {}
-    anchors = out.get("anchors") or {}
-    insights = out.get("insights") or {}
 
-    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
-    sub = (lvl.get("sublevel") or None)
-    label = (lvl.get("label") or "").strip()
-    label_fallback = LEVEL_LABELS.get(level, f"Level {level}")
-    level_line = f"{label}" if label else label_fallback
-
-    # Plaque lines (use your explicit evidence/burden)
-    plaque_evidence = (lvl.get("plaqueEvidence") or "—").strip()
-    plaque_burden = (lvl.get("plaqueBurden") or "—").strip()
-
-    # Decision lines
-    dec_conf = (lvl.get("decisionConfidence") or "—").strip()
-    stab = (lvl.get("decisionStability") or "—").strip()
-    stab_note = (lvl.get("decisionStabilityNote") or "").strip()
-    stab_line = stab + (f" — {stab_note}" if stab_note else "")
-
-    # Drivers (already deterministic + explicit in your assign_level logic)
-    drivers = (out.get("drivers") or lvl.get("triggers") or [])[:3]
-    drivers = [str(d).strip() for d in drivers if str(d).strip()]
-
-    # Metrics
-    rss_score = rs.get("score", "—")
-    rss_band = rs.get("band", "—")
-    pce_pct = risk10.get("risk_pct", None)
-    pce_cat = risk10.get("category", "—")
-    p_total = prev.get("total_cvd_10y_pct", None)
-    p_ascvd = prev.get("ascvd_10y_pct", None)
-
-    # Targets
-    targets = out.get("targets") or {}
-    targets_label = "Targets (if treated)"
-
-    # Aspirin / CAC canonical copy (single source of truth already exists)
-    asp_copy = insights.get("aspirin_copy") or {}
-    asp_head = _normalize_space(str(asp_copy.get("headline") or "Aspirin: —"))
-
-    cac_copy = insights.get("cac_copy") or {}
-    cac_head = _normalize_space(str(cac_copy.get("headline") or ""))
-
-    # Build Plan from nextActions with dominance + dedup
-    dominant = bool(lvl.get("dominantAction") is True)
-    primary, rest = _pick_primary_action(out.get("nextActions") or [], dominant=dominant)
-    plan_bullets = _action_to_plan_bullets(primary, rest)
-
-    # --- NEW: CKM + CKD inline (v4 adapter places these in insights) ---
-    ins = insights or {}
-
-    ckm_head = ""
-    try:
-        ckm_head = str((ins.get("ckm_copy") or {}).get("headline") or "").strip()
-    except Exception:
-        ckm_head = ""
-
-    ckd_head = ""
-    try:
-        ckd_head = str((ins.get("ckd_copy") or {}).get("headline") or "").strip()
-    except Exception:
-        ckd_head = ""
-
-    # --- Report assembly (clinician voice, low redundancy) ---
-    lines: List[str] = []
-    lines.append("RISK CONTINUUM — CLINICAL REPORT")
-    lines.append("-" * 60)
-    lines.append(f"Level: {level_line}")
-
-    # Inline CKM/CKD directly under Level (when present)
-    if ckm_head or ckd_head:
-        if ckm_head and ckd_head:
-            lines.append(f"{ckm_head} | {ckd_head}")
-        else:
-            lines.append(ckm_head or ckd_head)
-
-    lines.append(f"Plaque: {plaque_evidence} | Burden: {plaque_burden}")
-    lines.append(f"Confidence: {dec_conf} | Stability: {stab_line}")
-    lines.append("")
-
-    # If CKM is surfaced, suppress "Why (top drivers)" to avoid redundancy.
-    if (not ckm_head) and drivers:
-        lines.append("Why (top drivers):")
-        for d in drivers:
-            lines.append(f"- {d}")
-        lines.append("")
-
-    lines.append("Risk estimates:")
-    lines.append(f"- RSS: {rss_score}/100 ({rss_band})")
-    if pce_pct is not None:
-        lines.append(f"- ASCVD PCE (10y): {pce_pct}% ({pce_cat})")
-    else:
-        lines.append("- ASCVD PCE (10y): —")
-    lines.append(
-        f"- PREVENT (10y): Total CVD {p_total if p_total is not None else '—'}% | "
-        f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
-    )
-    lines.append("")
-
-    # Targets (if treated)
-    if isinstance(targets, dict) and targets:
-        t_parts: List[str] = []
-        if "ldl" in targets:
-            t_parts.append(f"LDL-C <{int(targets['ldl'])} mg/dL")
-        if "apob" in targets:
-            t_parts.append(f"ApoB <{int(targets['apob'])} mg/dL")
-        if t_parts:
-            lines.append(f"{targets_label}:")
-            for t in t_parts:
-                lines.append(f"- {t}")
-            lines.append("")
-
-    # Plan
-    lines.append("Plan:")
-    lines.extend(plan_bullets)
-
-    # Aspirin + CAC (canonical)
-    if asp_head:
-        lines.append(f"- {asp_head}")
-
-    # CAC: keep headline only (avoid filler)
-    if cac_head:
-        lines.append(f"- {cac_head}")
-
-    # Context anchors
-    near = (anchors.get("nearTerm") or {}).get("summary", "—")
-    life = (anchors.get("lifetime") or {}).get("summary", "—")
-    lines.append("")
-    lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
-
-    return "\n".join(_dedup_lines(lines))
 
 
 
