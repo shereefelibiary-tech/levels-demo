@@ -3358,6 +3358,129 @@ def _action_to_plan_bullets(primary: Optional[str], rest: List[str]) -> List[str
 
     bullets.extend(keep)
     return _dedup_lines([f"- {b}" for b in bullets])
+# -------------------------------------------------------------------
+# CANONICAL CLINICAL REPORT (polished; single source of truth)
+# -------------------------------------------------------------------
+def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
+    lvl = out.get("levels") or {}
+    rs = out.get("riskSignal") or {}
+    risk10 = out.get("ascvdPce10yRisk") or out.get("pooledCohortEquations10yAscvdRisk") or {}
+    prev = out.get("prevent10") or {}
+    anchors = out.get("anchors") or {}
+    insights = out.get("insights") or {}
+
+    level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
+    sub = (lvl.get("sublevel") or None)
+    label = (lvl.get("label") or "").strip()
+    label_fallback = LEVEL_LABELS.get(level, f"Level {level}")
+    level_line = f"{label}" if label else label_fallback
+
+    plaque_evidence = (lvl.get("plaqueEvidence") or "—").strip()
+    plaque_burden = (lvl.get("plaqueBurden") or "—").strip()
+
+    dec_conf = (lvl.get("decisionConfidence") or "—").strip()
+    stab = (lvl.get("decisionStability") or "—").strip()
+    stab_note = (lvl.get("decisionStabilityNote") or "").strip()
+    stab_line = stab + (f" — {stab_note}" if stab_note else "")
+
+    drivers = (out.get("drivers") or lvl.get("triggers") or [])[:3]
+    drivers = [str(d).strip() for d in drivers if str(d).strip()]
+
+    rss_score = rs.get("score", "—")
+    rss_band = rs.get("band", "—")
+    pce_pct = risk10.get("risk_pct", None)
+    pce_cat = risk10.get("category", "—")
+    p_total = prev.get("total_cvd_10y_pct", None)
+    p_ascvd = prev.get("ascvd_10y_pct", None)
+
+    targets = out.get("targets") or {}
+    targets_label = "Targets (if treated)"
+
+    asp_copy = insights.get("aspirin_copy") or {}
+    asp_head = _normalize_space(str(asp_copy.get("headline") or "Aspirin: —"))
+
+    cac_copy = insights.get("cac_copy") or {}
+    cac_head = _normalize_space(str(cac_copy.get("headline") or ""))
+
+    dominant = bool(lvl.get("dominantAction") is True)
+    primary, rest = _pick_primary_action(out.get("nextActions") or [], dominant=dominant)
+    plan_bullets = _action_to_plan_bullets(primary, rest)
+
+    ins = insights or {}
+
+    ckm_head = ""
+    try:
+        ckm_head = str((ins.get("ckm_copy") or {}).get("headline") or "").strip()
+    except Exception:
+        ckm_head = ""
+
+    ckd_head = ""
+    try:
+        ckd_head = str((ins.get("ckd_copy") or {}).get("headline") or "").strip()
+    except Exception:
+        ckd_head = ""
+
+    lines: List[str] = []
+    lines.append("RISK CONTINUUM — CLINICAL REPORT")
+    lines.append("-" * 60)
+    lines.append(f"Level: {level_line}")
+
+    if ckm_head or ckd_head:
+        if ckm_head and ckd_head:
+            lines.append(f"{ckm_head} | {ckd_head}")
+        else:
+            lines.append(ckm_head or ckd_head)
+
+    lines.append(f"Plaque: {plaque_evidence} | Burden: {plaque_burden}")
+    lines.append(f"Confidence: {dec_conf} | Stability: {stab_line}")
+    lines.append("")
+
+    if (not ckm_head) and drivers:
+        lines.append("Why (top drivers):")
+        for d in drivers:
+            lines.append(f"- {d}")
+        lines.append("")
+
+    lines.append("Risk estimates:")
+    lines.append(f"- RSS: {rss_score}/100 ({rss_band})")
+    if pce_pct is not None:
+        lines.append(f"- ASCVD PCE (10y): {pce_pct}% ({pce_cat})")
+    else:
+        lines.append("- ASCVD PCE (10y): —")
+    lines.append(
+        f"- PREVENT (10y): Total CVD {p_total if p_total is not None else '—'}% | "
+        f"ASCVD {p_ascvd if p_ascvd is not None else '—'}%"
+    )
+    lines.append("")
+
+    if isinstance(targets, dict) and targets:
+        t_parts: List[str] = []
+        if "ldl" in targets:
+            t_parts.append(f"LDL-C <{int(targets['ldl'])} mg/dL")
+        if "apob" in targets:
+            t_parts.append(f"ApoB <{int(targets['apob'])} mg/dL")
+        if t_parts:
+            lines.append(f"{targets_label}:")
+            for t in t_parts:
+                lines.append(f"- {t}")
+            lines.append("")
+
+    lines.append("Plan:")
+    lines.extend(plan_bullets)
+
+    if asp_head:
+        lines.append(f"- {asp_head}")
+
+    if cac_head:
+        lines.append(f"- {cac_head}")
+
+    near = (anchors.get("nearTerm") or {}).get("summary", "—")
+    life = (anchors.get("lifetime") or {}).get("summary", "—")
+    lines.append("")
+    lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
+
+    return "\n".join(_dedup_lines(lines))
+
 
 def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
     """
@@ -3366,7 +3489,6 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
 
     App must render this verbatim (no interpretation).
     """
-
     lvl = out.get("levels") or {}
     label = str(lvl.get("label") or "—").strip()
     triggers = set((lvl.get("triggers") or []))
@@ -3375,26 +3497,20 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
     cac_val = evidence.get("cac_value", None)
     cac_known = isinstance(cac_val, int)
 
-    # ---- display values (engine-owned) ----
     apob_disp = f"{fmt_int(p.get('apob'))} mg/dL" if p.has("apob") else "—"
     a1c_disp = f"{fmt_1dp(p.get('a1c'))}%" if p.has("a1c") else "—"
     smoke_disp = "Yes" if p.get("smoking") is True else ("No" if p.get("smoking") is False else "—")
     cac_disp = "Unmeasured" if not cac_known else str(int(cac_val))
 
-    # ---- helpers ----
     def _trigger_prefix(prefix: str) -> bool:
         return any(str(t).startswith(prefix) for t in triggers)
 
     def _trigger_exact(label_txt: str) -> bool:
         return any(str(t) == label_txt for t in triggers)
 
-    # ---- level effect (use exact trigger content; do not over-classify) ----
     apob_effect = "—"
-
-    # Major ApoB trigger is explicit as "ApoB≥"
     if any(str(t).startswith("ApoB≥") for t in triggers):
         apob_effect = "Trigger (major driver)"
-    # Mild ApoB trigger is explicit as "ApoB 80–99"
     elif any(str(t).startswith("ApoB 80") for t in triggers):
         apob_effect = "Trigger (mild signal)"
     else:
@@ -3413,7 +3529,6 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
     else:
         cac_effect = "Unmeasured"
 
-    # ---- HTML escape (safe, no imports needed beyond stdlib) ----
     import html as _html
     esc = _html.escape
 
@@ -3435,8 +3550,6 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
             f"<td>{esc(effect)}</td>"
             "</tr>"
         )
-
-    # (rest of your function continues unchanged...)
 
     return f"""
 <div class="block compact">
@@ -3462,6 +3575,7 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
   </table>
 </div>
 """.strip()
+
 
 def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
     """
@@ -3997,6 +4111,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
