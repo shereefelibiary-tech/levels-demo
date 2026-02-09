@@ -2986,7 +2986,16 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     conf = completeness(p)
     rss = risk_signal_score(p, trace)
     anchors = build_anchors(p, risk10, plaque)
-    prevent10 = prevent10_total_and_ascvd(p, trace)
+    try:
+        prevent10 = prevent10_total_and_ascvd(p, trace)
+    except Exception as _e:
+        add_trace(trace, "PREVENT_error", str(_e), "PREVENT calculation failed")
+        prevent10 = {
+            "total_cvd_10y_pct": None,
+            "ascvd_10y_pct": None,
+            "missing": [],
+            "notes": "PREVENT unavailable due to calculation error.",
+        }
 
     level, sublevel, level_triggers = assign_level(p, plaque, risk10, trace)
     targets = levels_targets(level)
@@ -3004,8 +3013,13 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     drivers_all = ranked_drivers(p, plaque, trace)
     drivers_top = drivers_all[:3]
     ckm = ckm_context(p)
-    ckm_copy = canonical_ckm_copy_stage(p, ckm, decision_conf=dec_conf)
+    try:
+        ckm_copy = canonical_ckm_copy_stage(p, ckm, decision_conf=dec_conf)
+    except Exception as _e:
+        add_trace(trace, "CKM_copy_error", str(_e), "CKM copy generation failed")
+        ckm_copy = None
     ckd_copy = canonical_ckd_copy(p, decision_conf=dec_conf)
+
 
     # ------------------------------------------------------------
     # Secondary Insight: lifestyle vs biology driver pattern
@@ -3132,8 +3146,10 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "pce_zone": pce_zone(risk10.get("risk_pct")),
     }
 
-    # NEW: teachable moment — PREVENT vs PCE divergence (engine-owned)
+       # NEW: teachable moment — PREVENT vs PCE divergence (engine-owned)
     insights["risk_model_mismatch"] = risk_model_mismatch(risk10, prevent10)
+
+    add_trace(trace, "PREVENT_available", prevent10.get("total_cvd_10y_pct") is not None, "PREVENT availability")
 
     out = {
         "version": VERSION,
@@ -4104,6 +4120,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
