@@ -2167,6 +2167,13 @@ def assign_level(
     if hs:
         triggers.extend(hs)
 
+        # Also carry forward mild signals so UI tables can show all active signals
+        # (does not change level assignment; display/transparency only)
+        ms = _mild_signals(p)
+        for t in ms:
+            if t not in triggers:
+                triggers.append(t)
+
         # 3B enhancers (explicit, ≥1 triggers 3B)
         enh = 0
         # Lp(a)
@@ -2189,6 +2196,7 @@ def assign_level(
         add_trace(trace, "Level3_sublevel", sub, "Assigned 3A/3B")
         add_trace(trace, "Level_high_biology", hs[:6], "Level=3")
         return 3, sub, triggers
+
 
     # Level 2: mild signals
     ms = _mild_signals(p)
@@ -4120,6 +4128,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
