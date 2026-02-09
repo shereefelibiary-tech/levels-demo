@@ -3174,7 +3174,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         "trajectoryNote": levels_obj.get("trajectoryNote"),
     }
 
-        # NEW: engine-owned HTML blocks (render-only in app)
+    # NEW: engine-owned HTML blocks (render-only in app)
     # Never allow HTML generation to break the engine output contract.
     try:
         out["insights"]["where_patient_falls_html"] = canonical_where_patient_falls_html(p, out)
@@ -3188,13 +3188,10 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         add_trace(trace, "HTML_criteria_table_error", str(_e), "criteria_table_html generation failed")
         out["insights"]["criteria_table_html"] = ""
 
-
     out["nextActions"] = compose_actions(p, out)
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
-
-
 
 # -------------------------------------------------------------------
 # Canonical EMR output (locked style) — direct: WHY → WHAT
@@ -4111,6 +4108,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
