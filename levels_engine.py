@@ -3592,6 +3592,238 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
   </table>
 </div>
 """.strip()
+def criteria_signals(p: Patient) -> Dict[str, Any]:
+    """
+    Engine-owned, deterministic signal classification for the criteria table.
+    Does NOT depend on levels["triggers"] string parsing.
+
+    Returns:
+      {
+        "domains": {
+          "<Domain>": {
+             "marker": "...",
+             "context": "...",
+             "patient": "...",
+             "severity": "major"|"mild"|"none"|"unmeasured",
+             "effect_label": "Major driver"|"Mild signal"|"—"
+          },
+          ...
+        },
+        "active_bits": [ "ApoB 92 mg/dL (mild)", ... ],
+        "chip": "ApoB 92 mg/dL"
+      }
+    """
+    domains: Dict[str, Dict[str, Any]] = {}
+
+    # -------------------------
+    # Atherogenic burden
+    # -------------------------
+    apob_v = p.get("apob") if p.has("apob") else None
+    ldl_v = p.get("ldl") if p.has("ldl") else None
+
+    athero_marker = "ApoB" if apob_v is not None else "LDL-C"
+    athero_context = "ApoB (preferred marker)" if apob_v is not None else "LDL-C (ApoB unmeasured)"
+
+    athero_patient = "Unmeasured"
+    athero_sev = "unmeasured"
+    if apob_v is not None:
+        try:
+            ap = float(apob_v)
+            athero_patient = f"{int(round(ap))} mg/dL"
+            if ap >= MAJOR_APOB_CUT:
+                athero_sev = "major"
+            elif MILD_APOB_MIN <= ap <= MILD_APOB_MAX:
+                athero_sev = "mild"
+            else:
+                athero_sev = "none"
+        except Exception:
+            athero_patient = "Unmeasured"
+            athero_sev = "unmeasured"
+    elif ldl_v is not None:
+        try:
+            ld = float(ldl_v)
+            athero_patient = f"{int(round(ld))} mg/dL"
+            if ld >= MAJOR_LDL_CUT:
+                athero_sev = "major"
+            elif MILD_LDL_MIN <= ld <= MILD_LDL_MAX:
+                athero_sev = "mild"
+            else:
+                athero_sev = "none"
+        except Exception:
+            athero_patient = "Unmeasured"
+            athero_sev = "unmeasured"
+
+    domains["Atherogenic burden"] = {
+        "marker": athero_marker,
+        "context": athero_context,
+        "patient": athero_patient,
+        "severity": athero_sev,
+    }
+
+    # -------------------------
+    # Glycemia
+    # -------------------------
+    a1c_v = p.get("a1c") if p.has("a1c") else None
+    dm_flag = (p.get("diabetes") is True)
+    gly_patient = "Unmeasured"
+    gly_sev = "unmeasured"
+
+    if dm_flag and a1c_v is None:
+        gly_patient = "Diabetes=true"
+        gly_sev = "major"
+    elif a1c_v is not None:
+        try:
+            a1c_f = float(a1c_v)
+            gly_patient = f"{round(a1c_f, 1)} %"
+            s = a1c_status(p)
+            if s == "diabetes_range" or dm_flag:
+                gly_sev = "major"
+            elif s in ("prediabetes", "near_diabetes_boundary"):
+                gly_sev = "mild"
+            else:
+                gly_sev = "none"
+        except Exception:
+            gly_patient = "Unmeasured"
+            gly_sev = "unmeasured"
+    else:
+        gly_patient = "Unmeasured"
+        gly_sev = "unmeasured"
+
+    domains["Glycemia"] = {
+        "marker": "A1c",
+        "context": "A1c / diabetes status",
+        "patient": gly_patient,
+        "severity": gly_sev,
+    }
+
+    # -------------------------
+    # Inflammation
+    # -------------------------
+    hscrp_v = p.get("hscrp") if p.has("hscrp") else None
+    infl_patient = "Unmeasured"
+    infl_sev = "unmeasured"
+
+    chronic = has_chronic_inflammatory_disease(p)
+    if hscrp_v is not None:
+        try:
+            h = float(hscrp_v)
+            infl_patient = f"{round(h, 1)} mg/L"
+            if (h >= 2.0) or chronic:
+                infl_sev = "major"
+            else:
+                infl_sev = "none"
+        except Exception:
+            infl_patient = "Unmeasured"
+            infl_sev = "unmeasured"
+    else:
+        if chronic:
+            infl_patient = "Chronic inflammatory disease"
+            infl_sev = "major"
+        else:
+            infl_patient = "Unmeasured"
+            infl_sev = "unmeasured"
+
+    domains["Inflammation"] = {
+        "marker": "hsCRP",
+        "context": "hsCRP (and inflammatory states)",
+        "patient": infl_patient,
+        "severity": infl_sev,
+    }
+
+    # -------------------------
+    # Genetics (Lp(a))
+    # -------------------------
+    lpa_v = p.get("lpa") if p.has("lpa") else None
+    lpa_unit = p.get("lpa_unit") if p.has("lpa_unit") else None
+
+    gen_patient = "Unmeasured"
+    gen_sev = "unmeasured"
+    if lpa_v is not None:
+        try:
+            raw = float(lpa_v)
+            u = (str(lpa_unit or "").strip() or "nmol/L")
+            gen_patient = f"{int(round(raw))} {u}".strip()
+            gen_sev = "major" if lpa_elevated_no_trace(p) else "none"
+        except Exception:
+            gen_patient = "Unmeasured"
+            gen_sev = "unmeasured"
+
+    domains["Genetics (Lp(a))"] = {
+        "marker": "Lp(a)",
+        "context": "Lp(a) / inherited risk",
+        "patient": gen_patient,
+        "severity": gen_sev,
+    }
+
+    # -------------------------
+    # Family history
+    # -------------------------
+    fhx_v = p.get("fhx") if p.has("fhx") else None
+    fh_patient = "Unmeasured"
+    fh_sev = "unmeasured"
+    if fhx_v is True:
+        fh_patient = "Yes"
+        fh_sev = "mild"
+    elif fhx_v is False:
+        fh_patient = "No"
+        fh_sev = "none"
+
+    domains["Family history"] = {
+        "marker": "Family history",
+        "context": "Premature family history",
+        "patient": fh_patient,
+        "severity": fh_sev,
+    }
+
+    # -------------------------
+    # Smoking
+    # -------------------------
+    sm = p.get("smoking")
+    sm_patient = "Unmeasured"
+    sm_sev = "unmeasured"
+    if sm is True:
+        sm_patient = "Yes"
+        sm_sev = "major"
+    elif sm is False:
+        sm_patient = "No"
+        sm_sev = "none"
+
+    domains["Smoking"] = {
+        "marker": "Smoking",
+        "context": "Current smoking",
+        "patient": sm_patient,
+        "severity": sm_sev,
+    }
+
+    # -------------------------
+    # Labels + active bits
+    # -------------------------
+    def _effect_label(sev: str) -> str:
+        if sev == "major":
+            return "Major driver"
+        if sev == "mild":
+            return "Mild signal"
+        return "—"
+
+    active_bits: List[str] = []
+    chip = ""
+
+    for dname, d in domains.items():
+        sev = str(d.get("severity") or "unmeasured")
+        d["effect_label"] = _effect_label(sev)
+        if sev in ("major", "mild"):
+            pv = str(d.get("patient") or "").strip()
+            mk = str(d.get("marker") or "").strip()
+            if pv and pv not in ("Unmeasured", "—"):
+                active_bits.append(f"{mk} {pv} ({sev})")
+
+    athero = domains.get("Atherogenic burden") or {}
+    if (athero.get("severity") in ("major", "mild")) and str(athero.get("patient")) not in ("Unmeasured", "—"):
+        chip = f"{athero.get('marker')} {athero.get('patient')}"
+    elif active_bits:
+        chip = active_bits[0].replace(" (major)", "").replace(" (mild)", "")
+
+    return {"domains": domains, "active_bits": active_bits, "chip": chip}
 
 
 def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
@@ -4128,6 +4360,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
