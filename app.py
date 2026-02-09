@@ -1432,7 +1432,20 @@ data_json = json.dumps(data, sort_keys=True)
 out = run_engine_uncached(data_json) if DEV_DISABLE_CACHE else run_engine_cached(data_json, ENGINE_CACHE_SALT)
 
 patient = Patient(data)
-note_text = le.render_quick_text(patient, out)
+# Engine note (fail-soft if render_quick_text is missing)
+_note_fn = getattr(le, "render_quick_text", None)
+if callable(_note_fn):
+    note_text = _note_fn(patient, out)
+else:
+    # Minimal fallback so the app never hard-crashes if the engine function is missing
+    lvl0 = (out.get("levels") or {})
+    note_text = (
+        "RISK CONTINUUM — CLINICAL REPORT\n"
+        "------------------------------------------------------------\n"
+        f"Level: {lvl0.get('label', lvl0.get('meaning', '—'))}\n"
+        f"Plaque: {lvl0.get('plaqueEvidence', '—')} | Burden: {lvl0.get('plaqueBurden', '—')}\n"
+    )
+
 note_text = scrub_terms(note_text)
 
 lvl = out.get("levels", {}) or {}
@@ -2788,6 +2801,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
