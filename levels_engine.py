@@ -3388,9 +3388,15 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
     def _trigger_exact(label_txt: str) -> bool:
         return any(str(t) == label_txt for t in triggers)
 
-    # ---- level effect ----
-    if _trigger_prefix("ApoB"):
+    # ---- level effect (use exact trigger content; do not over-classify) ----
+    apob_effect = "—"
+
+    # Major ApoB trigger is explicit as "ApoB≥"
+    if any(str(t).startswith("ApoB≥") for t in triggers):
         apob_effect = "Trigger (major driver)"
+    # Mild ApoB trigger is explicit as "ApoB 80–99"
+    elif any(str(t).startswith("ApoB 80") for t in triggers):
+        apob_effect = "Trigger (mild signal)"
     else:
         apob_effect = "Supportive (targets/intensity)" if (cac_known and int(cac_val) > 0) else "—"
 
@@ -3429,6 +3435,8 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
             f"<td>{esc(effect)}</td>"
             "</tr>"
         )
+
+    # (rest of your function continues unchanged...)
 
     return f"""
 <div class="block compact">
@@ -4101,6 +4109,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     lines.append(f"Context: Near-term: {near} | Lifetime: {life}")
 
     return "\n".join(_dedup_lines(lines))
+
 
 
 
