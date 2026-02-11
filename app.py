@@ -480,6 +480,7 @@ st.markdown(
 )
 
 st.info("De-identified use only. Do not enter patient identifiers.")
+st.caption("DEPLOY CHECK: engine control patch active")
 
 # ============================================================
 # Normalized extractors + action helpers (single source of truth)
@@ -2801,6 +2802,7 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
 
 
 
