@@ -2106,6 +2106,32 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
         return None
 
 
+def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict) -> str:
+    """
+    Human-readable explanation for Snapshot line, keyed to CKM stage.
+    """
+    if stage_num not in (1, 2, 3):
+        return ""
+
+    driver = ""
+    try:
+        driver = str((ckm_copy or {}).get("driver") or "").strip().lower()
+    except Exception:
+        driver = ""
+
+    if stage_num == 3:
+        if "ckd" in driver:
+            return "clinical/high-risk kidney disease signal (e.g., CKD with eGFR <60)"
+        if "ascvd" in driver:
+            return "clinical cardiovascular disease is present (ASCVD)"
+        return "clinical disease layer is present (ASCVD and/or CKD)"
+
+    if stage_num == 2:
+        return "metabolic disease is present (typically diabetes)"
+
+    return "risk-factor layer is present (e.g., obesity, elevated BP, prediabetes, or dyslipidemia)"
+
+
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     def stage_class(stage: int) -> str:
         return "ckm-stage is-active" if active_stage == stage else "ckm-stage"
@@ -2311,6 +2337,10 @@ with tab_report:
             _ckd_driven = False
 
         _ckm_label = f"Stage {_ckm_stage_num}" + (" (CKD-driven risk)" if _ckd_driven else "")
+
+    _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy)
+    if _ckm_stage_why:
+        _ckm_label = f"{_ckm_label} — {_ckm_stage_why}" if _ckm_label else ""
 
     # Show CKD label ONLY when eGFR < 60 (avoid noisy CKD2 alongside Stage 1)
     if not (_egfr_v is not None and float(_egfr_v) < 60):
