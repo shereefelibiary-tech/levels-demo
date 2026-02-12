@@ -1,7 +1,7 @@
 # app.py (Risk Continuum — v2.8 clinician-clean layout)
 # FULL, UPDATED VERSION (no "Overview" tab)
 #
-# Tabs: Report | Decision Framework | Details | Debug
+# Tabs: Report | Decision Framework | Details
 # SmartPhrase ingest: Parse & Apply (inline)
 # Imaging moved OUTSIDE form so CAC enable/disable is live
 # Polished EMR copy box with COPY button (no downloads)
@@ -1333,7 +1333,6 @@ with st.form("risk_continuum_form"):
             st.checkbox("Prior intracranial hemorrhage", value=st.session_state.get("bleed_ich", False), key="bleed_ich")
             st.checkbox("Advanced CKD / eGFR <45", value=st.session_state.get("bleed_ckd", False), key="bleed_ckd")
 
-    show_json = st.checkbox("Show JSON (debug)", value=False)
     submitted = st.form_submit_button("Run", type="primary")
 
 # ============================================================
@@ -1469,6 +1468,7 @@ asp = out.get("aspirin", {}) or {}
 ins = out.get("insights", {}) or {}
 
 ckm_copy = (ins.get("ckm_copy") or {}) if isinstance(ins, dict) else {}
+ckm_context = (ins.get("ckm_context") or {}) if isinstance(ins, dict) else {}
 
 level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
 level = max(1, min(5, level))
@@ -2107,6 +2107,92 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
         return None
 
 
+def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_context: dict, data: dict) -> str:
+    """
+    Patient-specific explanation for Snapshot CKM line.
+    """
+    if stage_num not in (1, 2, 3):
+        return ""
+
+    driver = ""
+    try:
+        driver = str((ckm_copy or {}).get("driver") or "").strip().lower()
+    except Exception:
+        driver = ""
+
+    ckm_ctx = ckm_context if isinstance(ckm_context, dict) else {}
+    vals = (ckm_ctx.get("values") or {}) if isinstance(ckm_ctx.get("values"), dict) else {}
+
+    reasons: list[str] = []
+
+    egfr_v = vals.get("egfr", data.get("egfr"))
+    ascvd_v = data.get("ascvd")
+    diabetes_v = data.get("diabetes")
+    a1c_v = vals.get("a1c", data.get("a1c"))
+    bmi_v = vals.get("bmi", data.get("bmi"))
+    sbp_v = vals.get("sbp", data.get("sbp"))
+    bp_treated_v = data.get("bp_treated")
+
+    if stage_num == 3:
+        if ascvd_v is True or "ascvd" in driver:
+            reasons.append("ASCVD is present")
+        try:
+            if (egfr_v is not None) and float(egfr_v) < 60:
+                reasons.append(f"eGFR {int(round(float(egfr_v)))} (<60)")
+        except Exception:
+            pass
+        if ckm_ctx.get("ckd_present") and not any("eGFR" in r for r in reasons):
+            reasons.append(str(ckm_ctx.get("ckd_stage") or "CKD present"))
+
+        if reasons:
+            return "clinical disease layer: " + "; ".join(reasons)
+        return "clinical disease layer is present"
+
+    if stage_num == 2:
+        if diabetes_v is True:
+            reasons.append("diabetes = yes")
+        try:
+            if a1c_v is not None and float(a1c_v) >= 6.5:
+                reasons.append(f"A1c {float(a1c_v):.1f}%")
+            elif a1c_v is not None and float(a1c_v) >= 6.2:
+                reasons.append(f"A1c {float(a1c_v):.1f}% (near diabetes threshold)")
+        except Exception:
+            pass
+        if reasons:
+            return "metabolic disease layer: " + "; ".join(reasons)
+        return "metabolic disease layer is present"
+
+    try:
+        if bmi_v is not None and float(bmi_v) >= 30:
+            reasons.append(f"BMI {float(bmi_v):.1f}")
+    except Exception:
+        pass
+
+    try:
+        if sbp_v is not None and float(sbp_v) >= 130:
+            reasons.append(f"SBP {int(round(float(sbp_v)))}")
+    except Exception:
+        pass
+
+    if bp_treated_v is True:
+        reasons.append("BP treated")
+
+    if str(ckm_ctx.get("metabolic_state") or "").lower() in ("prediabetes", "near diabetes threshold (6.2–6.4)"):
+        reasons.append(str(ckm_ctx.get("metabolic_state")))
+
+    try:
+        if data.get("apob") is not None and float(data.get("apob")) > 0:
+            reasons.append(f"ApoB {int(round(float(data.get('apob'))))}")
+        elif data.get("ldl") is not None:
+            reasons.append(f"LDL-C {int(round(float(data.get('ldl'))))}")
+    except Exception:
+        pass
+
+    if reasons:
+        return "risk-factor layer: " + "; ".join(reasons[:3])
+    return "risk-factor layer is present"
+
+
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
     def stage_class(stage: int) -> str:
         return "ckm-stage is-active" if active_stage == stage else "ckm-stage"
@@ -2263,8 +2349,8 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
 # ============================================================
 # Tabs
 # ============================================================
-tab_report, tab_framework, tab_details, tab_debug = st.tabs(
-    ["Report", "Decision Framework", "Details", "Debug"]
+tab_report, tab_framework, tab_details = st.tabs(
+    ["Report", "Decision Framework", "Details"]
 )
 
 # ------------------------------------------------------------
@@ -2312,6 +2398,10 @@ with tab_report:
             _ckd_driven = False
 
         _ckm_label = f"Stage {_ckm_stage_num}" + (" (CKD-driven risk)" if _ckd_driven else "")
+
+    _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
+    if _ckm_stage_why:
+        _ckm_label = f"{_ckm_label} — {_ckm_stage_why}" if _ckm_label else ""
 
     # Show CKD label ONLY when eGFR < 60 (avoid noisy CKD2 alongside Stage 1)
     if not (_egfr_v is not None and float(_egfr_v) < 60):
@@ -2380,27 +2470,6 @@ with tab_report:
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
             unsafe_allow_html=True
         )
-         # ===== DEBUG: which engine module is actually running? =====
-try:
-    st.write("DEBUG: engine module name =", getattr(le, "__name__", "—"))
-    st.write("DEBUG: engine module file =", getattr(le, "__file__", "NO __file__"))
-except Exception as _e:
-    st.write("DEBUG: engine module error:", _e)
-
-try:
-    # If levels_engine is imported separately anywhere, confirm it resolves to the same file
-    import levels_engine as _lemod  # noqa: F401
-    st.write("DEBUG: levels_engine file =", getattr(_lemod, "__file__", "NO __file__"))
-except Exception as _e:
-    st.write("DEBUG: direct import levels_engine failed:", _e)
-
-try:
-    st.write("DEBUG: out['version'] (raw):")
-    st.json(out.get("version"))
-except Exception as _e:
-    st.write("DEBUG: out['version'] error:", _e)
-
-
 
 # Tight criteria table (rings) + Where this patient falls
 # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
@@ -2431,14 +2500,6 @@ if _need_criteria or _need_falls or _need_version:
         # Silent: do not break report rendering
         pass
 
-# ===== DEBUG: tables presence (post-rehydration) =====
-try:
-    st.write("DEBUG: criteria_table_html length =", len(str(_ins.get("criteria_table_html") or "")))
-    st.write("DEBUG: where_patient_falls_html length =", len(str(_ins.get("where_patient_falls_html") or "")))
-    st.write("DEBUG: out keys =", sorted(list(out.keys())))
-except Exception:
-    pass
-
 def _call_with_supported_kwargs(fn, kwargs: dict):
     import inspect
 
@@ -2452,12 +2513,6 @@ def _call_with_supported_kwargs(fn, kwargs: dict):
     return fn(**filtered)
 
 _criteria_html = (_ins.get("criteria_table_html") or "").strip()
-
-# ===== DEBUG: which renderer is actually being used? =====
-try:
-    st.write("DEBUG: criteria source =", "engine_html" if _criteria_html else "fallback_renderer")
-except Exception:
-    pass
 
 if _criteria_html:
     st.markdown(_criteria_html, unsafe_allow_html=True)
@@ -2643,13 +2698,7 @@ if not str(note_for_emr).strip():
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
 
-# ===== DEBUG: EMR note presence (post-render) =====
-try:
-    st.write("DEBUG: note_for_emr length =", len(str(note_for_emr or "")))
-except Exception:
-    pass
-
-# 4) Debug visibility if still empty (do not break rendering)
+# 4) Fallback visibility if still empty (do not break rendering)
 if not str(note_for_emr).strip():
     st.markdown(
         "<div class='compact-caption'>EMR note unavailable (render_quick_text returned empty).</div>",
@@ -2781,20 +2830,6 @@ with tab_details:
         st.write("—")
 
 # ------------------------------------------------------------
-# DEBUG TAB
-# ------------------------------------------------------------
-with tab_debug:
-    st.subheader("Engine quick output (raw text)")
-    st.code(note_text, language="text")
-
-    st.subheader("Trace (audit trail)")
-    st.json(out.get("trace", []))
-
-    if show_json:
-        st.subheader("JSON (debug)")
-        st.json(out)
-
-# ------------------------------------------------------------
 # Footer
 # ------------------------------------------------------------
 st.caption(
@@ -2802,7 +2837,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
 
