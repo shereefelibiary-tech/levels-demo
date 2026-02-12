@@ -2646,13 +2646,13 @@ def canonical_aspirin_copy(asp: Dict[str, Any]) -> Dict[str, Any]:
 
     if raw.startswith("avoid"):
         return {
-            "headline": "Aspirin: Avoid.",
+            "headline": "Aspirin: Not indicated.",
             "detail": None,
         }
 
     if raw.startswith("consider"):
         return {
-            "headline": "Aspirin: Reasonable (shared decision).",
+            "headline": "Aspirin: Consider low-dose aspirin (shared decision-making; bleeding risk must be low).",
             "detail": None,
         }
 
@@ -2894,7 +2894,15 @@ def aspirin_explanation(status: str, rationale: List[str]) -> str:
 
 def aspirin_advice(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
     age = int(p.get("age", 0)) if p.has("age") else None
-    ascvd = (p.get("ascvd") is True)
+    secondary_flags = [
+        "ascvd",
+        "prior_mi",
+        "prior_stroke",
+        "prior_tia",
+        "pad",
+        "prior_revascularization",
+    ]
+    ascvd = any(p.get(k) is True for k in secondary_flags)
     bleed_high, bleed_flags = _bleeding_flags(p)
 
     if ascvd:
@@ -2922,9 +2930,9 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any], t
             "bleeding_flags": bleed_flags,
         }
 
-    if age < 40 or age >= 70:
-        status = "Avoid (primary prevention)"
-        rationale = [f"Age {age}"]
+    if age < 40:
+        status = "Not indicated"
+        rationale = [f"Primary prevention age {age}: routine aspirin not recommended"]
         return {
             "status": status,
             "rationale": rationale,
@@ -2934,7 +2942,7 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any], t
         }
 
     if bleed_flags:
-        status = "Avoid (primary prevention)"
+        status = "Not indicated"
         rationale = ["High bleeding risk: " + "; ".join(bleed_flags)]
         return {
             "status": status,
@@ -2944,29 +2952,43 @@ def aspirin_advice(p: Patient, risk10: Dict[str, Any], plaque: Dict[str, Any], t
             "bleeding_flags": bleed_flags,
         }
 
-    risk_pct = risk10.get("risk_pct")
     cac = plaque.get("cac_value")
-    risk_ok = (risk_pct is not None and float(risk_pct) >= 10.0)
     cac_ok = (cac is not None and isinstance(cac, int) and cac >= 100)
 
-    if cac_ok or risk_ok:
-        reasons: List[str] = []
-        if cac_ok:
-            reasons.append("CAC ≥100")
-        if risk_ok:
-            reasons.append(f"ASCVD PCE ≥10% ({risk_pct}%)")
-        reasons.append("No bleeding risk flags identified")
+    if age > 70:
+        status = "Not indicated"
+        rationale = ["Primary prevention age >70: routine aspirin discouraged due to bleeding risk"]
+        return {
+            "status": status,
+            "rationale": rationale,
+            "explanation": aspirin_explanation(status, rationale),
+            "bleeding_risk_high": bleed_high,
+            "bleeding_flags": bleed_flags,
+        }
+
+    if cac_ok:
+        for_rationale = (
+            "FOR: CAC ≥100 can identify primary-prevention groups with modeled net benefit from aspirin over bleeding harm in observational analyses (e.g., MESA), when bleeding risk is low."
+        )
+        against_rationale = (
+            "AGAINST: USPSTF 2022 recommends against initiating aspirin for primary prevention at age 60+; ACC/AHA 2019 gives only Class IIb consideration for select adults 40–70 at higher ASCVD risk without increased bleeding risk, advises against routine use, and advises avoiding use >70."
+        )
+        reasons: List[str] = [for_rationale, against_rationale]
+        if age >= 60:
+            reasons.append("Caution: age 60+ increases concern for bleeding; decision should be individualized.")
         status = "Consider (shared decision)"
         return {
             "status": status,
             "rationale": reasons,
+            "for_rationale": for_rationale,
+            "against_rationale": against_rationale,
             "explanation": aspirin_explanation(status, reasons),
             "bleeding_risk_high": bleed_high,
             "bleeding_flags": bleed_flags,
         }
 
-    status = "Avoid / individualize"
-    rationale = ["Primary prevention benefit likely small at current risk level"]
+    status = "Not indicated"
+    rationale = ["Primary prevention: CAC <100 does not support routine aspirin initiation"]
     return {
         "status": status,
         "rationale": rationale,
