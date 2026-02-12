@@ -696,7 +696,14 @@ def extract_labs(raw: str) -> Dict[str, Optional[float]]:
 
     ascvd = _first_float(r"\bascvd\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?\b", t)
 
-    cac = _first_float(r"\b(?:cac|coronary\s*artery\s*calcium|calcium\s*score)\s*(?:score)?\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b", t)
+    cac = _first_float(
+        r"\b(?:"
+        r"cac(?:\s*\)|\b)"
+        r"|coronary\s*artery\s*calcium(?:\s*\(\s*cac\s*\))?"
+        r"|calcium\s*score"
+        r")\s*(?:score)?\s*[:=]?\s*(\d{1,6}(?:\.\d+)?)\b",
+        t,
+    )
 
     return {
         "tc": tc,
@@ -850,5 +857,4 @@ def parse_smartphrase(raw: str) -> Dict[str, Any]:
         out["former_smoker"] = x["former_smoker"]
 
     return out
-
 

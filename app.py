@@ -1,7 +1,7 @@
 # app.py (Risk Continuum — v2.8 clinician-clean layout)
 # FULL, UPDATED VERSION (no "Overview" tab)
 #
-# Tabs: Report | Decision Framework | Details | Debug
+# Tabs: Report | Decision Framework | Details
 # SmartPhrase ingest: Parse & Apply (inline)
 # Imaging moved OUTSIDE form so CAC enable/disable is live
 # Polished EMR copy box with COPY button (no downloads)
@@ -1333,7 +1333,6 @@ with st.form("risk_continuum_form"):
             st.checkbox("Prior intracranial hemorrhage", value=st.session_state.get("bleed_ich", False), key="bleed_ich")
             st.checkbox("Advanced CKD / eGFR <45", value=st.session_state.get("bleed_ckd", False), key="bleed_ckd")
 
-    show_json = st.checkbox("Show JSON (debug)", value=False)
     submitted = st.form_submit_button("Run", type="primary")
 
 # ============================================================
@@ -2263,8 +2262,8 @@ def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
 # ============================================================
 # Tabs
 # ============================================================
-tab_report, tab_framework, tab_details, tab_debug = st.tabs(
-    ["Report", "Decision Framework", "Details", "Debug"]
+tab_report, tab_framework, tab_details = st.tabs(
+    ["Report", "Decision Framework", "Details"]
 )
 
 # ------------------------------------------------------------
@@ -2380,27 +2379,6 @@ with tab_report:
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
             unsafe_allow_html=True
         )
-         # ===== DEBUG: which engine module is actually running? =====
-try:
-    st.write("DEBUG: engine module name =", getattr(le, "__name__", "—"))
-    st.write("DEBUG: engine module file =", getattr(le, "__file__", "NO __file__"))
-except Exception as _e:
-    st.write("DEBUG: engine module error:", _e)
-
-try:
-    # If levels_engine is imported separately anywhere, confirm it resolves to the same file
-    import levels_engine as _lemod  # noqa: F401
-    st.write("DEBUG: levels_engine file =", getattr(_lemod, "__file__", "NO __file__"))
-except Exception as _e:
-    st.write("DEBUG: direct import levels_engine failed:", _e)
-
-try:
-    st.write("DEBUG: out['version'] (raw):")
-    st.json(out.get("version"))
-except Exception as _e:
-    st.write("DEBUG: out['version'] error:", _e)
-
-
 
 # Tight criteria table (rings) + Where this patient falls
 # Prefer engine-owned HTML, but fall back to in-app renderers if missing.
@@ -2431,14 +2409,6 @@ if _need_criteria or _need_falls or _need_version:
         # Silent: do not break report rendering
         pass
 
-# ===== DEBUG: tables presence (post-rehydration) =====
-try:
-    st.write("DEBUG: criteria_table_html length =", len(str(_ins.get("criteria_table_html") or "")))
-    st.write("DEBUG: where_patient_falls_html length =", len(str(_ins.get("where_patient_falls_html") or "")))
-    st.write("DEBUG: out keys =", sorted(list(out.keys())))
-except Exception:
-    pass
-
 def _call_with_supported_kwargs(fn, kwargs: dict):
     import inspect
 
@@ -2452,12 +2422,6 @@ def _call_with_supported_kwargs(fn, kwargs: dict):
     return fn(**filtered)
 
 _criteria_html = (_ins.get("criteria_table_html") or "").strip()
-
-# ===== DEBUG: which renderer is actually being used? =====
-try:
-    st.write("DEBUG: criteria source =", "engine_html" if _criteria_html else "fallback_renderer")
-except Exception:
-    pass
 
 if _criteria_html:
     st.markdown(_criteria_html, unsafe_allow_html=True)
@@ -2643,13 +2607,7 @@ if not str(note_for_emr).strip():
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
 
-# ===== DEBUG: EMR note presence (post-render) =====
-try:
-    st.write("DEBUG: note_for_emr length =", len(str(note_for_emr or "")))
-except Exception:
-    pass
-
-# 4) Debug visibility if still empty (do not break rendering)
+# 4) Fallback visibility if still empty (do not break rendering)
 if not str(note_for_emr).strip():
     st.markdown(
         "<div class='compact-caption'>EMR note unavailable (render_quick_text returned empty).</div>",
@@ -2779,20 +2737,6 @@ with tab_details:
         st.json(ckm)
     else:
         st.write("—")
-
-# ------------------------------------------------------------
-# DEBUG TAB
-# ------------------------------------------------------------
-with tab_debug:
-    st.subheader("Engine quick output (raw text)")
-    st.code(note_text, language="text")
-
-    st.subheader("Trace (audit trail)")
-    st.json(out.get("trace", []))
-
-    if show_json:
-        st.subheader("JSON (debug)")
-        st.json(out)
 
 # ------------------------------------------------------------
 # Footer
