@@ -135,15 +135,34 @@ def test_apob_lpa_missing_vs_zero_rules():
     assert "Missing (obtain Lp(a))" in html
 
 
-def test_aspirin_text_rules():
-    ascvd = evaluate(Patient({**BASE, "ascvd": True}))
-    old_age = evaluate(Patient({**BASE, "age": 75}))
-    consider = evaluate(Patient({**BASE, "cac": 150}))
+def test_aspirin_primary_prevention_guardrails_and_rationale():
+    # A) Primary prevention, age 60, CAC 222, no bleeding risks
+    primary_consider = evaluate(Patient({**BASE, "age": 60, "cac": 222, "ascvd": False}))
+    a_line = ((primary_consider.get("insights") or {}).get("aspirin_copy") or {}).get("headline", "")
+    a_data = primary_consider.get("aspirin") or {}
 
+    assert a_line == "Aspirin: Consider low-dose aspirin (shared decision-making; bleeding risk must be low)."
+    assert "FOR:" in " ".join(a_data.get("rationale") or [])
+    assert "AGAINST:" in " ".join(a_data.get("rationale") or [])
+
+    # B) Primary prevention, age 60, CAC 0, no bleeding risks
+    primary_cac0 = evaluate(Patient({**BASE, "age": 60, "cac": 0, "ascvd": False}))
+    b_line = ((primary_cac0.get("insights") or {}).get("aspirin_copy") or {}).get("headline", "")
+    assert b_line == "Aspirin: Not indicated."
+
+    # C) Primary prevention, age 72, CAC 300, no bleeding risks
+    primary_old = evaluate(Patient({**BASE, "age": 72, "cac": 300, "ascvd": False}))
+    c_line = ((primary_old.get("insights") or {}).get("aspirin_copy") or {}).get("headline", "")
+    assert c_line == "Aspirin: Not indicated."
+
+    # D) Primary prevention, age 55, CAC 150, anticoagulant
+    primary_anticoag = evaluate(Patient({**BASE, "age": 55, "cac": 150, "ascvd": False, "bleed_anticoag": True}))
+    d_line = ((primary_anticoag.get("insights") or {}).get("aspirin_copy") or {}).get("headline", "")
+    assert d_line == "Aspirin: Not indicated."
+
+
+def test_aspirin_secondary_prevention_behavior_unchanged():
+    # E) Secondary prevention pathway remains indicated wording
+    ascvd = evaluate(Patient({**BASE, "ascvd": True, "age": 60}))
     a1 = ((ascvd.get("insights") or {}).get("aspirin_copy") or {}).get("headline", "")
-    a2 = ((old_age.get("insights") or {}).get("aspirin_copy") or {}).get("headline", "")
-    a3 = ((consider.get("insights") or {}).get("aspirin_copy") or {}).get("headline", "")
-
     assert a1 == "Aspirin: Indicated (secondary prevention)."
-    assert a2 == "Aspirin: Avoid."
-    assert a3 == "Aspirin: Reasonable (shared decision)."
