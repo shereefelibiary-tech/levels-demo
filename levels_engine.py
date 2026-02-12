@@ -2622,10 +2622,9 @@ def canonical_cac_copy(
     # CAC not yet obtained
     return {
         "status": "unmeasured",
-        "headline": "Coronary calcium: Reasonable to obtain.",
+        "headline": "Coronary calcium: Reasonable to obtain for risk clarification (not a treatment escalation).",
         "detail": (
-            "Useful to define disease burden or if results would change treatment "
-            "intensity or downstream evaluation."
+            "Diagnostic clarification step to define plaque burden and guide risk discussions/intensity decisions."
         ),
         "referral": None,
     }
@@ -3305,7 +3304,7 @@ def recommended_action_line(out: Dict[str, Any]) -> str:
         if level == 3:
             return "Treatment is reasonable."
         if level <= 2:
-            return "No escalation today."
+            return "No medication escalation today."
         return "—"
 
     # Optional: if dominant, avoid hedgy phrasing

@@ -1468,6 +1468,7 @@ asp = out.get("aspirin", {}) or {}
 ins = out.get("insights", {}) or {}
 
 ckm_copy = (ins.get("ckm_copy") or {}) if isinstance(ins, dict) else {}
+ckm_context = (ins.get("ckm_context") or {}) if isinstance(ins, dict) else {}
 
 level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
 level = max(1, min(5, level))
@@ -2106,9 +2107,9 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
         return None
 
 
-def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict) -> str:
+def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_context: dict, data: dict) -> str:
     """
-    Human-readable explanation for Snapshot line, keyed to CKM stage.
+    Patient-specific explanation for Snapshot CKM line.
     """
     if stage_num not in (1, 2, 3):
         return ""
@@ -2119,17 +2120,77 @@ def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict) -> st
     except Exception:
         driver = ""
 
+    ckm_ctx = ckm_context if isinstance(ckm_context, dict) else {}
+    vals = (ckm_ctx.get("values") or {}) if isinstance(ckm_ctx.get("values"), dict) else {}
+
+    reasons: list[str] = []
+
+    egfr_v = vals.get("egfr", data.get("egfr"))
+    ascvd_v = data.get("ascvd")
+    diabetes_v = data.get("diabetes")
+    a1c_v = vals.get("a1c", data.get("a1c"))
+    bmi_v = vals.get("bmi", data.get("bmi"))
+    sbp_v = vals.get("sbp", data.get("sbp"))
+    bp_treated_v = data.get("bp_treated")
+
     if stage_num == 3:
-        if "ckd" in driver:
-            return "clinical/high-risk kidney disease signal (e.g., CKD with eGFR <60)"
-        if "ascvd" in driver:
-            return "clinical cardiovascular disease is present (ASCVD)"
-        return "clinical disease layer is present (ASCVD and/or CKD)"
+        if ascvd_v is True or "ascvd" in driver:
+            reasons.append("ASCVD is present")
+        try:
+            if (egfr_v is not None) and float(egfr_v) < 60:
+                reasons.append(f"eGFR {int(round(float(egfr_v)))} (<60)")
+        except Exception:
+            pass
+        if ckm_ctx.get("ckd_present") and not any("eGFR" in r for r in reasons):
+            reasons.append(str(ckm_ctx.get("ckd_stage") or "CKD present"))
+
+        if reasons:
+            return "clinical disease layer: " + "; ".join(reasons)
+        return "clinical disease layer is present"
 
     if stage_num == 2:
-        return "metabolic disease is present (typically diabetes)"
+        if diabetes_v is True:
+            reasons.append("diabetes = yes")
+        try:
+            if a1c_v is not None and float(a1c_v) >= 6.5:
+                reasons.append(f"A1c {float(a1c_v):.1f}%")
+            elif a1c_v is not None and float(a1c_v) >= 6.2:
+                reasons.append(f"A1c {float(a1c_v):.1f}% (near diabetes threshold)")
+        except Exception:
+            pass
+        if reasons:
+            return "metabolic disease layer: " + "; ".join(reasons)
+        return "metabolic disease layer is present"
 
-    return "risk-factor layer is present (e.g., obesity, elevated BP, prediabetes, or dyslipidemia)"
+    try:
+        if bmi_v is not None and float(bmi_v) >= 30:
+            reasons.append(f"BMI {float(bmi_v):.1f}")
+    except Exception:
+        pass
+
+    try:
+        if sbp_v is not None and float(sbp_v) >= 130:
+            reasons.append(f"SBP {int(round(float(sbp_v)))}")
+    except Exception:
+        pass
+
+    if bp_treated_v is True:
+        reasons.append("BP treated")
+
+    if str(ckm_ctx.get("metabolic_state") or "").lower() in ("prediabetes", "near diabetes threshold (6.2–6.4)"):
+        reasons.append(str(ckm_ctx.get("metabolic_state")))
+
+    try:
+        if data.get("apob") is not None and float(data.get("apob")) > 0:
+            reasons.append(f"ApoB {int(round(float(data.get('apob'))))}")
+        elif data.get("ldl") is not None:
+            reasons.append(f"LDL-C {int(round(float(data.get('ldl'))))}")
+    except Exception:
+        pass
+
+    if reasons:
+        return "risk-factor layer: " + "; ".join(reasons[:3])
+    return "risk-factor layer is present"
 
 
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
@@ -2338,7 +2399,7 @@ with tab_report:
 
         _ckm_label = f"Stage {_ckm_stage_num}" + (" (CKD-driven risk)" if _ckd_driven else "")
 
-    _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy)
+    _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
     if _ckm_stage_why:
         _ckm_label = f"{_ckm_label} — {_ckm_stage_why}" if _ckm_label else ""
 
@@ -2776,7 +2837,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
 
