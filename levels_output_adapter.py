@@ -13,13 +13,13 @@ def evaluate_unified(patient, engine_version: str = "legacy"):
     if engine_version == "v4":
         from levels_engine_v4 import evaluate_v4
         v4 = evaluate_v4(patient)
-        return _v4_to_legacy(v4)
+        return _v4_to_legacy(v4, patient)
 
     from levels_engine import evaluate
     return evaluate(patient)
 
 
-def _v4_to_legacy(v4: dict) -> dict:
+def _v4_to_legacy(v4: dict, patient=None) -> dict:
     """
     Translate v4 payload into the legacy shape expected by app.py.
     Minimal bridge; expand only when the app needs more.
@@ -58,6 +58,16 @@ def _v4_to_legacy(v4: dict) -> dict:
     plaque_status = v4.get("plaque_status", "Unknown")
     plaque_burden = v4.get("plaque_burden", "Not quantified")
 
+    therapy_on = False
+    try:
+        if patient is not None:
+            for k in ("lipid_lowering", "on_statin", "statin", "lipidTherapy"):
+                if bool(getattr(patient, "get", lambda *_: None)(k)) is True:
+                    therapy_on = True
+                    break
+    except Exception:
+        therapy_on = False
+
     return {
         "version": v4.get("version", {}),
         "system": v4.get("system", "Risk Continuum"),
@@ -78,6 +88,7 @@ def _v4_to_legacy(v4: dict) -> dict:
 
             "evidence": {
                 "clinical_ascvd": bool(v4.get("clinical_ascvd", False)),
+                "on_lipid_therapy": bool(therapy_on),
                 "cac_status": plaque_status,
                 "burden_band": plaque_burden,
                 "cac_value": v4.get("cac_value", None),
@@ -250,6 +261,12 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
     smoker = inputData.get("smoking") or inputData.get("smoker")
     diabetes = inputData.get("diabetes")
     ckd = inputData.get("ckd")
+    therapy_on = bool(
+        inputData.get("lipid_lowering")
+        or inputData.get("on_statin")
+        or inputData.get("statin")
+        or inputData.get("lipidTherapy")
+    )
 
     # Triggers (kept similar, but aligned with Risk Continuum language)
     triggers: List[Dict[str, Any]] = []
@@ -346,7 +363,12 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         plan_items.append(_plan_item("followup", "Re-run Risk Continuum after data completion.", "after data", 1))
     else:
         if level >= 4:
-            plan_items.append(_plan_item("med", "Initiate or intensify lipid-lowering therapy to reach targets.", "now", 1))
+            med_line = (
+                "Intensify lipid-lowering therapy to reach targets."
+                if therapy_on
+                else "Initiate or intensify lipid-lowering therapy to reach targets."
+            )
+            plan_items.append(_plan_item("med", med_line, "now", 1))
             plan_items.append(_plan_item("test", "Repeat lipids (± ApoB) to confirm response.", "8–12 weeks", 1))
         elif level == 3:
             plan_items.append(_plan_item("med", "Shared decision toward lipid-lowering therapy; consider escalation based on enhancers and trajectory.", "now", 1))

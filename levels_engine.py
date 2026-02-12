@@ -2622,10 +2622,9 @@ def canonical_cac_copy(
     # CAC not yet obtained
     return {
         "status": "unmeasured",
-        "headline": "Coronary calcium: Reasonable to obtain.",
+        "headline": "Coronary calcium: Reasonable to obtain for risk clarification (not a treatment escalation).",
         "detail": (
-            "Useful to define disease burden or if results would change treatment "
-            "intensity or downstream evaluation."
+            "Diagnostic clarification step to define plaque burden and guide risk discussions/intensity decisions."
         ),
         "referral": None,
     }
@@ -3001,6 +3000,20 @@ def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
 # Public API: evaluate()
 # -------------------------------------------------------------------
 def evaluate(p: Patient) -> Dict[str, Any]:
+    # Normalize known "zero means missing" labs so the engine treats 0 and None consistently.
+    try:
+        pdata = dict(getattr(p, "data", {}) or {})
+    except Exception:
+        pdata = {}
+    for _k in ("apob", "lpa"):
+        if _k in pdata:
+            try:
+                if float(pdata.get(_k)) <= 0:
+                    pdata[_k] = None
+            except Exception:
+                pdata[_k] = None
+    p = Patient(pdata)
+
     trace: List[Dict[str, Any]] = []
     add_trace(trace, "Engine_start", VERSION["levels"], "Begin evaluation")
 
@@ -3111,6 +3124,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
         "evidence": {
             "clinical_ascvd": bool(p.get("ascvd") is True),
+            "on_lipid_therapy": bool(therapy_on),
             "cac_status": plaque.get("plaque_evidence", "Unknown"),
             "burden_band": plaque.get("plaque_burden", "Not quantified"),
             "cac_value": plaque.get("cac_value"),
@@ -3246,6 +3260,15 @@ def recommended_action_line(out: Dict[str, Any]) -> str:
     lvl = out.get("levels") or {}
     level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or 0)
     sub = (lvl.get("sublevel") or None)
+    evidence = (lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {}
+
+    therapy_on = bool(
+        evidence.get("on_lipid_therapy")
+        or evidence.get("lipid_lowering")
+        or evidence.get("on_statin")
+        or evidence.get("statin")
+        or evidence.get("lipidTherapy")
+    )
 
     dominant = bool(lvl.get("dominantAction") is True)
 
@@ -3256,6 +3279,9 @@ def recommended_action_line(out: Dict[str, Any]) -> str:
     s = " ".join(plan.split())
     if "." in s:
         s = s.split(".", 1)[0].strip()
+    if therapy_on and "initiate lipid-lowering therapy" in s.lower():
+        s = "Optimize lipid-lowering therapy"
+
     if s and not s.endswith("."):
         s += "."
 
@@ -3264,22 +3290,26 @@ def recommended_action_line(out: Dict[str, Any]) -> str:
     if not s or any(w in s.lower() for w in forbidden):
         # Safe fallbacks by posture
         if level >= 5:
-            return "Continue secondary-prevention intensity lipid-lowering."
+            return (
+                "Continue secondary-prevention intensity lipid-lowering."
+                if therapy_on
+                else "Initiate secondary-prevention intensity lipid-lowering."
+            )
         if level == 4:
             return "Lipid-lowering therapy appropriate; intensity individualized based on targets and risk profile."
         if dominant and level >= 3:
-            return "Initiate treatment now."
+            return "Optimize current lipid-lowering therapy now." if therapy_on else "Initiate treatment now."
         if level == 3 and sub == "3B":
-            return "Initiate lipid-lowering therapy."
+            return "Optimize lipid-lowering therapy." if therapy_on else "Initiate lipid-lowering therapy."
         if level == 3:
             return "Treatment is reasonable."
         if level <= 2:
-            return "No escalation today."
+            return "No medication escalation today."
         return "—"
 
     # Optional: if dominant, avoid hedgy phrasing
     if dominant and ("reasonable" in s.lower() or "preference" in s.lower()):
-        return "Initiate treatment now."
+        return "Optimize current lipid-lowering therapy now." if therapy_on else "Initiate treatment now."
 
     return s
 
@@ -3532,6 +3562,14 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
     cac_known = isinstance(cac_val, int)
 
     apob_disp = f"{fmt_int(p.get('apob'))} mg/dL" if p.has("apob") else "—"
+    lpa_disp = "Unmeasured"
+    if p.has_nonzero("lpa"):
+        unit_raw = str(p.get("lpa_unit", "")).strip()
+        unit = unit_raw if unit_raw else "nmol/L"
+        try:
+            lpa_disp = f"{fmt_int(p.get('lpa'))} {unit}".strip()
+        except Exception:
+            lpa_disp = "Unmeasured"
     a1c_disp = f"{fmt_1dp(p.get('a1c'))}%" if p.has("a1c") else "—"
     smoke_disp = "Yes" if p.get("smoking") is True else ("No" if p.get("smoking") is False else "—")
     cac_disp = "Unmeasured" if not cac_known else str(int(cac_val))
@@ -3552,6 +3590,11 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
 
     a1c_effect = "Trigger (major driver)" if _trigger_prefix("Diabetes") else "—"
     smoke_effect = "Trigger (major driver)" if _trigger_exact("Smoking") else "—"
+    lpa_effect = "—"
+    if not p.has_nonzero("lpa"):
+        lpa_effect = "Missing (obtain Lp(a))"
+    elif any(str(t).lower().startswith("lp(a) elevated") for t in triggers) or any("lp(a) elevated" in str(t).lower() for t in triggers):
+        lpa_effect = "Trigger (major driver)"
 
     if cac_known:
         if int(cac_val) >= CAC_LEVEL5_CUT:
@@ -3568,6 +3611,7 @@ def canonical_where_patient_falls_html(p: Patient, out: Dict[str, Any]) -> str:
 
     rows = [
         ("Atherogenic burden", "ApoB", "ApoB (preferred marker)", apob_disp, apob_effect),
+        ("Genetics", "Lp(a)", "Lp(a) / inherited risk", lpa_disp, lpa_effect),
         ("Glycemia", "A1c", "A1c / diabetes status", a1c_disp, a1c_effect),
         ("Smoking", "Smoking", "Current smoking", smoke_disp, smoke_effect),
         ("Plaque", "CAC", "Coronary calcium (plaque evidence)", cac_disp, cac_effect),
