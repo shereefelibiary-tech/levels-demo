@@ -1469,6 +1469,7 @@ ins = out.get("insights", {}) or {}
 
 ckm_copy = (ins.get("ckm_copy") or {}) if isinstance(ins, dict) else {}
 ckm_context = (ins.get("ckm_context") or {}) if isinstance(ins, dict) else {}
+ckd_copy = (ins.get("ckd_copy") or {}) if isinstance(ins, dict) else {}
 
 level = int(lvl.get("managementLevel") or lvl.get("postureLevel") or lvl.get("level") or 1)
 level = max(1, min(5, level))
@@ -2579,14 +2580,52 @@ if rd.get("should_surface"):
         unsafe_allow_html=True,
     )
 
-# CKM context (engine-gated; display-only)
-if ckm_copy.get("headline"):
+# PCE vs PREVENT divergence (engine-gated)
+rmm = (out.get("insights") or {}).get("risk_model_mismatch") or {}
+if rmm.get("status") == "ok" and bool(rmm.get("should_surface")):
+    rmm_label = _html.escape(str(rmm.get("label") or "Model divergence"))
+    try:
+        _delta = abs(float(rmm.get("delta_points")))
+        rmm_delta_line = f"Absolute difference: {_delta:.1f} percentage points"
+    except Exception:
+        rmm_delta_line = ""
+    rmm_detail = _html.escape(str(rmm.get("explainer_clinical") or ""))
+
     st.markdown(
         f"""
 <div class="block compact">
-  <div class="block-title compact">CKM context</div>
-  <div class="kvline compact">{_html.escape(ckm_copy.get("headline",""))}</div>
+  <div class="block-title compact">Risk model alignment (PCE vs PREVENT)</div>
+  <div class="kvline compact">{rmm_label}</div>
+  {f"<div class='kvline compact inline-muted'>{_html.escape(rmm_delta_line)}</div>" if rmm_delta_line else ""}
+  {f"<div class='kvline compact inline-muted'>{rmm_detail}</div>" if rmm_detail else ""}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+# Structural clarification (engine-gated)
+struct_clar = (out.get("insights") or {}).get("structural_clarification")
+if str(struct_clar or "").strip():
+    st.markdown(
+        f"""
+<div class="block compact">
+  <div class="block-title compact">Structural clarification</div>
+  <div class="kvline compact">{_html.escape(str(struct_clar))}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+# CKM/CKD context (engine-gated; display-only)
+if ckm_copy.get("headline") or ckd_copy.get("headline"):
+    st.markdown(
+        f"""
+<div class="block compact">
+  <div class="block-title compact">CKM/CKD context</div>
+  {f"<div class='kvline compact'>{_html.escape(ckm_copy.get('headline',''))}</div>" if ckm_copy.get("headline") else ""}
   {f"<div class='kvline compact inline-muted'>{_html.escape(ckm_copy.get('detail',''))}</div>" if ckm_copy.get("detail") else ""}
+  {f"<div class='kvline compact'>{_html.escape(ckd_copy.get('headline',''))}</div>" if ckd_copy.get("headline") else ""}
+  {f"<div class='kvline compact inline-muted'>{_html.escape(ckd_copy.get('detail',''))}</div>" if ckd_copy.get("detail") else ""}
 </div>
 """,
         unsafe_allow_html=True,
@@ -2637,7 +2676,11 @@ with col_m:
     rec_action = recommended_action_line_unified(out, fallback=plan_clean)
 
     cac_copy = (out.get("insights") or {}).get("cac_copy") or {}
-    cac_head = _html.escape(cac_copy.get("headline") or "Coronary calcium: —")
+    cac_head_raw = str(cac_copy.get("headline") or "Coronary calcium: —").strip()
+    cac_head_raw = re.sub(r"(?i)^\s*coronary\s+calcium\s*:\s*", "", cac_head_raw)
+    # Action card is intentionally concise: keep core meaning, drop explanatory parenthetical.
+    cac_head_raw = cac_head_raw.replace(" (not a treatment escalation)", "")
+    cac_head = _html.escape(cac_head_raw)
     cac_det = _html.escape(cac_copy.get("detail") or "")
     cac_ref = _html.escape(cac_copy.get("referral") or "")
 
@@ -2648,7 +2691,9 @@ with col_m:
     )
 
     asp_copy = (out.get("insights") or {}).get("aspirin_copy") or {}
-    asp_head = _html.escape(asp_copy.get("headline") or f"Aspirin: {asp_line}")
+    asp_head_raw = str(asp_copy.get("headline") or f"Aspirin: {asp_line}").strip()
+    asp_head_raw = re.sub(r"(?i)^\s*aspirin\s*:\s*", "", asp_head_raw)
+    asp_head = _html.escape(asp_head_raw)
 
     st.markdown(
         f"""
