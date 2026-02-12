@@ -3001,6 +3001,20 @@ def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
 # Public API: evaluate()
 # -------------------------------------------------------------------
 def evaluate(p: Patient) -> Dict[str, Any]:
+    # Normalize known "zero means missing" labs so the engine treats 0 and None consistently.
+    try:
+        pdata = dict(getattr(p, "data", {}) or {})
+    except Exception:
+        pdata = {}
+    for _k in ("apob", "lpa"):
+        if _k in pdata:
+            try:
+                if float(pdata.get(_k)) <= 0:
+                    pdata[_k] = None
+            except Exception:
+                pdata[_k] = None
+    p = Patient(pdata)
+
     trace: List[Dict[str, Any]] = []
     add_trace(trace, "Engine_start", VERSION["levels"], "Begin evaluation")
 
