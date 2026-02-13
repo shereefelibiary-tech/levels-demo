@@ -570,6 +570,7 @@ def _coerce_emr_dx_entries(out: dict) -> list[dict]:
     Accepted shapes (first one found):
       - out["emr_dx"] -> list[dict]
       - out["diagnoses"] -> list[dict]
+      - out["diagnosisSynthesis"]["diagnoses"] -> list[dict]
       - out["insights"]["emr_dx"] -> list[dict]
 
     Each item may contain: label/name/text, status, icd/icd_code/code.
@@ -578,6 +579,7 @@ def _coerce_emr_dx_entries(out: dict) -> list[dict]:
     for candidate in (
         (out or {}).get("emr_dx"),
         (out or {}).get("diagnoses"),
+        ((out or {}).get("diagnosisSynthesis") or {}).get("diagnoses"),
         ((out or {}).get("insights") or {}).get("emr_dx"),
     ):
         if isinstance(candidate, list) and candidate:
@@ -594,6 +596,10 @@ def _coerce_emr_dx_entries(out: dict) -> list[dict]:
         status_raw = str(item.get("status") or item.get("bucket") or "confirmed").strip().lower()
         status = "suspected" if status_raw.startswith("sus") else "confirmed"
         icd = str(item.get("icd") or item.get("icd_code") or item.get("code") or "").strip()
+        if not icd and isinstance(item.get("icd10"), list) and item.get("icd10"):
+            first = item["icd10"][0]
+            if isinstance(first, dict):
+                icd = str(first.get("code") or "").strip()
         normalized.append({"label": label, "status": status, "icd": icd})
     return normalized
 
@@ -3342,7 +3348,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
 

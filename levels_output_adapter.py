@@ -13,10 +13,14 @@ def evaluate_unified(patient, engine_version: str = "legacy"):
     if engine_version == "v4":
         from levels_engine_v4 import evaluate_v4
         v4 = evaluate_v4(patient)
-        return _v4_to_legacy(v4, patient)
+        out = _v4_to_legacy(v4, patient)
+        out["diagnosisSynthesis"] = build_diagnosis_synthesis(patient, out)
+        return out
 
     from levels_engine import evaluate
-    return evaluate(patient)
+    out = evaluate(patient)
+    out["diagnosisSynthesis"] = build_diagnosis_synthesis(patient, out)
+    return out
 
 
 def _v4_to_legacy(v4: dict, patient=None) -> dict:
