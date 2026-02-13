@@ -563,7 +563,21 @@ def _inject_management_line_into_note(note: str, action_line: str) -> str:
     return note
 
 
-def _tidy_emr_plan_section(note: str, *, treatment_trigger: bool = False, cac0_low_risk: bool = False, enhancer_only: bool = False, engine_plan_bullets: list[str] | None = None) -> str:
+def _tidy_emr_plan_section(
+    note: str,
+    *,
+    treatment_trigger: bool = False,
+    cac0_low_risk: bool = False,
+    enhancer_only: bool = False,
+    engine_plan_bullets: list[str] | None = None,
+    plaque_unmeasured: bool = False,
+    missing_key_biomarkers: bool = False,
+    low_stability_incomplete_clarifiers: bool = False,
+    hard_lipid_trigger: bool = False,
+    clinical_ascvd: bool = False,
+    plaque_present: bool | None = None,
+    explicit_engine_mandate: bool = False,
+) -> str:
     """
     Keep Plan concise and clinician-friendly without altering computed thresholds/scoring.
     - Collapse duplicate high-level treatment bullets (Management + Lipid-lowering therapy).
@@ -667,6 +681,24 @@ def _tidy_emr_plan_section(note: str, *, treatment_trigger: bool = False, cac0_l
             or "intensity individualized" in tl
         )
 
+    def _is_no_escalation_line(t: str) -> bool:
+        tl = t.lower()
+        return (
+            "no medication escalation today" in tl
+            or "no immediate escalation" in tl
+            or "not required at this time" in tl
+        )
+
+    def _is_specific_lab_acquisition_line(t: str) -> bool:
+        tl = t.lower()
+        has_marker = ("apob" in tl) or ("lp(a)" in tl) or ("lpa" in tl)
+        has_missing_or_obtain = any(k in tl for k in ("missing", "obtain", "measure", "acquire", "complete"))
+        return has_marker and has_missing_or_obtain
+
+    def _is_generic_data_completion_line(t: str) -> bool:
+        tl = t.lower()
+        return tl.startswith("data completion") and not _is_specific_lab_acquisition_line(t)
+
     parsed = [p for p in parsed if p]
 
     if engine_plan_bullets:
@@ -684,6 +716,30 @@ def _tidy_emr_plan_section(note: str, *, treatment_trigger: bool = False, cac0_l
         parsed = [p for p in parsed if not _is_initiate_line(p)]
         parsed = [p for p in parsed if not _is_lpa_line(p)]
         parsed.append("Elevated Lp(a) informs lifetime risk discussion.")
+
+    # Reconcile mutually exclusive medication actions before final Plan rendering.
+    med_escalation_eligible = bool(
+        (plaque_present is True)
+        or hard_lipid_trigger
+        or clinical_ascvd
+        or explicit_engine_mandate
+    )
+    defer_due_to_incomplete_data = bool(
+        (plaque_unmeasured or missing_key_biomarkers or low_stability_incomplete_clarifiers)
+        and (not med_escalation_eligible)
+    )
+
+    if defer_due_to_incomplete_data:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+        parsed = [p for p in parsed if not _is_lipid_bullet(p)]
+        if not any(_is_no_escalation_line(p) for p in parsed):
+            parsed.insert(0, "No medication escalation today")
+    elif not med_escalation_eligible:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+
+    has_specific_lab_acquisition = any(_is_specific_lab_acquisition_line(p) for p in parsed)
+    if has_specific_lab_acquisition:
+        parsed = [p for p in parsed if not _is_generic_data_completion_line(p)]
 
     lipid_positions = [i for i, p in enumerate(parsed) if _is_lipid_bullet(p)]
     if lipid_positions:
@@ -719,21 +775,6 @@ def _tidy_emr_plan_section(note: str, *, treatment_trigger: bool = False, cac0_l
 
     parsed = _dedupe_bullets(parsed)
 
-    def _cat(text: str) -> int:
-        t = text.lower()
-        if t.startswith("treatment ") or t.startswith("management:") or t.startswith("lipid-lowering therapy") or t.startswith("initiate lipid-lowering therapy"):
-            return 0
-        if "apob" in t or "driver" in t:
-            return 1
-        if "lp(a)" in t or "lpa" in t:
-            return 2
-        if "aspirin" in t:
-            return 3
-        if "cac" in t or "coronary calcium" in t:
-            return 4
-        return 5
-
-    parsed = [p for _, p in sorted(enumerate(parsed), key=lambda x: (_cat(x[1]), x[0]))]
     parsed = _dedupe_bullets(parsed)
     new_bullets = [f"- {p}" for p in parsed]
 
@@ -2997,6 +3038,22 @@ _ldl_or_apob_hard_trigger = ((_apob_v is not None and _apob_v >= _apob_hard_cut)
 _treatment_trigger = bool((plaque_present is True) or (_pce_pct_for_plan is not None and _pce_pct_for_plan >= _pce_tx_cut) or _ldl_or_apob_hard_trigger)
 _cac0_low_risk = bool((plaque_present is False) and (_pce_pct_for_plan is not None) and (_pce_pct_for_plan < _low_risk_cut) and (not _treatment_trigger))
 
+_apob_initiate_cut = float(getattr(le, "APOB_INITIATE_CUT", 110.0))
+_very_high_ldl_cut = 190.0
+_very_high_lipid_trigger = bool(
+    (_apob_v is not None and _apob_v >= _apob_initiate_cut)
+    or (_ldl_v is not None and _ldl_v >= _very_high_ldl_cut)
+)
+
+_rs_missing = {str(x).strip().lower() for x in ((out.get("riskSignal") or {}).get("missing") or []) if str(x).strip()}
+_missing_key_biomarkers = bool(("apob" in _rs_missing) or any(x in _rs_missing for x in ("lp(a)", "lpa")))
+_plaque_unmeasured = _plaque_unmeasured((lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {})
+_low_stability_incomplete_clarifiers = bool(
+    str(decision_stability or "").strip().lower() == "low"
+    and "clarifier" in str(decision_stability_note or "").strip().lower()
+)
+_explicit_engine_mandate = bool((lvl.get("dominantAction") is True) and _treatment_trigger)
+
 try:
     _lpa_v = float(data.get("lpa")) if data.get("lpa") is not None else None
 except Exception:
@@ -3011,6 +3068,13 @@ note_for_emr = _tidy_emr_plan_section(
     cac0_low_risk=_cac0_low_risk,
     enhancer_only=_enhancer_only,
     engine_plan_bullets=out.get("plan_bullets"),
+    plaque_unmeasured=_plaque_unmeasured,
+    missing_key_biomarkers=_missing_key_biomarkers,
+    low_stability_incomplete_clarifiers=_low_stability_incomplete_clarifiers,
+    hard_lipid_trigger=_very_high_lipid_trigger,
+    clinical_ascvd=clinical_ascvd,
+    plaque_present=plaque_present,
+    explicit_engine_mandate=_explicit_engine_mandate,
 )
 
 # 4) Fallback visibility if still empty (do not break rendering)
@@ -3152,8 +3216,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
-
 
 
 
