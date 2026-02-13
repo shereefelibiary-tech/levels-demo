@@ -3017,6 +3017,694 @@ def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
     life = (anchors.get("lifetime") or {}).get("summary", "—")
     near = near.replace(" / CAC unknown", "").replace(" / Plaque unmeasured", "")
     return near, life
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+from datetime import date
+
+
+def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Engine-owned cardiometabolic diagnosis synthesis.
+    Scope-locked to Risk Continuum inputs already parsed into `patient` (or derivable).
+    Produces out["diagnosisSynthesis"].
+
+    Confirmed vs suspected:
+      - suspected diagnoses do not export ICD by default (icd10 list empty; candidates optional)
+      - composite-first suppression prevents redundancy
+    """
+
+    # ----------------------------
+    # Helpers: safe extraction
+    # ----------------------------
+    def _as_float(x: Any) -> Optional[float]:
+        try:
+            if x is None:
+                return None
+            if isinstance(x, bool):
+                return None
+            return float(x)
+        except Exception:
+            return None
+
+    def _as_int(x: Any) -> Optional[int]:
+        try:
+            if x is None:
+                return None
+            if isinstance(x, bool):
+                return None
+            return int(float(x))
+        except Exception:
+            return None
+
+    def _get_attr_first(obj: Any, names: List[str]) -> Any:
+        for n in names:
+            if hasattr(obj, n):
+                v = getattr(obj, n)
+                if v is not None:
+                    return v
+        return None
+
+    def _get_float(patient_obj: Any, names: List[str]) -> Optional[float]:
+        return _as_float(_get_attr_first(patient_obj, names))
+
+    def _get_int(patient_obj: Any, names: List[str]) -> Optional[int]:
+        return _as_int(_get_attr_first(patient_obj, names))
+
+    def _get_bool(patient_obj: Any, names: List[str]) -> Optional[bool]:
+        v = _get_attr_first(patient_obj, names)
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        s = str(v).strip().lower()
+        if s in {"true", "yes", "y", "1"}:
+            return True
+        if s in {"false", "no", "n", "0"}:
+            return False
+        return None
+
+    def _today_iso() -> str:
+        return date.today().isoformat()
+
+    # ----------------------------
+    # Pull inputs (try multiple common names)
+    # ----------------------------
+    a1c = _get_float(patient, ["a1c", "hba1c", "hemoglobin_a1c"])
+    egfr = _get_float(patient, ["egfr", "e_gfr"])
+    uacr = _get_float(patient, ["uacr", "acr", "albumin_creatinine_ratio", "urine_albumin_creatinine_ratio"])
+
+    bmi = _get_float(patient, ["bmi", "body_mass_index"])
+    cac = _get_int(patient, ["cac", "cac_score", "agatston", "agatston_score"])
+
+    lpa = _get_float(patient, ["lpa", "lp_a", "lp(a)", "lipoprotein_a"])
+    apob = _get_float(patient, ["apob", "apo_b", "apoB"])
+
+    ldl = _get_float(patient, ["ldl", "ldl_c", "ldlc"])
+    hdl = _get_float(patient, ["hdl", "hdl_c", "hdlc"])
+    tg = _get_float(patient, ["triglycerides", "trig", "tg"])
+    tc = _get_float(patient, ["total_cholesterol", "tc", "cholesterol_total"])
+
+    diabetes_flag = _get_bool(patient, ["diabetes", "dm", "t2dm", "has_diabetes"])
+    htn_flag = _get_bool(patient, ["hypertension", "htn", "has_hypertension"])
+
+    smoking = _get_attr_first(patient, ["smoking_status", "smoking", "tobacco", "tobacco_use"])
+    smoking_s = str(smoking).strip().lower() if smoking is not None else ""
+
+    fam_hx_prem_ascvd = _get_bool(patient, ["family_history_premature_ascvd", "fhx_premature_ascvd", "premature_fhx_ascvd"])
+
+    # Optional: if you already capture “chronicity” flags in patient, we can use them.
+    # If absent, we stay conservative.
+    ckd_flag = _get_bool(patient, ["ckd", "has_ckd", "chronic_kidney_disease"])
+    albuminuria_persistent_flag = _get_bool(patient, ["albuminuria_persistent", "persistent_albuminuria"])
+    dm_confirmed_flag = _get_bool(patient, ["diabetes_confirmed", "dm_confirmed"])
+
+    # ----------------------------
+    # Thresholds (engine defaults; can be overridden by module constants if present)
+    # ----------------------------
+    A1C_DM_MIN = float(globals().get("A1C_DIABETES_MIN", 6.5))
+    A1C_PRE_MIN = float(globals().get("A1C_PREDIABETES_MIN", 5.7))
+    A1C_PRE_MAX = float(globals().get("A1C_PREDIABETES_MAX", 6.4))
+
+    UACR_A2_MIN = 30.0
+    UACR_A3_MIN = 300.0
+
+    LPA_ELEVATED_CUTOFF = float(globals().get("LPA_ELEVATED_CUTOFF", 50.0))  # unit-aware handling belongs in parser if possible
+    LDL_FH_SUSPECT_CUTOFF = 190.0
+
+    TG_HIGH_CUTOFF = float(globals().get("TG_HIGH_CUTOFF", 150.0))
+    LDL_HIGH_CUTOFF = float(globals().get("LDL_HIGH_CUTOFF", 130.0))
+
+    # ----------------------------
+    # CKD staging helpers
+    # ----------------------------
+    def _ckd_stage_from_egfr(v: Optional[float]) -> Optional[str]:
+        if v is None:
+            return None
+        if v < 15:
+            return "5"
+        if v < 30:
+            return "4"
+        if v < 45:
+            return "3b"
+        if v < 60:
+            return "3a"
+        if v < 90:
+            return "2"
+        return "1"
+
+    def _icd_ckd_stage(stage: str) -> Optional[str]:
+        if stage == "1":
+            return "N18.1"
+        if stage == "2":
+            return "N18.2"
+        if stage == "3a":
+            return "N18.31"
+        if stage == "3b":
+            return "N18.32"
+        if stage == "4":
+            return "N18.4"
+        if stage == "5":
+            return "N18.5"
+        return None
+
+    ckd_stage = _ckd_stage_from_egfr(egfr)
+
+    def _ckd_is_severe(stage: Optional[str]) -> bool:
+        return stage in {"3a", "3b", "4", "5"}
+
+    # Conservative CKD confirmation:
+    # - If explicit CKD flag is present => confirmed CKD
+    # - Else if eGFR < 60 => suspected CKD (unless you have longitudinal persistence elsewhere)
+    ckd_confirmed = bool(ckd_flag) if ckd_flag is not None else False
+    ckd_suspected = (egfr is not None and egfr < 60 and not ckd_confirmed)
+
+    # Albuminuria category + persistence
+    def _albuminuria_category(u: Optional[float]) -> Optional[str]:
+        if u is None:
+            return None
+        if u >= UACR_A3_MIN:
+            return "A3"
+        if u >= UACR_A2_MIN:
+            return "A2"
+        return None
+
+    uacr_cat = _albuminuria_category(uacr)
+    albuminuria_confirmed = bool(albuminuria_persistent_flag) if albuminuria_persistent_flag is not None else False
+    albuminuria_suspected = (uacr_cat is not None and not albuminuria_confirmed)
+
+    # Diabetes confirmation gate:
+    # - If diabetes_flag true => confirmed
+    # - Else if dm_confirmed_flag true => confirmed
+    # - Else single A1C >= 6.5 => suspected
+    dm_confirmed = bool(diabetes_flag) if diabetes_flag is not None else False
+    if not dm_confirmed and dm_confirmed_flag is True:
+        dm_confirmed = True
+    dm_suspected = (not dm_confirmed and a1c is not None and a1c >= A1C_DM_MIN)
+
+    # Prediabetes
+    prediabetes = (not dm_confirmed and not dm_suspected and a1c is not None and A1C_PRE_MIN <= a1c <= A1C_PRE_MAX)
+
+    # Smoking current (handle common variants)
+    smoking_current = False
+    if smoking_s:
+        if "current" in smoking_s:
+            smoking_current = True
+        elif smoking_s in {"yes", "y", "true"}:
+            smoking_current = True
+
+    # ----------------------------
+    # Diagnosis object builder
+    # ----------------------------
+    def _dx(
+        dx_id: str,
+        status: str,
+        label: str,
+        icd10: List[Dict[str, str]],
+        is_hcc: bool,
+        severity: int,
+        actionability: str,
+        criteria_summary: str,
+        evidence: List[Dict[str, Any]],
+        suppress_if_present: Optional[List[str]] = None,
+        icd10_candidates: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "id": dx_id,
+            "status": status,  # confirmed | suspected | at_risk
+            "priority": 0,     # set later by sorting key
+            "label": label,
+            "icd10": icd10,
+            "icd10_candidates": icd10_candidates or [],
+            "hcc": {
+                "is_hcc": bool(is_hcc),
+                "hcc_categories": [],
+                "note": "HCC categories require a maintained mapping table; boolean used for ranking only.",
+            },
+            "evidence": evidence,
+            "criteria_summary": criteria_summary,
+            "actionability": actionability,  # high | medium | low
+            "severity": severity,            # higher = more severe
+            "suppress_if_present": suppress_if_present or [],
+        }
+
+    dxs: List[Dict[str, Any]] = []
+
+    # ----------------------------
+    # DX rules (DX1–DX16)
+    # ----------------------------
+
+    # DX4 suspected diabetes
+    if dm_suspected:
+        ev = []
+        if a1c is not None:
+            ev.append({"key": "a1c", "value": a1c, "unit": "%"})
+        dxs.append(
+            _dx(
+                dx_id="dx_dm_suspected",
+                status="suspected",
+                label="Suspected diabetes mellitus — confirm with repeat A1C or alternate diagnostic test",
+                icd10=[],
+                icd10_candidates=[{"code": "E11.9", "display": "Type 2 diabetes mellitus without complications"}],
+                is_hcc=True,
+                severity=70,
+                actionability="high",
+                criteria_summary="Single diagnostic-range A1C without confirmatory evidence in current inputs.",
+                evidence=ev,
+            )
+        )
+
+    # DX3 prediabetes
+    if prediabetes:
+        ev = []
+        if a1c is not None:
+            ev.append({"key": "a1c", "value": a1c, "unit": "%"})
+        dxs.append(
+            _dx(
+                dx_id="dx_prediabetes",
+                status="confirmed",
+                label="Prediabetes",
+                icd10=[{"code": "R73.03", "display": "Prediabetes"}],
+                is_hcc=False,
+                severity=30,
+                actionability="high",
+                criteria_summary="A1C in prediabetes range and diabetes not confirmed.",
+                evidence=ev,
+            )
+        )
+
+    # CKD (DX5/DX6)
+    if ckd_confirmed or ckd_suspected:
+        stage = ckd_stage
+        stage_icd = _icd_ckd_stage(stage) if stage is not None else None
+        ev = []
+        if egfr is not None:
+            ev.append({"key": "egfr", "value": egfr, "unit": "mL/min/1.73m2"})
+        if ckd_confirmed and stage_icd:
+            dxs.append(
+                _dx(
+                    dx_id=f"dx_ckd_{stage}",
+                    status="confirmed",
+                    label=f"Chronic kidney disease, stage {stage}",
+                    icd10=[{"code": stage_icd, "display": f"Chronic kidney disease, stage {stage}"}],
+                    is_hcc=_ckd_is_severe(stage),
+                    severity=85 if _ckd_is_severe(stage) else 60,
+                    actionability="high",
+                    criteria_summary="CKD flagged/confirmed; stage derived from eGFR.",
+                    evidence=ev,
+                )
+            )
+        elif ckd_suspected and stage_icd:
+            dxs.append(
+                _dx(
+                    dx_id=f"dx_ckd_{stage}_suspected",
+                    status="suspected",
+                    label=f"Suspected chronic kidney disease, stage {stage} — confirm persistence ≥3 months",
+                    icd10=[],
+                    icd10_candidates=[{"code": stage_icd, "display": f"Chronic kidney disease, stage {stage}"}],
+                    is_hcc=_ckd_is_severe(stage),
+                    severity=80 if _ckd_is_severe(stage) else 55,
+                    actionability="high",
+                    criteria_summary="Single eGFR-based stage without persistence/CKD flag in current inputs.",
+                    evidence=ev,
+                )
+            )
+
+    # Albuminuria phenotype (DX7)
+    if uacr_cat is not None:
+        ev = []
+        if uacr is not None:
+            ev.append({"key": "uacr", "value": uacr, "unit": "mg/g"})
+        status = "confirmed" if albuminuria_confirmed else "suspected"
+        label = f"Albuminuria ({uacr_cat})"
+        if status == "suspected":
+            label = f"Albuminuria ({uacr_cat}) — confirm persistence"
+        dxs.append(
+            _dx(
+                dx_id=f"dx_albuminuria_{uacr_cat}",
+                status=status,
+                label=label,
+                icd10=[],
+                is_hcc=False,
+                severity=65 if uacr_cat == "A3" else 50,
+                actionability="high",
+                criteria_summary="UACR category derived from available UACR input.",
+                evidence=ev,
+            )
+        )
+
+    # CKD + albuminuria linked phenotype (DX8)
+    if ckd_stage is not None and uacr_cat is not None:
+        weak_suspected = False
+        if not ckd_confirmed and ckd_suspected:
+            weak_suspected = True
+        if albuminuria_suspected:
+            weak_suspected = True
+
+        status = "suspected" if weak_suspected else "confirmed"
+        label = f"CKD stage {ckd_stage} with {uacr_cat} albuminuria"
+        if status == "suspected":
+            label = f"{label} — confirm persistence"
+
+        ev = []
+        if egfr is not None:
+            ev.append({"key": "egfr", "value": egfr, "unit": "mL/min/1.73m2"})
+        if uacr is not None:
+            ev.append({"key": "uacr", "value": uacr, "unit": "mg/g"})
+
+        # ICD: CKD stage only if CKD is confirmed; keep albuminuria phenotype-only
+        icd_list: List[Dict[str, str]] = []
+        if ckd_confirmed:
+            stage_icd = _icd_ckd_stage(ckd_stage)
+            if stage_icd:
+                icd_list.append({"code": stage_icd, "display": f"Chronic kidney disease, stage {ckd_stage}"})
+
+        dxs.append(
+            _dx(
+                dx_id=f"dx_ckd_{ckd_stage}_{uacr_cat}",
+                status=status,
+                label=label,
+                icd10=icd_list,
+                is_hcc=_ckd_is_severe(ckd_stage),
+                severity=90 if (ckd_stage in {"4", "5"} or uacr_cat == "A3") else 75,
+                actionability="high",
+                criteria_summary="Combined CKD stage (eGFR) and albuminuria category (UACR).",
+                evidence=ev,
+            )
+        )
+
+    # Hypertension (DX9) and Hypertensive CKD (DX10)
+    if htn_flag is True:
+        dxs.append(
+            _dx(
+                dx_id="dx_htn",
+                status="confirmed",
+                label="Hypertension",
+                icd10=[{"code": "I10", "display": "Essential (primary) hypertension"}],
+                is_hcc=False,
+                severity=45,
+                actionability="high",
+                criteria_summary="Hypertension flag present.",
+                evidence=[],
+                suppress_if_present=["dx_htn_ckd"],
+            )
+        )
+
+    if htn_flag is True and ckd_confirmed and ckd_stage is not None:
+        # ICD selection by CKD stage
+        # I12.9: hypertensive CKD with stage 1-4 or unspecified CKD
+        # I12.0: hypertensive CKD with stage 5 or ESRD
+        ckd_stage_icd = _icd_ckd_stage(ckd_stage)
+        if ckd_stage in {"5"}:
+            i12 = "I12.0"
+            i12_disp = "Hypertensive chronic kidney disease with stage 5 chronic kidney disease or end stage renal disease"
+        else:
+            i12 = "I12.9"
+            i12_disp = "Hypertensive chronic kidney disease with stage 1 through stage 4 chronic kidney disease, or unspecified chronic kidney disease"
+
+        icd_list = [{"code": i12, "display": i12_disp}]
+        if ckd_stage_icd:
+            icd_list.append({"code": ckd_stage_icd, "display": f"Chronic kidney disease, stage {ckd_stage}"})
+
+        ev = []
+        if egfr is not None:
+            ev.append({"key": "egfr", "value": egfr, "unit": "mL/min/1.73m2"})
+
+        dxs.append(
+            _dx(
+                dx_id="dx_htn_ckd",
+                status="confirmed",
+                label=f"Hypertensive chronic kidney disease, stage {ckd_stage}",
+                icd10=icd_list,
+                is_hcc=_ckd_is_severe(ckd_stage),
+                severity=88,
+                actionability="high",
+                criteria_summary="Hypertension present with confirmed CKD; stage derived from eGFR.",
+                evidence=ev,
+                suppress_if_present=["dx_htn", f"dx_ckd_{ckd_stage}"],
+            )
+        )
+
+    # Coronary calcified lesion (DX11)
+    if cac is not None and cac > 0:
+        dxs.append(
+            _dx(
+                dx_id="dx_coronary_calcified_plaque",
+                status="confirmed",
+                label="Coronary atherosclerosis due to calcified coronary lesion",
+                icd10=[{"code": "I25.84", "display": "Coronary atherosclerosis due to calcified coronary lesion"}],
+                is_hcc=True,
+                severity=90 if cac >= 100 else 75,
+                actionability="high",
+                criteria_summary="CAC present (score > 0).",
+                evidence=[{"key": "cac", "value": cac, "unit": "Agatston"}],
+            )
+        )
+
+    # Lipoprotein(a) (DX12)
+    if lpa is not None and lpa >= LPA_ELEVATED_CUTOFF:
+        dxs.append(
+            _dx(
+                dx_id="dx_lpa_elevated",
+                status="confirmed",
+                label="Elevated lipoprotein(a)",
+                icd10=[{"code": "E78.41", "display": "Elevated lipoprotein(a)"}],
+                is_hcc=False,
+                severity=55,
+                actionability="high",
+                criteria_summary="Lp(a) above threshold.",
+                evidence=[{"key": "lpa", "value": lpa, "unit": "unit-dependent"}],
+            )
+        )
+
+    # Dyslipidemia classification (DX13) — choose one best-fit code
+    lipid_code: Optional[str] = None
+    lipid_disp: Optional[str] = None
+
+    tg_high = (tg is not None and tg >= TG_HIGH_CUTOFF)
+    ldl_high = (ldl is not None and ldl >= LDL_HIGH_CUTOFF)
+
+    if tg_high and ldl_high:
+        lipid_code, lipid_disp = "E78.2", "Mixed hyperlipidemia"
+    elif tg_high:
+        lipid_code, lipid_disp = "E78.1", "Pure hyperglyceridemia"
+    elif ldl_high:
+        lipid_code, lipid_disp = "E78.0", "Pure hypercholesterolemia"
+
+    if lipid_code and lipid_disp:
+        ev = []
+        if ldl is not None:
+            ev.append({"key": "ldl", "value": ldl, "unit": "mg/dL"})
+        if tg is not None:
+            ev.append({"key": "triglycerides", "value": tg, "unit": "mg/dL"})
+        if hdl is not None:
+            ev.append({"key": "hdl", "value": hdl, "unit": "mg/dL"})
+        dxs.append(
+            _dx(
+                dx_id="dx_dyslipidemia",
+                status="confirmed",
+                label=lipid_disp,
+                icd10=[{"code": lipid_code, "display": lipid_disp}],
+                is_hcc=False,
+                severity=45,
+                actionability="high",
+                criteria_summary="Lipid phenotype selected by deterministic thresholds.",
+                evidence=ev,
+            )
+        )
+
+    # Suspected FH (DX14) — phenotype-only default
+    fh_suspected = (ldl is not None and ldl >= LDL_FH_SUSPECT_CUTOFF)
+    if not fh_suspected and apob is not None and fam_hx_prem_ascvd is True:
+        # Conservative ApoB threshold; adjust if you have engine constants
+        apob_fh_cutoff = float(globals().get("APOB_FH_SUSPECT_CUTOFF", 140.0))
+        fh_suspected = apob >= apob_fh_cutoff
+
+    if fh_suspected:
+        ev = []
+        if ldl is not None:
+            ev.append({"key": "ldl", "value": ldl, "unit": "mg/dL"})
+        if apob is not None:
+            ev.append({"key": "apob", "value": apob, "unit": "mg/dL"})
+        if fam_hx_prem_ascvd is True:
+            ev.append({"key": "family_history_premature_ascvd", "value": True})
+        dxs.append(
+            _dx(
+                dx_id="dx_fh_suspected",
+                status="suspected",
+                label="Suspected familial hypercholesterolemia",
+                icd10=[],
+                icd10_candidates=[{"code": "E78.01", "display": "Familial hypercholesterolemia"}],
+                is_hcc=False,
+                severity=60,
+                actionability="high",
+                criteria_summary="LDL ≥ 190 and/or ApoB very high with premature family history.",
+                evidence=ev,
+            )
+        )
+
+    # Weight (DX15) — one only
+    if bmi is not None:
+        if bmi >= 30.0:
+            dxs.append(
+                _dx(
+                    dx_id="dx_obesity",
+                    status="confirmed",
+                    label="Obesity",
+                    icd10=[{"code": "E66.9", "display": "Obesity, unspecified"}],
+                    is_hcc=False,
+                    severity=40,
+                    actionability="medium",
+                    criteria_summary="BMI ≥ 30.",
+                    evidence=[{"key": "bmi", "value": bmi, "unit": "kg/m2"}],
+                    suppress_if_present=["dx_overweight"],
+                )
+            )
+        elif bmi >= 25.0:
+            dxs.append(
+                _dx(
+                    dx_id="dx_overweight",
+                    status="confirmed",
+                    label="Overweight",
+                    icd10=[{"code": "E66.3", "display": "Overweight"}],
+                    is_hcc=False,
+                    severity=20,
+                    actionability="medium",
+                    criteria_summary="BMI 25–29.9.",
+                    evidence=[{"key": "bmi", "value": bmi, "unit": "kg/m2"}],
+                )
+            )
+
+    # Tobacco (DX16) — one only
+    if smoking_current:
+        dxs.append(
+            _dx(
+                dx_id="dx_tobacco_use",
+                status="confirmed",
+                label="Current tobacco use",
+                icd10=[{"code": "Z72.0", "display": "Tobacco use, not otherwise specified"}],
+                is_hcc=False,
+                severity=25,
+                actionability="high",
+                criteria_summary="Smoking status indicates current use.",
+                evidence=[{"key": "smoking_status", "value": str(smoking)}],
+            )
+        )
+
+    # Type 2 DM base / diabetic CKD linkage (DX1/DX2) — add after CKD derived
+    if dm_confirmed:
+        # Diabetic CKD composite if CKD confirmed and stage known
+        if ckd_confirmed and ckd_stage is not None:
+            stage_icd = _icd_ckd_stage(ckd_stage)
+            icd_list = [{"code": "E11.22", "display": "Type 2 diabetes mellitus with diabetic chronic kidney disease"}]
+            if stage_icd:
+                icd_list.append({"code": stage_icd, "display": f"Chronic kidney disease, stage {ckd_stage}"})
+            ev = []
+            if a1c is not None:
+                ev.append({"key": "a1c", "value": a1c, "unit": "%"})
+            if egfr is not None:
+                ev.append({"key": "egfr", "value": egfr, "unit": "mL/min/1.73m2"})
+            dxs.append(
+                _dx(
+                    dx_id="dx_t2dm_ckd",
+                    status="confirmed",
+                    label=f"Type 2 diabetes mellitus with diabetic chronic kidney disease, stage {ckd_stage}",
+                    icd10=icd_list,
+                    is_hcc=True,
+                    severity=92,
+                    actionability="high",
+                    criteria_summary="Diabetes confirmed with confirmed CKD; stage derived from eGFR.",
+                    evidence=ev,
+                    suppress_if_present=["dx_t2dm", f"dx_ckd_{ckd_stage}"],
+                )
+            )
+        else:
+            # Base T2DM only if no composite DM phenotype exists
+            ev = []
+            if a1c is not None:
+                ev.append({"key": "a1c", "value": a1c, "unit": "%"})
+            dxs.append(
+                _dx(
+                    dx_id="dx_t2dm",
+                    status="confirmed",
+                    label="Type 2 diabetes mellitus",
+                    icd10=[{"code": "E11.9", "display": "Type 2 diabetes mellitus without complications"}],
+                    is_hcc=True,
+                    severity=75,
+                    actionability="high",
+                    criteria_summary="Diabetes flag/confirmation present.",
+                    evidence=ev,
+                    suppress_if_present=["dx_t2dm_ckd"],
+                )
+            )
+
+    # ----------------------------
+    # Sort, suppress, cap
+    # ----------------------------
+    def _status_rank(s: str) -> int:
+        if s == "confirmed":
+            return 0
+        if s == "suspected":
+            return 1
+        return 2
+
+    def _action_rank(a: str) -> int:
+        if a == "high":
+            return 0
+        if a == "medium":
+            return 1
+        return 2
+
+    # Ranking key: confirmed → HCC → severity → actionability → label
+    for d in dxs:
+        d["priority"] = 0
+
+    dxs_sorted = sorted(
+        dxs,
+        key=lambda d: (
+            _status_rank(str(d.get("status"))),
+            0 if ((d.get("hcc") or {}).get("is_hcc") is True) else 1,
+            -int(d.get("severity") or 0),
+            _action_rank(str(d.get("actionability") or "low")),
+            str(d.get("label") or ""),
+        ),
+    )
+
+    present_ids = {d["id"] for d in dxs_sorted}
+    suppressed_ids: set[str] = set()
+    for d in dxs_sorted:
+        for sid in d.get("suppress_if_present") or []:
+            if sid in present_ids:
+                suppressed_ids.add(sid)
+
+    dxs_final = [d for d in dxs_sorted if d["id"] not in suppressed_ids]
+
+    # Cap in output defaults (UI may still show all in panel if desired)
+    confirmed = [d for d in dxs_final if d.get("status") == "confirmed"]
+    suspected = [d for d in dxs_final if d.get("status") == "suspected"]
+    at_risk = [d for d in dxs_final if d.get("status") == "at_risk"]
+
+    max_confirmed = 6
+    max_suspected = 3
+
+    dxs_capped = confirmed[:max_confirmed] + suspected[:max_suspected] + at_risk
+
+    return {
+        "model_version": "1.0",
+        "hcc_model": "CMS-HCC-V28",
+        "generated_at": _today_iso(),
+        "diagnoses": dxs_capped,
+        "render_defaults": {
+            "note_show_codes": False,
+            "panel_show_codes": True,
+            "note_include_suspected_codes": False,
+            "max_confirmed": max_confirmed,
+            "max_suspected": max_suspected,
+        },
+    }
 
 # -------------------------------------------------------------------
 # Public API: evaluate()
@@ -4551,6 +5239,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
