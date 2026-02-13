@@ -515,48 +515,62 @@ def extract_bmi(raw: str) -> Optional[float]:
 
     return None
 
-def extract_uacr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
+def extract_uacr(raw: str) -> Tuple[Optional[float], Optional[str]]:
     """
-    Returns (uacr_mg_g, reason_if_missing_or_unreliable)
-
-    Accepts common formats:
-      - "UACR: 85 mg/g"
-      - "Urine albumin/creatinine ratio: 85"
-      - "Albumin/Creatinine Ratio 85 mg/g"
-      - "Microalb/Creat Ratio: 85"
-      - "ACR: 85" (guarded to avoid random "CR")
+    Urine albumin/creatinine ratio (UACR/ACR), mg/g.
+    Accepts formats like:
+      - "UACR <5"
+      - "UACR 12"
+      - "Urine albumin/creatinine ratio: <5 mg/g"
+      - "ACR < 5"
+    Returns (value, warning). If value is from a '<' comparator, we still return the numeric value.
     """
-    t = raw.lower()
+    text = raw or ""
 
-    # 1) Direct UACR / ACR labels
-    v = _first_float(
-        r"\b(?:uacr|urine\s+acr|albumin\/creatinine\s+ratio|albumin\s*\/\s*creatinine\s+ratio|"
-        r"urine\s+albumin\/creatinine\s+ratio|microalb\/creat(?:inine)?\s*ratio|microalbumin\/creat(?:inine)?\s*ratio|"
-        r"microalb(?:umin)?\s*\/\s*creat(?:inine)?\s*ratio)\b"
-        r"\s*[:=]?\s*(\d{1,5}(?:\.\d+)?)\b",
-        t,
+    # Comparator optional; capture the number.
+    # Examples matched:
+    #   UACR <5
+    #   UACR: < 5 mg/g
+    #   ACR 12
+    m = re.search(
+        r"\b(?:uacr|acr|urine\s+albumin(?:\s*\/\s*|\s+to\s+)?creatinine\s+ratio|albumin\s*\/\s*creatinine\s+ratio)\b"
+        r"[^0-9<>\n]{0,40}"
+        r"(?P<cmp><|>)?\s*(?P<val>\d+(?:\.\d+)?)"
+        r"(?:\s*(?:mg\s*\/\s*g|mg/g))?",
+        text,
+        flags=re.I,
     )
+    if not m:
+        return None, None
 
-    # 2) Guarded "ACR" (avoid matching "Cr" or "Creatinine")
+    v = _to_float(m.group("val"))
     if v is None:
-        v = _first_float(r"\bacr\b\s*[:=]?\s*(\d{1,5}(?:\.\d+)?)\b", t)
+        return None, None
 
+    cmp_ = m.group("cmp")
+    if cmp_ == "<":
+        return v, "UACR reported as < value; numeric floor captured"
+    if cmp_ == ">":
+        return v, "UACR reported as > value; numeric threshold captured"
+    return v, None
+
+
+def extract_uacr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
+    """Backward-compatible UACR extractor returning compact reason codes."""
+    v, warn = extract_uacr(raw)
     if v is not None:
-        # sanity range (mg/g)
         if v < 0 or v > 10000:
             return v, "uacr_value_out_of_range_verify"
+        if warn == "UACR reported as < value; numeric floor captured":
+            return v, "uacr_lt_threshold_captured"
+        if warn == "UACR reported as > value; numeric threshold captured":
+            return v, "uacr_gt_threshold_captured"
         return v, None
 
-    # 3) Explicit “not available” / “no results”
+    t = (raw or "").lower()
     if re.search(r"\b(uacr|acr|albumin\/creatinine\s+ratio)\b.*\b(no\s+results\s+found|not\s+available|unavailable)\b", t):
         return None, "uacr_unavailable"
-
     return None, None
-
-
-def extract_uacr(raw: str) -> Optional[float]:
-    v, _reason = extract_uacr_with_reason(raw)
-    return v
 
 
 def extract_egfr_with_reason(raw: str) -> Tuple[Optional[float], Optional[str]]:
