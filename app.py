@@ -574,7 +574,10 @@ def _coerce_emr_dx_entries(out: dict) -> list[dict]:
       - out["diagnosisSynthesis"]["diagnoses"] -> list[dict]
       - out["insights"]["emr_dx"] -> list[dict]
 
-    Each item may contain: label/name/text, status, icd/icd_code/code.
+    Each item may contain: id, label/name/text, status/bucket, icd/icd_code/code, icd10[].
+    Adds:
+      - "id" (stable; falls back to label if missing)
+      - "label_display" (UI-friendly label with trailing "— confirm ..." removed)
     """
     raw = []
     for candidate in (
@@ -591,40 +594,78 @@ def _coerce_emr_dx_entries(out: dict) -> list[dict]:
     for item in raw:
         if not isinstance(item, dict):
             continue
+
+        dx_id = str(item.get("id") or "").strip()
+
         label = str(item.get("label") or item.get("name") or item.get("text") or "").strip()
         if not label:
             continue
+
+        # Display label: remove trailing “— confirm ...” language for UI readability
+        label_display = re.sub(r"\s*—\s*confirm.*$", "", label, flags=re.I).strip()
+
         status_raw = str(item.get("status") or item.get("bucket") or "confirmed").strip().lower()
         status = "suspected" if status_raw.startswith("sus") else "confirmed"
+
         icd = str(item.get("icd") or item.get("icd_code") or item.get("code") or "").strip()
         if not icd and isinstance(item.get("icd10"), list) and item.get("icd10"):
             first = item["icd10"][0]
             if isinstance(first, dict):
                 icd = str(first.get("code") or "").strip()
-        normalized.append({"label": label, "status": status, "icd": icd})
+
+        if not dx_id:
+            dx_id = label  # stable fallback
+
+        normalized.append(
+            {
+                "id": dx_id,
+                "label": label,
+                "label_display": label_display,
+                "status": status,
+                "icd": icd,
+            }
+        )
+
     return normalized
 
-
 def _render_emr_dx_panel(dx_entries: list[dict]) -> bool:
-    """Render Confirmed/Suspected diagnosis lists with muted ICD lines."""
+    """Render Confirmed/Suspected diagnosis lists with muted ICD lines and per-item Confirm buttons."""
     if not dx_entries:
         return False
 
-    confirmed = [d for d in dx_entries if d.get("status") == "confirmed"]
-    suspected = [d for d in dx_entries if d.get("status") == "suspected"]
+    # Session state: remember which suspected dx the clinician confirmed
+    st.session_state.setdefault("dx_confirmed_ids", [])
+    confirmed_ids = set(str(x) for x in (st.session_state.get("dx_confirmed_ids") or []))
+
+    # Promote suspected → confirmed in-session
+    promoted: list[dict] = []
+    for d in dx_entries:
+        if not isinstance(d, dict):
+            continue
+        d2 = dict(d)
+        dxid = str(d2.get("id") or "").strip()
+        if dxid and dxid in confirmed_ids:
+            d2["status"] = "confirmed"
+        promoted.append(d2)
+
+    confirmed = [d for d in promoted if d.get("status") == "confirmed"]
+    suspected = [d for d in promoted if d.get("status") == "suspected"]
 
     st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
     st.markdown("**Assessment candidates**")
     c1, c2 = st.columns(2)
 
-    def _render_col(col, title: str, rows: list[dict]):
+    def _label_for(d: dict) -> str:
+        return str(d.get("label_display") or d.get("label") or "—").strip() or "—"
+
+    def _render_confirmed(col, title: str, rows: list[dict]):
         with col:
             st.caption(title)
             if not rows:
                 st.markdown("- —")
                 return
             for d in rows:
-                st.markdown(f"- { _html.escape(str(d.get('label') or '—')) }")
+                st.markdown(f"- {_html.escape(_label_for(d))}")
                 icd = str(d.get("icd") or "").strip()
                 if icd:
                     st.markdown(
@@ -632,9 +673,36 @@ def _render_emr_dx_panel(dx_entries: list[dict]) -> bool:
                         unsafe_allow_html=True,
                     )
 
-    _render_col(c1, "Confirmed", confirmed)
-    _render_col(c2, "Suspected", suspected)
+    def _render_suspected(col, title: str, rows: list[dict]):
+        with col:
+            st.caption(title)
+            if not rows:
+                st.markdown("- —")
+                return
+
+            for d in rows:
+                dxid = str(d.get("id") or "").strip()
+                label_txt = _label_for(d)
+
+                r1, r2 = st.columns([5.0, 1.6], gap="small")
+                with r1:
+                    st.markdown(f"- {_html.escape(label_txt)}")
+                with r2:
+                    if dxid:
+                        btn_key = f"dx_confirm__{dxid}"
+                    else:
+                        btn_key = f"dx_confirm__{uuid.uuid4().hex}"
+
+                    if st.button("Confirm", key=btn_key):
+                        cur = st.session_state.get("dx_confirmed_ids") or []
+                        if dxid and dxid not in cur:
+                            st.session_state["dx_confirmed_ids"] = cur + [dxid]
+                        st.rerun()
+
+    _render_confirmed(c1, "Confirmed", confirmed)
+    _render_suspected(c2, "Suspected", suspected)
     return True
+
 
 
 def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirmed: bool = False) -> str:
