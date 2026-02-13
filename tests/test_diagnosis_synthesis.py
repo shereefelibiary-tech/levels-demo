@@ -45,3 +45,19 @@ def test_generate_output_includes_diagnosis_synthesis():
     out = generateRiskContinuumCvOutput(input_data, engine_out)
     assert "diagnosisSynthesis" in out
     assert isinstance(out["diagnosisSynthesis"].get("diagnoses"), list)
+
+
+def test_build_diagnosis_synthesis_lpa_unit_threshold_respects_nmol():
+    payload = {"lpa": 80, "lpa_unit": "nmol/L"}
+    out = build_diagnosis_synthesis(payload, {})
+    ids = {d["id"] for d in out["diagnoses"]}
+
+    assert "dx_lpa_elevated" not in ids
+
+
+def test_build_diagnosis_synthesis_lpa_unit_threshold_respects_mgdl():
+    payload = {"lpa": 80, "lpa_unit": "mg/dL"}
+    out = build_diagnosis_synthesis(payload, {})
+    ids = {d["id"] for d in out["diagnoses"]}
+
+    assert "dx_lpa_elevated" in ids
