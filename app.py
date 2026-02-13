@@ -699,6 +699,24 @@ def _tidy_emr_plan_section(note: str, *, treatment_trigger: bool = False, cac0_l
             "Lipid-lowering therapy: Appropriate; intensity individualized to targets and risk profile.",
         )
 
+    _has_specific_lipid_bullet = any(str(p).strip().lower().startswith("lipid-lowering therapy:") for p in parsed)
+    if _has_specific_lipid_bullet:
+        def _is_generic_lipid_initiation(text: str) -> bool:
+            tl = str(text or "").strip().lower()
+            if tl.startswith("lipid-lowering therapy:"):
+                return False
+            if tl.startswith("initiate lipid-lowering therapy"):
+                return True
+            if tl.startswith("start lipid-lowering therapy"):
+                return True
+            if tl == "lipid-lowering therapy appropriate":
+                return True
+            if "initiate lipid" in tl:
+                return True
+            return False
+
+        parsed = [p for p in parsed if not _is_generic_lipid_initiation(p)]
+
     parsed = _dedupe_bullets(parsed)
 
     def _cat(text: str) -> int:
@@ -2633,9 +2651,30 @@ with tab_report:
         _uacr_context_val = int(round(_uacr_v)) if float(_uacr_v).is_integer() else round(_uacr_v, 1)
         _ckd_context_bits.append(f"UACR {_uacr_context_val}")
 
-    _ckd_context_label = _format_ckd_stage_label_from_egfr(_egfr_v)
-    if _ckd_context_bits and _ckd_context_label != "CKD — unknown":
-        _ckd_context_label = f"{_ckd_context_label.split(' (', 1)[0]} ({', '.join(_ckd_context_bits)})"
+    _ckd_stage_num = None
+    if _egfr_v is not None:
+        try:
+            _egfr_num = float(_egfr_v)
+            if _egfr_num >= 90:
+                _ckd_stage_num = 1
+            elif _egfr_num >= 60:
+                _ckd_stage_num = 2
+            elif _egfr_num >= 45:
+                _ckd_stage_num = "3a"
+            elif _egfr_num >= 30:
+                _ckd_stage_num = "3b"
+            elif _egfr_num >= 15:
+                _ckd_stage_num = 4
+            else:
+                _ckd_stage_num = 5
+        except Exception:
+            _ckd_stage_num = None
+
+    _ckd_stage_label = f"Stage {_ckd_stage_num}" if _ckd_stage_num is not None else "—"
+    _has_albuminuria = bool(_uacr_v is not None and _uacr_v >= 30)
+    _ckd_context_label = _ckd_stage_label + (" with albuminuria" if _has_albuminuria and _ckd_stage_num is not None else "")
+    if _ckd_context_bits and _ckd_stage_num is not None:
+        _ckd_context_label += f" ({', '.join(_ckd_context_bits)})"
 
     _snapshot_context_line = f"CKM {_ckm_context_label}; CKD {_ckd_context_label}"
 
