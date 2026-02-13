@@ -49,6 +49,12 @@ def scrub_terms(s: str) -> str:
     s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
     s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
     s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
+    s = re.sub(r"\brisk-factor\s+layer\b", "risk factors", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bclinical\s+disease\s+layer\b", "clinical disease", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bmetabolic\s+disease\s+layer\b", "metabolic disease", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bstructural\s+imaging\s+layer\b", "imaging", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bdominantAction\s+flag\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bengine\b", "", s, flags=re.IGNORECASE)
     return s
 
 def scrub_list(xs):
@@ -2110,7 +2116,7 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
 
 def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_context: dict, data: dict) -> str:
     """
-    Patient-specific explanation for Snapshot CKM line.
+    Returns concise, clinician-facing CKM drivers for Snapshot.
     """
     if stage_num not in (1, 2, 3):
         return ""
@@ -2136,32 +2142,32 @@ def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_c
 
     if stage_num == 3:
         if ascvd_v is True or "ascvd" in driver:
-            reasons.append("ASCVD is present")
+            reasons.append("ASCVD present")
         try:
             if (egfr_v is not None) and float(egfr_v) < 60:
-                reasons.append(f"eGFR {int(round(float(egfr_v)))} (<60)")
+                reasons.append(f"eGFR {int(round(float(egfr_v)))}")
         except Exception:
             pass
         if ckm_ctx.get("ckd_present") and not any("eGFR" in r for r in reasons):
             reasons.append(str(ckm_ctx.get("ckd_stage") or "CKD present"))
 
         if reasons:
-            return "clinical disease layer: " + "; ".join(reasons)
-        return "clinical disease layer is present"
+            return ", ".join(reasons)
+        return "clinical disease present"
 
     if stage_num == 2:
         if diabetes_v is True:
-            reasons.append("diabetes = yes")
+            reasons.append("diabetes")
         try:
             if a1c_v is not None and float(a1c_v) >= 6.5:
                 reasons.append(f"A1c {float(a1c_v):.1f}%")
             elif a1c_v is not None and float(a1c_v) >= 6.2:
-                reasons.append(f"A1c {float(a1c_v):.1f}% (near diabetes threshold)")
+                reasons.append(f"A1c {float(a1c_v):.1f}%")
         except Exception:
             pass
         if reasons:
-            return "metabolic disease layer: " + "; ".join(reasons)
-        return "metabolic disease layer is present"
+            return ", ".join(reasons)
+        return "metabolic disease present"
 
     try:
         if bmi_v is not None and float(bmi_v) >= 30:
@@ -2190,8 +2196,8 @@ def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_c
         pass
 
     if reasons:
-        return "risk-factor layer: " + "; ".join(reasons[:3])
-    return "risk-factor layer is present"
+        return ", ".join(reasons[:3])
+    return "risk factors present"
 
 
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
@@ -2383,38 +2389,13 @@ with tab_report:
     except Exception:
         _egfr_v = None
 
-    _ckd_label = _format_ckd_stage_label_from_egfr(_egfr_v)
-
     _ckm_stage_num = active_ckm_stage  # already computed above via _extract_ckm_stage_num(out)
-
-    _ckm_label = ""
-    if _ckm_stage_num is None:
-        _ckm_label = ""
-    else:
-        # Add "(CKD-driven risk)" only when CKM Stage 3 is paired with CKD stage ≥3a (eGFR < 60).
-        _ckd_driven = False
-        try:
-            _ckd_driven = (_ckm_stage_num == 3) and (_egfr_v is not None) and (float(_egfr_v) < 60)
-        except Exception:
-            _ckd_driven = False
-
-        _ckm_label = f"Stage {_ckm_stage_num}" + (" (CKD-driven risk)" if _ckd_driven else "")
-
-    _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
-    if _ckm_stage_why:
-        _ckm_label = f"{_ckm_label} — {_ckm_stage_why}" if _ckm_label else ""
-
-    # Show CKD label ONLY when eGFR < 60 (avoid noisy CKD2 alongside Stage 1)
-    if not (_egfr_v is not None and float(_egfr_v) < 60):
-        _ckd_label = ""
-
     _ckmckd_line = ""
-    if _ckm_label and _ckd_label:
-        _ckmckd_line = f"{_ckm_label} | {_ckd_label}"
-    elif _ckm_label:
-        _ckmckd_line = _ckm_label
-    elif _ckd_label and _ckd_label != "CKD — unknown":
-        _ckmckd_line = _ckd_label
+    if _ckm_stage_num is not None:
+        _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
+        _ckmckd_line = f"Stage {_ckm_stage_num}"
+        if _ckm_stage_why:
+            _ckmckd_line += f" — {_ckm_stage_why}"
 
     # Suppress CKM once plaque is assessed or posture is plaque-driven (Level 4+)
     try:
@@ -2424,6 +2405,46 @@ with tab_report:
 
     if _plaque_assessed:
         _ckmckd_line = ""
+
+    if plaque_present is True:
+        _plaque_status_line = "Present"
+        _burden_txt = scrub_terms(str(ev.get("burden_band", "") or "")).strip()
+        if _burden_txt and _burden_txt != "—":
+            _plaque_status_line += f"; {_burden_txt}"
+    elif plaque_present is False:
+        _plaque_status_line = "Absent"
+        _burden_txt = scrub_terms(str(ev.get("burden_band", "") or "")).strip()
+        if _burden_txt and _burden_txt != "—":
+            _plaque_status_line += f"; {_burden_txt}"
+    else:
+        _plaque_status_line = "Unknown — no imaging"
+
+    _rss_score = rs.get("score", "—")
+    _rss_band = rs.get("band", "—")
+    _pce_value = risk10.get("risk_pct")
+    _pce_text = f"{_pce_value}%" if _pce_value is not None else "—"
+
+    _targets = out.get("targets", {}) or {}
+    _targets_bits = []
+    if _targets.get("ldl") is not None:
+        _targets_bits.append(f"LDL <{int(_targets.get('ldl'))}")
+    if _targets.get("sbp") is not None:
+        _targets_bits.append(f"SBP <{int(_targets.get('sbp'))}")
+    if _targets.get("a1c") is not None:
+        _targets_bits.append(f"A1c <{float(_targets.get('a1c')):.1f}")
+    _is_treated = bool(data.get("lipid_lowering") or data.get("bp_treated") or data.get("diabetes"))
+
+    _aspirin_line = ""
+    _asp_status = str(asp.get("status") or "").strip().lower()
+    if _asp_status:
+        if _asp_status.startswith("consider"):
+            _aspirin_line = "Aspirin: Consider yes"
+        elif _asp_status.startswith("avoid"):
+            _aspirin_line = "Aspirin: Consider contraindicated"
+        elif _asp_status.startswith("secondary prevention"):
+            _aspirin_line = "Aspirin: Consider yes"
+        elif _asp_status.startswith("not indicated"):
+            _aspirin_line = "Aspirin: Consider no"
 
     st.markdown(
         f"""
@@ -2437,35 +2458,30 @@ with tab_report:
   {f"<div class='kvline'><b>CKM:</b> {_html.escape(_ckmckd_line)}</div>" if _ckmckd_line else ""}
 
   <div class="kvline">
-    <b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))}
-    &nbsp; <b>Plaque burden:</b> {scrub_terms(ev.get('burden_band','—'))}
+    <b>Plaque status:</b> {_html.escape(_plaque_status_line)}
   </div>
 
+  <div class="kvline"><b>Decision confidence:</b> {decision_conf}</div>
   <div class="kvline">
-    <b>Decision confidence:</b> {decision_conf}
-    &nbsp; <b>Decision stability:</b> {stab_line}
+    <b>Decision stability:</b> {stab_line}
   </div>
 
   <div class="kvline">
     <b>Key metrics:</b>
-    RSS {rs.get('score','—')}/100 ({rs.get('band','—')})
-    • ASCVD PCE (10y) {pce_line} {pce_cat}
+    RSS {_rss_score}/100 ({_rss_band}); ASCVD PCE (10y) {_pce_text}
   </div>
 
   <div class="kvline">
-    <b>PREVENT (10y, population model):</b>
-    total CVD {f"{p_total}%" if p_total is not None else '—'}
-    • ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
+    <b>PREVENT (10y):</b> total CVD {f"{p_total}%" if p_total is not None else '—'}, ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
   </div>
+
+  {f"<div class='kvline'><b>Targets (if treated):</b> {_html.escape(', '.join(_targets_bits))}</div>" if (_is_treated and _targets_bits) else ""}
+  {f"<div class='kvline'><b>{_html.escape(_aspirin_line)}</b></div>" if _aspirin_line else ""}
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>",
-        unsafe_allow_html=True
-    )
     if (p_total is None and p_ascvd is None) and p_note:
         st.markdown(
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
@@ -2882,8 +2898,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
-
 
 
 
