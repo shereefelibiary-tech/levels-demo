@@ -49,6 +49,12 @@ def scrub_terms(s: str) -> str:
     s = re.sub(r"\bdrift\b", "Emerging risk", s, flags=re.IGNORECASE)
     s = re.sub(r"\bposture\b", "level", s, flags=re.IGNORECASE)
     s = re.sub(r"\brobustness\b", "stability", s, flags=re.IGNORECASE)
+    s = re.sub(r"\brisk-factor\s+layer\b", "risk factors", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bclinical\s+disease\s+layer\b", "clinical disease", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bmetabolic\s+disease\s+layer\b", "metabolic disease", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bstructural\s+imaging\s+layer\b", "imaging", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bdominantAction\s+flag\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bengine\b", "", s, flags=re.IGNORECASE)
     return s
 
 def scrub_list(xs):
@@ -557,12 +563,157 @@ def _inject_management_line_into_note(note: str, action_line: str) -> str:
     return note
 
 
-def _tidy_emr_plan_section(note: str) -> str:
+def _coerce_emr_dx_entries(out: dict) -> list[dict]:
     """
-    Keep Plan concise and clinician-friendly without altering any computed outputs.
+    Normalize optional diagnosis payload for UI + EMR insertion.
+
+    Accepted shapes (first one found):
+      - out["emr_dx"] -> list[dict]
+      - out["diagnoses"] -> list[dict]
+      - out["diagnosisSynthesis"]["diagnoses"] -> list[dict]
+      - out["insights"]["emr_dx"] -> list[dict]
+
+    Each item may contain: label/name/text, status, icd/icd_code/code.
+    """
+    raw = []
+    for candidate in (
+        (out or {}).get("emr_dx"),
+        (out or {}).get("diagnoses"),
+        ((out or {}).get("diagnosisSynthesis") or {}).get("diagnoses"),
+        ((out or {}).get("insights") or {}).get("emr_dx"),
+    ):
+        if isinstance(candidate, list) and candidate:
+            raw = candidate
+            break
+
+    normalized: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("name") or item.get("text") or "").strip()
+        if not label:
+            continue
+        status_raw = str(item.get("status") or item.get("bucket") or "confirmed").strip().lower()
+        status = "suspected" if status_raw.startswith("sus") else "confirmed"
+        icd = str(item.get("icd") or item.get("icd_code") or item.get("code") or "").strip()
+        if not icd and isinstance(item.get("icd10"), list) and item.get("icd10"):
+            first = item["icd10"][0]
+            if isinstance(first, dict):
+                icd = str(first.get("code") or "").strip()
+        normalized.append({"label": label, "status": status, "icd": icd})
+    return normalized
+
+
+def _render_emr_dx_panel(dx_entries: list[dict]) -> bool:
+    """Render Confirmed/Suspected diagnosis lists with muted ICD lines."""
+    if not dx_entries:
+        return False
+
+    confirmed = [d for d in dx_entries if d.get("status") == "confirmed"]
+    suspected = [d for d in dx_entries if d.get("status") == "suspected"]
+
+    st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
+    st.markdown("**Assessment candidates**")
+    c1, c2 = st.columns(2)
+
+    def _render_col(col, title: str, rows: list[dict]):
+        with col:
+            st.caption(title)
+            if not rows:
+                st.markdown("- —")
+                return
+            for d in rows:
+                st.markdown(f"- { _html.escape(str(d.get('label') or '—')) }")
+                icd = str(d.get("icd") or "").strip()
+                if icd:
+                    st.markdown(
+                        f"<div style='margin-left:1.05rem;color:rgba(17,24,39,0.56);font-size:0.88rem;'>ICD: {_html.escape(icd)}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    _render_col(c1, "Confirmed", confirmed)
+    _render_col(c2, "Suspected", suspected)
+    return True
+
+
+def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirmed: bool = False) -> str:
+    """Insert/replace Assessment section in EMR note using Confirmed/Suspected lists."""
+    if not note:
+        return note or ""
+    if not dx_entries:
+        return note
+
+    confirmed = [d for d in dx_entries if d.get("status") == "confirmed"]
+    suspected = [d for d in dx_entries if d.get("status") == "suspected"]
+
+    if not confirmed and not suspected:
+        return note
+
+    section: list[str] = ["Assessment:"]
+    if confirmed:
+        section.append("- Confirmed:")
+        for d in confirmed:
+            line = f"  - {str(d.get('label') or '').strip()}"
+            icd = str(d.get("icd") or "").strip()
+            if include_icd_confirmed and icd:
+                line += f" (ICD: {icd})"
+            section.append(line)
+    if suspected:
+        section.append("- Suspected:")
+        for d in suspected:
+            section.append(f"  - {str(d.get('label') or '').strip()}")
+
+    section_text = "\n".join(section)
+
+    # Replace existing Assessment block if present.
+    # Intentionally avoid DOTALL so replacement cannot consume Plan/Context sections.
+    lines = note.splitlines()
+    assessment_idx = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "assessment:"), None)
+    if assessment_idx is not None:
+        end_idx = assessment_idx + 1
+        while end_idx < len(lines):
+            cur = lines[end_idx]
+            cur_stripped = cur.strip()
+            # Stop at next top-level section header (e.g., Plan:, Context:).
+            if cur_stripped and re.match(r"^[A-Za-z][A-Za-z /()\-]*:\s*$", cur_stripped):
+                break
+            end_idx += 1
+
+        replacement = section_text.splitlines()
+        lines = lines[:assessment_idx] + replacement + lines[end_idx:]
+        return "\n".join(lines)
+
+    # Otherwise insert before Plan when possible.
+    lines = note.splitlines()
+    plan_idx = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "plan:"), None)
+    if plan_idx is None:
+        return note.rstrip() + "\n\n" + section_text
+
+    new_lines = lines[:plan_idx] + [section_text, ""] + lines[plan_idx:]
+    return "\n".join(new_lines)
+
+
+def _tidy_emr_plan_section(
+    note: str,
+    *,
+    treatment_trigger: bool = False,
+    cac0_low_risk: bool = False,
+    enhancer_only: bool = False,
+    engine_plan_bullets: list[str] | None = None,
+    plaque_unmeasured: bool = False,
+    missing_key_biomarkers: bool = False,
+    low_stability_incomplete_clarifiers: bool = False,
+    hard_lipid_trigger: bool = False,
+    clinical_ascvd: bool = False,
+    plaque_present: bool | None = None,
+    explicit_engine_mandate: bool = False,
+) -> str:
+    """
+    Keep Plan concise and clinician-friendly without altering computed thresholds/scoring.
     - Collapse duplicate high-level treatment bullets (Management + Lipid-lowering therapy).
-    - Order Plan bullets consistently.
-    - Avoid duplicate CAC rationale in Context when already present in Plan.
+    - Reconcile mutually exclusive lipid-lowering statements.
+    - Deterministically de-duplicate overlapping plan bullets.
+    - Tighten Context to avoid repeating CKM/driver information already shown above.
     """
     if not note:
         return note or ""
@@ -574,6 +725,31 @@ def _tidy_emr_plan_section(note: str) -> str:
 
     def _is_bullet(ln: str) -> bool:
         return bool(re.match(r"^\s*[-•]\s+", ln or ""))
+
+    def _normalize_for_dedupe(text: str) -> str:
+        t = re.sub(r"\s+", " ", (text or "").strip())
+        t = t.rstrip(".")
+        return t.casefold()
+
+    def _dedupe_bullets(bullets: list[str]) -> list[str]:
+        out: list[str] = []
+        norm_out: list[str] = []
+        for b in bullets:
+            n = _normalize_for_dedupe(b)
+            if not n or n in norm_out:
+                continue
+            out.append(b.strip())
+            norm_out.append(n)
+
+        keep = [True] * len(out)
+        for i, ni in enumerate(norm_out):
+            for j, nj in enumerate(norm_out):
+                if i == j:
+                    continue
+                if ni and (ni != nj) and (ni in nj):
+                    keep[i] = False
+                    break
+        return [b for i, b in enumerate(out) if keep[i]]
 
     start = plan_idx + 1
     end = start
@@ -614,19 +790,122 @@ def _tidy_emr_plan_section(note: str) -> str:
         parsed = [p for i, p in enumerate(parsed) if i not in {mgmt_idx, lipid_idx}]
         parsed.insert(0, combined[:1].upper() + combined[1:])
 
-    def _cat(text: str) -> int:
-        t = text.lower()
-        if t.startswith("treatment ") or t.startswith("management:") or t.startswith("lipid-lowering therapy"):
-            return 0
-        if "apob" in t or "driver" in t:
-            return 1
-        if "aspirin" in t:
-            return 2
-        if "cac" in t or "coronary calcium" in t:
-            return 3
-        return 4
+    def _is_initiate_line(t: str) -> bool:
+        tl = t.lower()
+        return "initiate lipid-lowering therapy" in tl or "initiate treatment" in tl
 
-    parsed = [p for _, p in sorted(enumerate(parsed), key=lambda x: (_cat(x[1]), x[0]))]
+    def _is_not_required_line(t: str) -> bool:
+        tl = t.lower()
+        return ("lipid-lowering therapy" in tl) and ("not required" in tl)
+
+    def _is_lpa_line(t: str) -> bool:
+        tl = t.lower()
+        return ("lp(a)" in tl or "lpa" in tl) and "elevated" in tl
+
+    def _is_lipid_bullet(t: str) -> bool:
+        tl = t.lower()
+        return (
+            tl.startswith("lipid-lowering therapy:")
+            or "lipid-lowering therapy appropriate" in tl
+            or "optimize lipid-lowering" in tl
+            or "intensity individualized" in tl
+        )
+
+    def _is_no_escalation_line(t: str) -> bool:
+        tl = t.lower()
+        return (
+            "no medication escalation today" in tl
+            or "no immediate escalation" in tl
+            or "not required at this time" in tl
+        )
+
+    def _is_specific_lab_acquisition_line(t: str) -> bool:
+        tl = t.lower()
+        has_marker = ("apob" in tl) or ("lp(a)" in tl) or ("lpa" in tl)
+        has_missing_or_obtain = any(k in tl for k in ("missing", "obtain", "measure", "acquire", "complete"))
+        return has_marker and has_missing_or_obtain
+
+    def _is_generic_data_completion_line(t: str) -> bool:
+        tl = t.lower()
+        return tl.startswith("data completion") and not _is_specific_lab_acquisition_line(t)
+
+    parsed = [p for p in parsed if p]
+
+    if engine_plan_bullets:
+        parsed = [re.sub(r"^\s*[-•]\s+", "", str(b)).strip() for b in engine_plan_bullets if str(b).strip()]
+    elif treatment_trigger:
+        parsed = [p for p in parsed if not _is_not_required_line(p)]
+        if not any(_is_initiate_line(p) for p in parsed):
+            parsed.insert(0, "Initiate lipid-lowering therapy")
+    elif cac0_low_risk:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+        if not any(_is_not_required_line(p) for p in parsed):
+            parsed.insert(0, "Lipid-lowering therapy not required at this time")
+
+    if enhancer_only:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+        parsed = [p for p in parsed if not _is_lpa_line(p)]
+        parsed.append("Elevated Lp(a) informs lifetime risk discussion.")
+
+    # Reconcile mutually exclusive medication actions before final Plan rendering.
+    med_escalation_eligible = bool(
+        (plaque_present is True)
+        or hard_lipid_trigger
+        or clinical_ascvd
+        or explicit_engine_mandate
+    )
+    defer_due_to_incomplete_data = bool(
+        (plaque_unmeasured or missing_key_biomarkers or low_stability_incomplete_clarifiers)
+        and (not med_escalation_eligible)
+    )
+
+    if defer_due_to_incomplete_data:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+        parsed = [p for p in parsed if not _is_lipid_bullet(p)]
+        if not any(_is_no_escalation_line(p) for p in parsed):
+            parsed.insert(0, "No medication escalation today")
+    elif not med_escalation_eligible:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+
+    has_specific_lab_acquisition = any(_is_specific_lab_acquisition_line(p) for p in parsed)
+    if has_specific_lab_acquisition:
+        parsed = [p for p in parsed if not _is_generic_data_completion_line(p)]
+
+    lipid_positions = [i for i, p in enumerate(parsed) if _is_lipid_bullet(p)]
+    if lipid_positions:
+        first_pos = lipid_positions[0]
+        parsed = [
+            p for i, p in enumerate(parsed)
+            if (i not in lipid_positions)
+            and ("intensity individualized" not in p.lower())
+            and ("targets and risk profile" not in p.lower() or "lipid-lowering therapy" in p.lower())
+        ]
+        parsed.insert(
+            min(first_pos, len(parsed)),
+            "Lipid-lowering therapy: Appropriate; intensity individualized to targets and risk profile.",
+        )
+
+    _has_specific_lipid_bullet = any(str(p).strip().lower().startswith("lipid-lowering therapy:") for p in parsed)
+    if _has_specific_lipid_bullet:
+        def _is_generic_lipid_initiation(text: str) -> bool:
+            tl = str(text or "").strip().lower()
+            if tl.startswith("lipid-lowering therapy:"):
+                return False
+            if tl.startswith("initiate lipid-lowering therapy"):
+                return True
+            if tl.startswith("start lipid-lowering therapy"):
+                return True
+            if tl == "lipid-lowering therapy appropriate":
+                return True
+            if "initiate lipid" in tl:
+                return True
+            return False
+
+        parsed = [p for p in parsed if not _is_generic_lipid_initiation(p)]
+
+    parsed = _dedupe_bullets(parsed)
+
+    parsed = _dedupe_bullets(parsed)
     new_bullets = [f"- {p}" for p in parsed]
 
     has_plan_cac = any(("cac" in p.lower() or "coronary calcium" in p.lower()) for p in parsed)
@@ -2205,7 +2484,7 @@ def _extract_ckm_stage_num(out: dict) -> int | None:
 
 def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_context: dict, data: dict) -> str:
     """
-    Patient-specific explanation for Snapshot CKM line.
+    Returns concise, clinician-facing CKM drivers for Snapshot.
     """
     if stage_num not in (1, 2, 3):
         return ""
@@ -2231,32 +2510,32 @@ def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_c
 
     if stage_num == 3:
         if ascvd_v is True or "ascvd" in driver:
-            reasons.append("ASCVD is present")
+            reasons.append("ASCVD present")
         try:
             if (egfr_v is not None) and float(egfr_v) < 60:
-                reasons.append(f"eGFR {int(round(float(egfr_v)))} (<60)")
+                reasons.append(f"eGFR {int(round(float(egfr_v)))}")
         except Exception:
             pass
         if ckm_ctx.get("ckd_present") and not any("eGFR" in r for r in reasons):
             reasons.append(str(ckm_ctx.get("ckd_stage") or "CKD present"))
 
         if reasons:
-            return "clinical disease layer: " + "; ".join(reasons)
-        return "clinical disease layer is present"
+            return ", ".join(reasons)
+        return "clinical disease present"
 
     if stage_num == 2:
         if diabetes_v is True:
-            reasons.append("diabetes = yes")
+            reasons.append("diabetes")
         try:
             if a1c_v is not None and float(a1c_v) >= 6.5:
                 reasons.append(f"A1c {float(a1c_v):.1f}%")
             elif a1c_v is not None and float(a1c_v) >= 6.2:
-                reasons.append(f"A1c {float(a1c_v):.1f}% (near diabetes threshold)")
+                reasons.append(f"A1c {float(a1c_v):.1f}%")
         except Exception:
             pass
         if reasons:
-            return "metabolic disease layer: " + "; ".join(reasons)
-        return "metabolic disease layer is present"
+            return ", ".join(reasons)
+        return "metabolic disease present"
 
     try:
         if bmi_v is not None and float(bmi_v) >= 30:
@@ -2285,8 +2564,8 @@ def _ckm_stage_snapshot_explanation(stage_num: int | None, ckm_copy: dict, ckm_c
         pass
 
     if reasons:
-        return "risk-factor layer: " + "; ".join(reasons[:3])
-    return "risk-factor layer is present"
+        return ", ".join(reasons[:3])
+    return "risk factors present"
 
 
 def render_ckm_vertical_rail_html(active_stage: int | None) -> str:
@@ -2478,38 +2757,13 @@ with tab_report:
     except Exception:
         _egfr_v = None
 
-    _ckd_label = _format_ckd_stage_label_from_egfr(_egfr_v)
-
     _ckm_stage_num = active_ckm_stage  # already computed above via _extract_ckm_stage_num(out)
-
-    _ckm_label = ""
-    if _ckm_stage_num is None:
-        _ckm_label = ""
-    else:
-        # Add "(CKD-driven risk)" only when CKM Stage 3 is paired with CKD stage ≥3a (eGFR < 60).
-        _ckd_driven = False
-        try:
-            _ckd_driven = (_ckm_stage_num == 3) and (_egfr_v is not None) and (float(_egfr_v) < 60)
-        except Exception:
-            _ckd_driven = False
-
-        _ckm_label = f"Stage {_ckm_stage_num}" + (" (CKD-driven risk)" if _ckd_driven else "")
-
-    _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
-    if _ckm_stage_why:
-        _ckm_label = f"{_ckm_label} — {_ckm_stage_why}" if _ckm_label else ""
-
-    # Show CKD label ONLY when eGFR < 60 (avoid noisy CKD2 alongside Stage 1)
-    if not (_egfr_v is not None and float(_egfr_v) < 60):
-        _ckd_label = ""
-
     _ckmckd_line = ""
-    if _ckm_label and _ckd_label:
-        _ckmckd_line = f"{_ckm_label} | {_ckd_label}"
-    elif _ckm_label:
-        _ckmckd_line = _ckm_label
-    elif _ckd_label and _ckd_label != "CKD — unknown":
-        _ckmckd_line = _ckd_label
+    if _ckm_stage_num is not None:
+        _ckm_stage_why = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
+        _ckmckd_line = f"Stage {_ckm_stage_num}"
+        if _ckm_stage_why:
+            _ckmckd_line += f" — {_ckm_stage_why}"
 
     # Suppress CKM once plaque is assessed or posture is plaque-driven (Level 4+)
     try:
@@ -2519,6 +2773,74 @@ with tab_report:
 
     if _plaque_assessed:
         _ckmckd_line = ""
+
+    if plaque_present is True:
+        _plaque_status_line = "Present"
+        _burden_txt = scrub_terms(str(ev.get("burden_band", "") or "")).strip()
+        if _burden_txt and _burden_txt != "—":
+            _plaque_status_line += f"; {_burden_txt}"
+    elif plaque_present is False:
+        _plaque_status_line = "Absent"
+        _burden_txt = scrub_terms(str(ev.get("burden_band", "") or "")).strip()
+        if _burden_txt and _burden_txt != "—":
+            _plaque_status_line += f"; {_burden_txt}"
+    else:
+        _plaque_status_line = "Unknown — no imaging"
+
+    _rss_score = rs.get("score", "—")
+    _rss_band = rs.get("band", "—")
+    _pce_value = risk10.get("risk_pct")
+    _pce_text = f"{_pce_value}%" if _pce_value is not None else "—"
+
+    _plaque_label = "Present" if plaque_present is True else ("Absent" if plaque_present is False else "Unknown")
+    _burden_txt = scrub_terms(str(ev.get("burden_band", "") or "")).strip()
+    _burden_label = _burden_txt if (_burden_txt and _burden_txt != "—") else "Not quantified"
+
+    _ckm_context_label = "—"
+    if _ckm_stage_num is not None:
+        _ckm_context_label = f"Stage {_ckm_stage_num}"
+        _ckm_driver = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
+        if _ckm_driver:
+            _ckm_context_label += f" ({_ckm_driver})"
+
+    _ckd_context_bits = []
+    if _egfr_v is not None:
+        _ckd_context_bits.append(f"eGFR {int(round(float(_egfr_v)))}")
+    _uacr_v = data.get("uacr")
+    try:
+        _uacr_v = float(_uacr_v) if _uacr_v is not None else None
+    except Exception:
+        _uacr_v = None
+    if _uacr_v is not None:
+        _uacr_context_val = int(round(_uacr_v)) if float(_uacr_v).is_integer() else round(_uacr_v, 1)
+        _ckd_context_bits.append(f"UACR {_uacr_context_val}")
+
+    _ckd_stage_num = None
+    if _egfr_v is not None:
+        try:
+            _egfr_num = float(_egfr_v)
+            if _egfr_num >= 90:
+                _ckd_stage_num = 1
+            elif _egfr_num >= 60:
+                _ckd_stage_num = 2
+            elif _egfr_num >= 45:
+                _ckd_stage_num = "3a"
+            elif _egfr_num >= 30:
+                _ckd_stage_num = "3b"
+            elif _egfr_num >= 15:
+                _ckd_stage_num = 4
+            else:
+                _ckd_stage_num = 5
+        except Exception:
+            _ckd_stage_num = None
+
+    _ckd_stage_label = f"Stage {_ckd_stage_num}" if _ckd_stage_num is not None else "—"
+    _has_albuminuria = bool(_uacr_v is not None and _uacr_v >= 30)
+    _ckd_context_label = _ckd_stage_label + (" with albuminuria" if _has_albuminuria and _ckd_stage_num is not None else "")
+    if _ckd_context_bits and _ckd_stage_num is not None:
+        _ckd_context_label += f" ({', '.join(_ckd_context_bits)})"
+
+    _snapshot_context_line = f"CKM {_ckm_context_label}; CKD {_ckd_context_label}"
 
     st.markdown(
         f"""
@@ -2532,35 +2854,26 @@ with tab_report:
   {f"<div class='kvline'><b>CKM:</b> {_html.escape(_ckmckd_line)}</div>" if _ckmckd_line else ""}
 
   <div class="kvline">
-    <b>Plaque status:</b> {scrub_terms(ev.get('cac_status','—'))}
-    &nbsp; <b>Plaque burden:</b> {scrub_terms(ev.get('burden_band','—'))}
+    <b>Plaque:</b> {_html.escape(_plaque_label)} | <b>Burden:</b> {_html.escape(_burden_label)}
   </div>
 
   <div class="kvline">
-    <b>Decision confidence:</b> {decision_conf}
-    &nbsp; <b>Decision stability:</b> {stab_line}
+    <b>Confidence:</b> {decision_conf} | <b>Stability:</b> {stab_line}
   </div>
 
-  <div class="kvline">
-    <b>Key metrics:</b>
-    RSS {rs.get('score','—')}/100 ({rs.get('band','—')})
-    • ASCVD PCE (10y) {pce_line} {pce_cat}
-  </div>
+  <div class="kvline"><b>RSS:</b> {_rss_score}/100 ({_rss_band})</div>
+  <div class="kvline"><b>ASCVD PCE (10y):</b> {_pce_text}</div>
 
   <div class="kvline">
-    <b>PREVENT (10y, population model):</b>
-    total CVD {f"{p_total}%" if p_total is not None else '—'}
-    • ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
+    <b>PREVENT (10y):</b> Total CVD {f"{p_total}%" if p_total is not None else '—'} | ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
   </div>
+
+  <div class="kvline"><b>Context:</b> {_html.escape(_snapshot_context_line)}</div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        f"<div class='compact-caption'>{_html.escape(PREVENT_EXPLAINER)}</div>",
-        unsafe_allow_html=True
-    )
     if (p_total is None and p_ascvd is None) and p_note:
         st.markdown(
             f"<div class='compact-caption'>PREVENT: {_html.escape(p_note)}</div>",
@@ -2711,21 +3024,6 @@ if str(struct_clar or "").strip():
         unsafe_allow_html=True,
     )
 
-# CKM/CKD context (engine-gated; display-only)
-if ckm_copy.get("headline") or ckd_copy.get("headline"):
-    st.markdown(
-        f"""
-<div class="block compact">
-  <div class="block-title compact">CKM/CKD context</div>
-  {f"<div class='kvline compact'>{_html.escape(ckm_copy.get('headline',''))}</div>" if ckm_copy.get("headline") else ""}
-  {f"<div class='kvline compact inline-muted'>{_html.escape(ckm_copy.get('detail',''))}</div>" if ckm_copy.get("detail") else ""}
-  {f"<div class='kvline compact'>{_html.escape(ckd_copy.get('headline',''))}</div>" if ckd_copy.get("headline") else ""}
-  {f"<div class='kvline compact inline-muted'>{_html.escape(ckd_copy.get('detail',''))}</div>" if ckd_copy.get("detail") else ""}
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
 col_t, col_m = st.columns([1.05, 1.35], gap="small")
@@ -2808,6 +3106,16 @@ with col_m:
         unsafe_allow_html=True,
     )
 
+dx_entries = _coerce_emr_dx_entries(out)
+_has_dx_panel = _render_emr_dx_panel(dx_entries)
+include_icd_confirmed = False
+if _has_dx_panel:
+    include_icd_confirmed = st.toggle(
+        "Include ICD codes (quiet) (confirmed only)",
+        value=False,
+        help="When on, confirmed diagnoses in the EMR note include ICD codes in muted parenthetical form.",
+    )
+
     # EMR note  ✅ MUST stay inside tab_report
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 st.subheader("EMR note (copy/paste)")
@@ -2837,7 +3145,75 @@ if not str(note_for_emr).strip():
 # 3) Final formatting + unified Management line injection
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
-note_for_emr = _tidy_emr_plan_section(note_for_emr)
+note_for_emr = _inject_dx_into_note(
+    note_for_emr,
+    dx_entries=dx_entries,
+    include_icd_confirmed=bool(include_icd_confirmed),
+)
+
+try:
+    _pce_pct_for_plan = float((risk10 or {}).get("risk_pct")) if (risk10 or {}).get("risk_pct") is not None else None
+except Exception:
+    _pce_pct_for_plan = None
+
+_ldl_v = data.get("ldl")
+_apob_v = data.get("apob")
+try:
+    _ldl_v = float(_ldl_v) if _ldl_v is not None else None
+except Exception:
+    _ldl_v = None
+try:
+    _apob_v = float(_apob_v) if _apob_v is not None else None
+except Exception:
+    _apob_v = None
+
+_pce_tx_cut = float(getattr(le, "PCE_INTERMEDIATE_CUT", 7.5))
+_ldl_hard_cut = float(getattr(le, "MAJOR_LDL_CUT", 130.0))
+_apob_hard_cut = float(getattr(le, "MAJOR_APOB_CUT", 100.0))
+_low_risk_cut = float(getattr(le, "PCE_HARD_NO_MAX", 4.0))
+
+_ldl_or_apob_hard_trigger = ((_apob_v is not None and _apob_v >= _apob_hard_cut) or (_apob_v is None and _ldl_v is not None and _ldl_v >= _ldl_hard_cut))
+_treatment_trigger = bool((plaque_present is True) or (_pce_pct_for_plan is not None and _pce_pct_for_plan >= _pce_tx_cut) or _ldl_or_apob_hard_trigger)
+_cac0_low_risk = bool((plaque_present is False) and (_pce_pct_for_plan is not None) and (_pce_pct_for_plan < _low_risk_cut) and (not _treatment_trigger))
+
+_apob_initiate_cut = float(getattr(le, "APOB_INITIATE_CUT", 110.0))
+_very_high_ldl_cut = 190.0
+_very_high_lipid_trigger = bool(
+    (_apob_v is not None and _apob_v >= _apob_initiate_cut)
+    or (_ldl_v is not None and _ldl_v >= _very_high_ldl_cut)
+)
+
+_rs_missing = {str(x).strip().lower() for x in ((out.get("riskSignal") or {}).get("missing") or []) if str(x).strip()}
+_missing_key_biomarkers = bool(("apob" in _rs_missing) or any(x in _rs_missing for x in ("lp(a)", "lpa")))
+_plaque_unmeasured = _plaque_unmeasured((lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {})
+_low_stability_incomplete_clarifiers = bool(
+    str(decision_stability or "").strip().lower() == "low"
+    and "clarifier" in str(decision_stability_note or "").strip().lower()
+)
+_explicit_engine_mandate = bool((lvl.get("dominantAction") is True) and _treatment_trigger)
+
+try:
+    _lpa_v = float(data.get("lpa")) if data.get("lpa") is not None else None
+except Exception:
+    _lpa_v = None
+
+_lpa_elev = bool((_lpa_v is not None and _lpa_v >= 125) or any("lp(a) elevated" in str(t).lower() for t in (lvl.get("triggers") or [])))
+_enhancer_only = bool(_lpa_elev and not _treatment_trigger)
+
+note_for_emr = _tidy_emr_plan_section(
+    note_for_emr,
+    treatment_trigger=_treatment_trigger,
+    cac0_low_risk=_cac0_low_risk,
+    enhancer_only=_enhancer_only,
+    engine_plan_bullets=out.get("plan_bullets"),
+    plaque_unmeasured=_plaque_unmeasured,
+    missing_key_biomarkers=_missing_key_biomarkers,
+    low_stability_incomplete_clarifiers=_low_stability_incomplete_clarifiers,
+    hard_lipid_trigger=_very_high_lipid_trigger,
+    clinical_ascvd=clinical_ascvd,
+    plaque_present=plaque_present,
+    explicit_engine_mandate=_explicit_engine_mandate,
+)
 
 # 4) Fallback visibility if still empty (do not break rendering)
 if not str(note_for_emr).strip():
