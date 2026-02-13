@@ -3017,11 +3017,6 @@ def _context_anchors_sentence(anchors: Dict[str, Any]) -> Tuple[str, str]:
     life = (anchors.get("lifetime") or {}).get("summary", "—")
     near = near.replace(" / CAC unknown", "").replace(" / Plaque unmeasured", "")
     return near, life
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-from datetime import date
 
 
 def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, Any]:
@@ -5239,6 +5234,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
