@@ -563,6 +563,136 @@ def _inject_management_line_into_note(note: str, action_line: str) -> str:
     return note
 
 
+def _coerce_emr_dx_entries(out: dict) -> list[dict]:
+    """
+    Normalize optional diagnosis payload for UI + EMR insertion.
+
+    Accepted shapes (first one found):
+      - out["emr_dx"] -> list[dict]
+      - out["diagnoses"] -> list[dict]
+      - out["diagnosisSynthesis"]["diagnoses"] -> list[dict]
+      - out["insights"]["emr_dx"] -> list[dict]
+
+    Each item may contain: label/name/text, status, icd/icd_code/code.
+    """
+    raw = []
+    for candidate in (
+        (out or {}).get("emr_dx"),
+        (out or {}).get("diagnoses"),
+        ((out or {}).get("diagnosisSynthesis") or {}).get("diagnoses"),
+        ((out or {}).get("insights") or {}).get("emr_dx"),
+    ):
+        if isinstance(candidate, list) and candidate:
+            raw = candidate
+            break
+
+    normalized: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("name") or item.get("text") or "").strip()
+        if not label:
+            continue
+        status_raw = str(item.get("status") or item.get("bucket") or "confirmed").strip().lower()
+        status = "suspected" if status_raw.startswith("sus") else "confirmed"
+        icd = str(item.get("icd") or item.get("icd_code") or item.get("code") or "").strip()
+        if not icd and isinstance(item.get("icd10"), list) and item.get("icd10"):
+            first = item["icd10"][0]
+            if isinstance(first, dict):
+                icd = str(first.get("code") or "").strip()
+        normalized.append({"label": label, "status": status, "icd": icd})
+    return normalized
+
+
+def _render_emr_dx_panel(dx_entries: list[dict]) -> bool:
+    """Render Confirmed/Suspected diagnosis lists with muted ICD lines."""
+    if not dx_entries:
+        return False
+
+    confirmed = [d for d in dx_entries if d.get("status") == "confirmed"]
+    suspected = [d for d in dx_entries if d.get("status") == "suspected"]
+
+    st.markdown("<div class='hr'></div>", unsafe_allow_html=True)
+    st.markdown("**Assessment candidates**")
+    c1, c2 = st.columns(2)
+
+    def _render_col(col, title: str, rows: list[dict]):
+        with col:
+            st.caption(title)
+            if not rows:
+                st.markdown("- —")
+                return
+            for d in rows:
+                st.markdown(f"- { _html.escape(str(d.get('label') or '—')) }")
+                icd = str(d.get("icd") or "").strip()
+                if icd:
+                    st.markdown(
+                        f"<div style='margin-left:1.05rem;color:rgba(17,24,39,0.56);font-size:0.88rem;'>ICD: {_html.escape(icd)}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    _render_col(c1, "Confirmed", confirmed)
+    _render_col(c2, "Suspected", suspected)
+    return True
+
+
+def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirmed: bool = False) -> str:
+    """Insert/replace Assessment section in EMR note using Confirmed/Suspected lists."""
+    if not note:
+        return note or ""
+    if not dx_entries:
+        return note
+
+    confirmed = [d for d in dx_entries if d.get("status") == "confirmed"]
+    suspected = [d for d in dx_entries if d.get("status") == "suspected"]
+
+    if not confirmed and not suspected:
+        return note
+
+    section: list[str] = ["Assessment:"]
+    if confirmed:
+        section.append("- Confirmed:")
+        for d in confirmed:
+            line = f"  - {str(d.get('label') or '').strip()}"
+            icd = str(d.get("icd") or "").strip()
+            if include_icd_confirmed and icd:
+                line += f" (ICD: {icd})"
+            section.append(line)
+    if suspected:
+        section.append("- Suspected:")
+        for d in suspected:
+            section.append(f"  - {str(d.get('label') or '').strip()}")
+
+    section_text = "\n".join(section)
+
+    # Replace existing Assessment block if present.
+    # Intentionally avoid DOTALL so replacement cannot consume Plan/Context sections.
+    lines = note.splitlines()
+    assessment_idx = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "assessment:"), None)
+    if assessment_idx is not None:
+        end_idx = assessment_idx + 1
+        while end_idx < len(lines):
+            cur = lines[end_idx]
+            cur_stripped = cur.strip()
+            # Stop at next top-level section header (e.g., Plan:, Context:).
+            if cur_stripped and re.match(r"^[A-Za-z][A-Za-z /()\-]*:\s*$", cur_stripped):
+                break
+            end_idx += 1
+
+        replacement = section_text.splitlines()
+        lines = lines[:assessment_idx] + replacement + lines[end_idx:]
+        return "\n".join(lines)
+
+    # Otherwise insert before Plan when possible.
+    lines = note.splitlines()
+    plan_idx = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "plan:"), None)
+    if plan_idx is None:
+        return note.rstrip() + "\n\n" + section_text
+
+    new_lines = lines[:plan_idx] + [section_text, ""] + lines[plan_idx:]
+    return "\n".join(new_lines)
+
+
 def _tidy_emr_plan_section(
     note: str,
     *,
@@ -779,30 +909,23 @@ def _tidy_emr_plan_section(
     new_bullets = [f"- {p}" for p in parsed]
 
     has_plan_cac = any(("cac" in p.lower() or "coronary calcium" in p.lower()) for p in parsed)
-    ckm_stage2 = any(("stage 2" in (ln or "").lower()) and ("ckm" in (ln or "").lower()) for ln in lines)
-    apob_elsewhere = any(("apob" in (ln or "").lower()) and (not (ln or "").strip().lower().startswith("context:")) for ln in lines)
+    if has_plan_cac:
+        for i, ln in enumerate(lines):
+            if ln.strip().lower().startswith("context:") and "|" in ln and "cac" in ln.lower():
+                head, tail = ln.split(":", 1)
+                parts = [p.strip() for p in tail.split("|")]
+                cleaned_parts = []
+                for part in parts:
+                    if "cac" not in part.lower() and "coronary calcium" not in part.lower():
+                        cleaned_parts.append(part)
+                        continue
 
-    for i, ln in enumerate(lines):
-        if not ln.strip().lower().startswith("context:"):
-            continue
+                    subparts = [sp.strip() for sp in re.split(r"\s*/\s*", part) if sp.strip()]
+                    subparts = [sp for sp in subparts if "cac" not in sp.lower() and "coronary calcium" not in sp.lower()]
+                    if subparts:
+                        cleaned_parts.append(" / ".join(subparts))
 
-        head, tail = ln.split(":", 1)
-        parts = [p.strip() for p in tail.split("|") if p.strip()]
-        kept: list[str] = []
-        for part in parts:
-            pl = part.lower()
-            if has_plan_cac and ("cac" in pl or "coronary calcium" in pl):
-                continue
-            if ckm_stage2 and "diabetes" in pl:
-                continue
-            if apob_elsewhere and "apob" in pl:
-                continue
-            kept.append(part)
-
-        if kept:
-            lines[i] = f"{head}: {' | '.join(kept)}"
-        else:
-            lines[i] = ""
+                lines[i] = f"{head}: {' | '.join(cleaned_parts)}" if cleaned_parts else f"{head}:"
 
     lines[start:end] = new_bullets
     return "\n".join(lines)
@@ -2983,6 +3106,16 @@ with col_m:
         unsafe_allow_html=True,
     )
 
+dx_entries = _coerce_emr_dx_entries(out)
+_has_dx_panel = _render_emr_dx_panel(dx_entries)
+include_icd_confirmed = False
+if _has_dx_panel:
+    include_icd_confirmed = st.toggle(
+        "Include ICD codes (quiet) (confirmed only)",
+        value=False,
+        help="When on, confirmed diagnoses in the EMR note include ICD codes in muted parenthetical form.",
+    )
+
     # EMR note  ✅ MUST stay inside tab_report
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 st.subheader("EMR note (copy/paste)")
@@ -3012,6 +3145,11 @@ if not str(note_for_emr).strip():
 # 3) Final formatting + unified Management line injection
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
+note_for_emr = _inject_dx_into_note(
+    note_for_emr,
+    dx_entries=dx_entries,
+    include_icd_confirmed=bool(include_icd_confirmed),
+)
 
 try:
     _pce_pct_for_plan = float((risk10 or {}).get("risk_pct")) if (risk10 or {}).get("risk_pct") is not None else None
@@ -3216,6 +3354,8 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
+
 
 
 

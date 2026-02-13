@@ -1,4 +1,9 @@
-from levels_output_adapter import build_diagnosis_synthesis, generateRiskContinuumCvOutput
+from levels_engine import Patient
+from levels_output_adapter import (
+    build_diagnosis_synthesis,
+    evaluate_unified,
+    generateRiskContinuumCvOutput,
+)
 
 
 def test_build_diagnosis_synthesis_suspected_diabetes_no_exported_icd():
