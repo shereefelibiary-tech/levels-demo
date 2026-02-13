@@ -3033,7 +3033,7 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
       - composite-first suppression prevents redundancy
     """
 
-    # ----------------------------
+       # ----------------------------
     # Helpers: safe extraction
     # ----------------------------
     def _as_float(x: Any) -> Optional[float]:
@@ -3057,6 +3057,18 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
             return None
 
     def _get_attr_first(obj: Any, names: List[str]) -> Any:
+        # Support Risk Continuum Patient wrapper (dict-like via .get)
+        try:
+            get_fn = getattr(obj, "get", None)
+            if callable(get_fn):
+                for n in names:
+                    v = get_fn(n, None)
+                    if v is not None:
+                        return v
+        except Exception:
+            pass
+
+        # Fallback: attribute access
         for n in names:
             if hasattr(obj, n):
                 v = getattr(obj, n)
@@ -5237,6 +5249,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
