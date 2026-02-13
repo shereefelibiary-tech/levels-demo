@@ -834,6 +834,9 @@ def _tidy_emr_plan_section(
 
     if engine_plan_bullets:
         parsed = [re.sub(r"^\s*[-•]\s+", "", str(b)).strip() for b in engine_plan_bullets if str(b).strip()]
+        parsed = _dedupe_bullets(parsed)
+        lines[start:end] = [f"- {p}" for p in parsed]
+        return "\n".join(lines)
     elif treatment_trigger:
         parsed = [p for p in parsed if not _is_not_required_line(p)]
         if not any(_is_initiate_line(p) for p in parsed):
