@@ -274,9 +274,9 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
     if apob is not None:
         try:
             if float(apob) >= 120:
-                triggers.append(_trigger("APOB_HIGH", "ApoB high", _fmt_num(apob, "mg/dL"), "Atherogenic particle burden elevated.", "high"))
+                triggers.append(_trigger("APOB_HIGH", "ApoB high", _fmt_num(apob, "mg/dL"), "Atherogenic particle burden elevated, supports treatment intensification.", "high"))
             elif float(apob) >= 90:
-                triggers.append(_trigger("APOB_ELEV", "ApoB elevated", _fmt_num(apob, "mg/dL"), "Above goal for this risk tier.", "moderate"))
+                triggers.append(_trigger("APOB_ELEV", "ApoB elevated", _fmt_num(apob, "mg/dL"), "Above goal for this risk tier, supports risk-focused follow-up.", "moderate"))
         except Exception:
             pass
 
@@ -284,25 +284,25 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         try:
             thresh = 50 if str(lpa_unit).lower().startswith("mg") else 125
             if float(lpa) >= thresh:
-                triggers.append(_trigger("LPA_ELEV", "Lp(a) elevated", _fmt_num(lpa, lpa_unit, 1), "Genetic risk enhancer.", "moderate"))
+                triggers.append(_trigger("LPA_ELEV", "Lp(a) elevated", _fmt_num(lpa, lpa_unit, 1), "Genetic risk enhancer, informs long-term intensity planning.", "moderate"))
         except Exception:
             pass
 
     if a1c is not None:
         try:
             if float(a1c) >= 6.5:
-                triggers.append(_trigger("A1C_DM", "Diabetes-range A1c", _fmt_num(a1c, "%", 1), "Metabolic amplification of risk.", "high"))
+                triggers.append(_trigger("A1C_DM", "Diabetes-range A1c", _fmt_num(a1c, "%", 1), "Metabolic amplification of risk, prioritizes comprehensive risk reduction.", "high"))
             elif float(a1c) >= 5.7:
-                triggers.append(_trigger("A1C_PRE", "Prediabetes-range A1c", _fmt_num(a1c, "%", 1), "Metabolic risk enhancer.", "moderate"))
+                triggers.append(_trigger("A1C_PRE", "Prediabetes-range A1c", _fmt_num(a1c, "%", 1), "Metabolic risk enhancer, supports trajectory monitoring.", "moderate"))
         except Exception:
             pass
 
     if pce_risk_pct is not None:
         try:
             if float(pce_risk_pct) >= 20:
-                triggers.append(_trigger("PCE10_HIGH", "10-year ASCVD risk high (PCE)", _fmt_pct(pce_risk_pct), "Population estimate is high.", "high"))
+                triggers.append(_trigger("PCE10_HIGH", "10-year ASCVD risk high (PCE)", _fmt_pct(pce_risk_pct), "Population estimate is high, supports prompt preventive action.", "high"))
             elif float(pce_risk_pct) >= 7.5:
-                triggers.append(_trigger("PCE10_INT", "10-year ASCVD risk intermediate (PCE)", _fmt_pct(pce_risk_pct), "Population estimate is clinically meaningful.", "moderate"))
+                triggers.append(_trigger("PCE10_INT", "10-year ASCVD risk intermediate (PCE)", _fmt_pct(pce_risk_pct), "Population estimate is clinically meaningful, supports shared planning.", "moderate"))
         except Exception:
             pass
 
@@ -311,23 +311,23 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         d = dbp if dbp is not None else "?"
         try:
             if (sbp is not None and float(sbp) >= 140) or (dbp is not None and float(dbp) >= 90):
-                triggers.append(_trigger("BP_UNCTRL", "BP uncontrolled", f"{s}/{d}", "Major driver of stroke/MI risk.", "high"))
+                triggers.append(_trigger("BP_UNCTRL", "BP uncontrolled", f"{s}/{d}", "Major driver of stroke and MI risk, supports treatment adjustment.", "high"))
             elif (sbp is not None and float(sbp) >= 130) or (dbp is not None and float(dbp) >= 80):
-                triggers.append(_trigger("BP_ELEV", "BP above goal", f"{s}/{d}", "Treat-to-goal reduces events.", "moderate"))
+                triggers.append(_trigger("BP_ELEV", "BP above goal", f"{s}/{d}", "Treat-to-goal reduces events, supports timely reassessment.", "moderate"))
         except Exception:
             pass
 
     if ckd is True:
-        triggers.append(_trigger("CKD", "CKD present", None, "Risk enhancer.", "high"))
+        triggers.append(_trigger("CKD", "CKD present", None, "Risk enhancer, supports higher-intensity prevention.", "high"))
     if smoker is True:
-        triggers.append(_trigger("SMOKE", "Current smoker", None, "Risk enhancer.", "high"))
+        triggers.append(_trigger("SMOKE", "Current smoker", None, "Risk enhancer, prioritize cessation support.", "high"))
     if diabetes is True:
-        triggers.append(_trigger("DM_FLAG", "Diabetes present", None, "Risk enhancer.", "high"))
+        triggers.append(_trigger("DM_FLAG", "Diabetes present", None, "Risk enhancer, supports multifactor risk management.", "high"))
     if fhx is True:
-        triggers.append(_trigger("FHX", "Premature family history", None, "Risk enhancer.", "moderate"))
+        triggers.append(_trigger("FHX", "Premature family history", None, "Risk enhancer, supports earlier intervention thresholds.", "moderate"))
 
     if not triggers:
-        triggers.append(_trigger("NO_MAJOR", "No major triggers detected", None, "Based on provided inputs.", "low"))
+        triggers.append(_trigger("NO_MAJOR", "No major triggers detected", None, "Based on provided inputs, continue guideline-concordant surveillance.", "low"))
 
     triggers = triggers[:6]
 
@@ -341,13 +341,13 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
             "marker": "LDL-C",
             "current": _fmt_num(ldl, "mg/dL"),
             "target": (f"<{int(ldl_goal)} mg/dL" if ldl_goal is not None else None),
-            "why": "Treat-to-goal reduces events; proxy when ApoB missing.",
+            "why": "Treat-to-goal reduces events, proxy when ApoB is missing.",
         },
         {
             "marker": "ApoB",
             "current": _fmt_num(apob, "mg/dL"),
             "target": (f"<{int(apob_goal)} mg/dL" if apob_goal is not None else None),
-            "why": "Best proxy for plaque-driving particle burden.",
+            "why": "Best proxy for plaque-driving particle burden, aligns treatment intensity to biology.",
         },
     ]
     targets = [t for t in targets if t.get("target") is not None]
@@ -359,25 +359,25 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
     pending = "pending" in tag
 
     if pending:
-        plan_items.append(_plan_item("test", "Complete key missing inputs to increase certainty (e.g., CAC, ApoB, Lp(a), hsCRP).", "now", 1))
-        plan_items.append(_plan_item("followup", "Re-run Risk Continuum after data completion.", "after data", 1))
+        plan_items.append(_plan_item("test", "Complete key missing inputs to increase certainty, e.g., CAC, ApoB, Lp(a), hsCRP.", "now", 1))
+        plan_items.append(_plan_item("followup", "Re-run Risk Continuum after data completion, then confirm next-step intensity.", "after data", 1))
     else:
         if level >= 4:
             med_line = (
-                "Intensify lipid-lowering therapy to reach targets."
+                "Intensify lipid-lowering therapy to reach targets, aligned with current burden."
                 if therapy_on
-                else "Initiate or intensify lipid-lowering therapy to reach targets."
+                else "Initiate or intensify lipid-lowering therapy to reach targets, aligned with current burden."
             )
             plan_items.append(_plan_item("med", med_line, "now", 1))
-            plan_items.append(_plan_item("test", "Repeat lipids (± ApoB) to confirm response.", "8–12 weeks", 1))
+            plan_items.append(_plan_item("test", "Repeat lipids, ± ApoB, to confirm response.", "8–12 weeks", 1))
         elif level == 3:
-            plan_items.append(_plan_item("med", "Shared decision toward lipid-lowering therapy; consider escalation based on enhancers and trajectory.", "now", 1))
-            plan_items.append(_plan_item("test", "Repeat lipids (± ApoB) to confirm trajectory/response.", "8–12 weeks", 1))
+            plan_items.append(_plan_item("med", "Shared decision toward lipid-lowering therapy, consider escalation based on enhancers and trajectory.", "now", 1))
+            plan_items.append(_plan_item("test", "Repeat lipids, ± ApoB, to confirm trajectory and response.", "8–12 weeks", 1))
         elif level == 2:
-            plan_items.append(_plan_item("lifestyle", "Structured lifestyle sprint; reassess trajectory.", "now", 1))
-            plan_items.append(_plan_item("test", "Repeat lipids (± ApoB) to confirm trend; consider CAC if it would change intensity.", "8–12 weeks", 2))
+            plan_items.append(_plan_item("lifestyle", "Structured lifestyle sprint, reassess trajectory.", "now", 1))
+            plan_items.append(_plan_item("test", "Repeat lipids, ± ApoB, to confirm trend, consider CAC if it would change intensity.", "8–12 weeks", 2))
         else:
-            plan_items.append(_plan_item("lifestyle", "Maintain favorable trajectory; periodic reassessment.", "now", 1))
+            plan_items.append(_plan_item("lifestyle", "Maintain favorable trajectory, periodic reassessment.", "now", 1))
 
     plan = {
         "meds": [p for p in plan_items if p["kind"] == "med"],
@@ -387,40 +387,40 @@ def generateRiskContinuumCvOutput(inputData: dict, engineOut: dict) -> dict:
         "followup": [p for p in plan_items if p["kind"] == "followup"],
     }
 
-    title = "RISK CONTINUUM — CV ACTION SUMMARY"
+    title = "RISK CONTINUUM; CLINICIAN CV ACTION SUMMARY"
     level_name = level_label.split("—", 1)[-1].strip() if "—" in level_label else level_label
-    summary_line = f"Current CV Level: Level {level}" + (f" ({sublevel})" if sublevel else "") + f" — {level_name}."
+    summary_line = f"Current CV level, Level {level}" + (f", {sublevel}" if sublevel else "") + f"; {level_name}."
 
-    confidence_line = f"Recommendation tag: {recommendation_tag}."
+    confidence_line = f"Recommendation tag, {recommendation_tag};"
     if rss_score is not None:
-        confidence_line += f" Risk Signal Score: {rss_score}/100."
+        confidence_line += f" Risk Signal Score, {rss_score}/100;"
     if pce_risk_pct is not None:
-        confidence_line += f" PCE 10y ASCVD: {_fmt_pct(pce_risk_pct)}"
+        confidence_line += f" PCE 10y ASCVD, {_fmt_pct(pce_risk_pct)}"
         if pce_cat:
-            confidence_line += f" ({pce_cat})."
+            confidence_line += f", {pce_cat}."
         else:
             confidence_line += "."
 
     patient_translation = (
-        "This places you on a risk spectrum. The goal is to reduce plaque-driving particles (ApoB/LDL) and control major drivers "
-        "(blood pressure, metabolic factors) over time."
+        "Clinical framing, patient aligns to a cardiovascular risk spectrum; goal is to reduce plaque-driving particles, ApoB and LDL, "
+        "and control major drivers, blood pressure and metabolic factors, over time."
     )
 
-    reassess_line = "Reassess after repeat labs and/or additional data (e.g., CAC) as indicated."
+    reassess_line = "Reassess after repeat labs and or additional data, e.g., CAC, as indicated."
 
     prevent_summary = None
     if prevent_total is not None or prevent_ascvd is not None:
         prevent_summary = {
             "totalCvd10yPct": prevent_total,
             "ascvd10yPct": prevent_ascvd,
-            "notes": prevent_note or "PREVENT (10-year) comparator.",
+            "notes": prevent_note or "PREVENT 10-year comparator, for contextual risk discussion.",
         }
     else:
         if prevent_missing:
             prevent_summary = {
                 "totalCvd10yPct": None,
                 "ascvd10yPct": None,
-                "notes": "PREVENT not calculated (missing required inputs).",
+                "notes": "PREVENT not calculated, missing required inputs.",
                 "missing": prevent_missing[:5],
             }
         elif prevent_note:
