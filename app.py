@@ -2895,8 +2895,9 @@ if not isinstance(_ins, dict):
 _need_criteria = not bool((_ins.get("criteria_table_html") or "").strip())
 _need_falls = not bool((_ins.get("where_patient_falls_html") or "").strip())
 _need_version = not bool(out.get("version"))
+_need_dx = not bool(((out.get("diagnosisSynthesis") or {}).get("diagnoses") or []))
 
-if _need_criteria or _need_falls or _need_version:
+if _need_criteria or _need_falls or _need_version or _need_dx:
     try:
         _engine_out = le.evaluate(patient)
         if isinstance(_engine_out, dict):
@@ -2909,9 +2910,11 @@ if _need_criteria or _need_falls or _need_version:
             if _need_version:
                 _v = _engine_out.get("version")
                 out["version"] = _v if isinstance(_v, dict) else {}
+            if _need_dx:
+                out["diagnosisSynthesis"] = _engine_out.get("diagnosisSynthesis") or {}
     except Exception:
-        # Silent: do not break report rendering
         pass
+
 
 def _call_with_supported_kwargs(fn, kwargs: dict):
     import inspect
