@@ -635,8 +635,18 @@ def _tidy_emr_plan_section(note: str) -> str:
             if ln.strip().lower().startswith("context:") and "|" in ln and "cac" in ln.lower():
                 head, tail = ln.split(":", 1)
                 parts = [p.strip() for p in tail.split("|")]
-                parts = [p for p in parts if "cac" not in p.lower() and "coronary calcium" not in p.lower()]
-                lines[i] = f"{head}: {' | '.join(parts)}" if parts else f"{head}:"
+                cleaned_parts = []
+                for part in parts:
+                    if "cac" not in part.lower() and "coronary calcium" not in part.lower():
+                        cleaned_parts.append(part)
+                        continue
+
+                    subparts = [sp.strip() for sp in re.split(r"\s*/\s*", part) if sp.strip()]
+                    subparts = [sp for sp in subparts if "cac" not in sp.lower() and "coronary calcium" not in sp.lower()]
+                    if subparts:
+                        cleaned_parts.append(" / ".join(subparts))
+
+                lines[i] = f"{head}: {' | '.join(cleaned_parts)}" if cleaned_parts else f"{head}:"
 
     lines[start:end] = new_bullets
     return "\n".join(lines)
@@ -2968,7 +2978,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
 
