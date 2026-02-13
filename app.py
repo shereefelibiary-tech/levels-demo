@@ -3111,6 +3111,8 @@ with col_m:
     )
 
 dx_entries = _coerce_emr_dx_entries(out)
+st.write("DX COUNT:", len(dx_entries))
+
 _has_dx_panel = _render_emr_dx_panel(dx_entries)
 include_icd_confirmed = False
 if _has_dx_panel:
