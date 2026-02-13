@@ -660,9 +660,22 @@ def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirme
     section_text = "\n".join(section)
 
     # Replace existing Assessment block if present.
-    pat = re.compile(r"(?mi)^Assessment:\s*\n(?:^[ \t]*[-•][^\n]*\n?)+")
-    if pat.search(note):
-        return pat.sub(section_text + "\n", note, count=1)
+    # Intentionally avoid DOTALL so replacement cannot consume Plan/Context sections.
+    lines = note.splitlines()
+    assessment_idx = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "assessment:"), None)
+    if assessment_idx is not None:
+        end_idx = assessment_idx + 1
+        while end_idx < len(lines):
+            cur = lines[end_idx]
+            cur_stripped = cur.strip()
+            # Stop at next top-level section header (e.g., Plan:, Context:).
+            if cur_stripped and re.match(r"^[A-Za-z][A-Za-z /()\-]*:\s*$", cur_stripped):
+                break
+            end_idx += 1
+
+        replacement = section_text.splitlines()
+        lines = lines[:assessment_idx] + replacement + lines[end_idx:]
+        return "\n".join(lines)
 
     # Otherwise insert before Plan when possible.
     lines = note.splitlines()
@@ -3342,7 +3355,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
 
