@@ -909,30 +909,23 @@ def _tidy_emr_plan_section(
     new_bullets = [f"- {p}" for p in parsed]
 
     has_plan_cac = any(("cac" in p.lower() or "coronary calcium" in p.lower()) for p in parsed)
-    ckm_stage2 = any(("stage 2" in (ln or "").lower()) and ("ckm" in (ln or "").lower()) for ln in lines)
-    apob_elsewhere = any(("apob" in (ln or "").lower()) and (not (ln or "").strip().lower().startswith("context:")) for ln in lines)
+    if has_plan_cac:
+        for i, ln in enumerate(lines):
+            if ln.strip().lower().startswith("context:") and "|" in ln and "cac" in ln.lower():
+                head, tail = ln.split(":", 1)
+                parts = [p.strip() for p in tail.split("|")]
+                cleaned_parts = []
+                for part in parts:
+                    if "cac" not in part.lower() and "coronary calcium" not in part.lower():
+                        cleaned_parts.append(part)
+                        continue
 
-    for i, ln in enumerate(lines):
-        if not ln.strip().lower().startswith("context:"):
-            continue
+                    subparts = [sp.strip() for sp in re.split(r"\s*/\s*", part) if sp.strip()]
+                    subparts = [sp for sp in subparts if "cac" not in sp.lower() and "coronary calcium" not in sp.lower()]
+                    if subparts:
+                        cleaned_parts.append(" / ".join(subparts))
 
-        head, tail = ln.split(":", 1)
-        parts = [p.strip() for p in tail.split("|") if p.strip()]
-        kept: list[str] = []
-        for part in parts:
-            pl = part.lower()
-            if has_plan_cac and ("cac" in pl or "coronary calcium" in pl):
-                continue
-            if ckm_stage2 and "diabetes" in pl:
-                continue
-            if apob_elsewhere and "apob" in pl:
-                continue
-            kept.append(part)
-
-        if kept:
-            lines[i] = f"{head}: {' | '.join(kept)}"
-        else:
-            lines[i] = ""
+                lines[i] = f"{head}: {' | '.join(cleaned_parts)}" if cleaned_parts else f"{head}:"
 
     lines[start:end] = new_bullets
     return "\n".join(lines)
@@ -3361,6 +3354,11 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
+
+
+
+
+
 
 
 
