@@ -557,6 +557,91 @@ def _inject_management_line_into_note(note: str, action_line: str) -> str:
     return note
 
 
+def _tidy_emr_plan_section(note: str) -> str:
+    """
+    Keep Plan concise and clinician-friendly without altering any computed outputs.
+    - Collapse duplicate high-level treatment bullets (Management + Lipid-lowering therapy).
+    - Order Plan bullets consistently.
+    - Avoid duplicate CAC rationale in Context when already present in Plan.
+    """
+    if not note:
+        return note or ""
+
+    lines = note.splitlines()
+    plan_idx = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "plan:"), None)
+    if plan_idx is None:
+        return note
+
+    def _is_bullet(ln: str) -> bool:
+        return bool(re.match(r"^\s*[-•]\s+", ln or ""))
+
+    start = plan_idx + 1
+    end = start
+    while end < len(lines):
+        ln = lines[end]
+        stripped = ln.strip()
+        if stripped.lower().startswith("context:"):
+            break
+        if stripped and (not _is_bullet(ln)):
+            break
+        end += 1
+
+    plan_lines = lines[start:end]
+    bullets = [ln for ln in plan_lines if _is_bullet(ln)]
+    if not bullets:
+        return note
+
+    mgmt_idx = lipid_idx = None
+    mgmt_text = lipid_text = ""
+    parsed = []
+
+    for idx, bullet in enumerate(bullets):
+        txt = re.sub(r"^\s*[-•]\s+", "", bullet).strip()
+        parsed.append(txt)
+        low = txt.lower()
+        if mgmt_idx is None and low.startswith("management:"):
+            mgmt_idx = idx
+            mgmt_text = txt.split(":", 1)[1].strip()
+        if lipid_idx is None and low.startswith("lipid-lowering therapy:"):
+            lipid_idx = idx
+            lipid_text = txt.split(":", 1)[1].strip()
+
+    if mgmt_idx is not None and lipid_idx is not None:
+        mg = mgmt_text.rstrip(" .")
+        lip = lipid_text.rstrip(" .")
+        lip_clause = lip if lip.lower().startswith("lipid-lowering therapy") else f"lipid-lowering therapy {lip}".strip()
+        combined = f"{mg}; {lip_clause}."
+        parsed = [p for i, p in enumerate(parsed) if i not in {mgmt_idx, lipid_idx}]
+        parsed.insert(0, combined[:1].upper() + combined[1:])
+
+    def _cat(text: str) -> int:
+        t = text.lower()
+        if t.startswith("treatment ") or t.startswith("management:") or t.startswith("lipid-lowering therapy"):
+            return 0
+        if "apob" in t or "driver" in t:
+            return 1
+        if "aspirin" in t:
+            return 2
+        if "cac" in t or "coronary calcium" in t:
+            return 3
+        return 4
+
+    parsed = [p for _, p in sorted(enumerate(parsed), key=lambda x: (_cat(x[1]), x[0]))]
+    new_bullets = [f"- {p}" for p in parsed]
+
+    has_plan_cac = any(("cac" in p.lower() or "coronary calcium" in p.lower()) for p in parsed)
+    if has_plan_cac:
+        for i, ln in enumerate(lines):
+            if ln.strip().lower().startswith("context:") and "|" in ln and "cac" in ln.lower():
+                head, tail = ln.split(":", 1)
+                parts = [p.strip() for p in tail.split("|")]
+                parts = [p for p in parts if "cac" not in p.lower() and "coronary calcium" not in p.lower()]
+                lines[i] = f"{head}: {' | '.join(parts)}" if parts else f"{head}:"
+
+    lines[start:end] = new_bullets
+    return "\n".join(lines)
+
+
 # ============================================================
 # Visual: Risk Continuum bar
 # ============================================================
@@ -2742,6 +2827,7 @@ if not str(note_for_emr).strip():
 # 3) Final formatting + unified Management line injection
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
+note_for_emr = _tidy_emr_plan_section(note_for_emr)
 
 # 4) Fallback visibility if still empty (do not break rendering)
 if not str(note_for_emr).strip():
@@ -2882,8 +2968,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
-
 
 
 
