@@ -19,9 +19,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import levels_engine as le
-import streamlit as st
-st.write("DEPLOY TEST 1 TOP")
-st.stop()
 
 from smartphrase_ingest.parser import parse_smartphrase
 from levels_engine import Patient, VERSION, short_why
