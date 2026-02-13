@@ -283,6 +283,8 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
     cac = _get_int(patient, ["cac", "cac_score", "agatston", "agatston_score"])
 
     lpa = _get_float(patient, ["lpa", "lp_a", "lp(a)", "lipoprotein_a"])
+    lpa_unit_raw = _get_attr_first(patient, ["lpa_unit", "lpaUnit", "lp_a_unit", "lpAUnit"])
+    lpa_unit = str(lpa_unit_raw).strip() if lpa_unit_raw is not None else ""
     apob = _get_float(patient, ["apob", "apo_b", "apoB"])
 
     ldl = _get_float(patient, ["ldl", "ldl_c", "ldlc"])
@@ -309,6 +311,7 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
     UACR_A3_MIN = 300.0
 
     LPA_ELEVATED_CUTOFF = float(globals().get("LPA_ELEVATED_CUTOFF", 50.0))
+    LPA_ELEVATED_CUTOFF_NMOL = float(globals().get("LPA_ELEVATED_CUTOFF_NMOL", 125.0))
     LDL_FH_SUSPECT_CUTOFF = 190.0
 
     TG_HIGH_CUTOFF = float(globals().get("TG_HIGH_CUTOFF", 150.0))
@@ -432,8 +435,10 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
     if cac is not None and cac > 0:
         dxs.append(_dx("dx_coronary_calcified_plaque", "confirmed", "Coronary atherosclerosis due to calcified coronary lesion", [{"code": "I25.84", "display": "Coronary atherosclerosis due to calcified coronary lesion"}], True, 90 if cac >= 100 else 75, "high", "CAC present (score > 0).", [{"key": "cac", "value": cac, "unit": "Agatston"}]))
 
-    if lpa is not None and lpa >= LPA_ELEVATED_CUTOFF:
-        dxs.append(_dx("dx_lpa_elevated", "confirmed", "Elevated lipoprotein(a)", [{"code": "E78.41", "display": "Elevated lipoprotein(a)"}], False, 55, "high", "Lp(a) above threshold.", [{"key": "lpa", "value": lpa, "unit": "unit-dependent"}]))
+    lpa_cutoff = LPA_ELEVATED_CUTOFF_NMOL if "nmol" in lpa_unit.lower() else LPA_ELEVATED_CUTOFF
+    if lpa is not None and lpa >= lpa_cutoff:
+        lpa_ev_unit = lpa_unit if lpa_unit else "mg/dL"
+        dxs.append(_dx("dx_lpa_elevated", "confirmed", "Elevated lipoprotein(a)", [{"code": "E78.41", "display": "Elevated lipoprotein(a)"}], False, 55, "high", "Lp(a) above unit-aware threshold.", [{"key": "lpa", "value": lpa, "unit": lpa_ev_unit}]))
 
     lipid_code: Optional[str] = None
     lipid_disp: Optional[str] = None

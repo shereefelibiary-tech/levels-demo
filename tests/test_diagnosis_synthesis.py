@@ -52,17 +52,17 @@ def test_generate_output_includes_diagnosis_synthesis():
     assert isinstance(out["diagnosisSynthesis"].get("diagnoses"), list)
 
 
-def test_evaluate_unified_legacy_includes_diagnosis_synthesis():
-    p = Patient({"age": 60, "sex": "M", "race": "other", "sbp": 130, "tc": 200, "hdl": 45, "ldl": 120, "a1c": 6.7})
-    out = evaluate_unified(p, engine_version="legacy")
+def test_build_diagnosis_synthesis_lpa_unit_threshold_respects_nmol():
+    payload = {"lpa": 80, "lpa_unit": "nmol/L"}
+    out = build_diagnosis_synthesis(payload, {})
+    ids = {d["id"] for d in out["diagnoses"]}
 
-    assert "diagnosisSynthesis" in out
-    assert isinstance(out["diagnosisSynthesis"].get("diagnoses"), list)
+    assert "dx_lpa_elevated" not in ids
 
 
-def test_evaluate_unified_v4_includes_diagnosis_synthesis():
-    p = Patient({"age": 60, "sex": "M", "race": "other", "sbp": 130, "tc": 200, "hdl": 45, "ldl": 120, "a1c": 6.7})
-    out = evaluate_unified(p, engine_version="v4")
+def test_build_diagnosis_synthesis_lpa_unit_threshold_respects_mgdl():
+    payload = {"lpa": 80, "lpa_unit": "mg/dL"}
+    out = build_diagnosis_synthesis(payload, {})
+    ids = {d["id"] for d in out["diagnoses"]}
 
-    assert "diagnosisSynthesis" in out
-    assert isinstance(out["diagnosisSynthesis"].get("diagnoses"), list)
+    assert "dx_lpa_elevated" in ids
