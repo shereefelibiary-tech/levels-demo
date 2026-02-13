@@ -1,4 +1,9 @@
-from levels_output_adapter import build_diagnosis_synthesis, generateRiskContinuumCvOutput
+from levels_engine import Patient
+from levels_output_adapter import (
+    build_diagnosis_synthesis,
+    evaluate_unified,
+    generateRiskContinuumCvOutput,
+)
 
 
 def test_build_diagnosis_synthesis_suspected_diabetes_no_exported_icd():
@@ -43,5 +48,21 @@ def test_generate_output_includes_diagnosis_synthesis():
     }
 
     out = generateRiskContinuumCvOutput(input_data, engine_out)
+    assert "diagnosisSynthesis" in out
+    assert isinstance(out["diagnosisSynthesis"].get("diagnoses"), list)
+
+
+def test_evaluate_unified_legacy_includes_diagnosis_synthesis():
+    p = Patient({"age": 60, "sex": "M", "race": "other", "sbp": 130, "tc": 200, "hdl": 45, "ldl": 120, "a1c": 6.7})
+    out = evaluate_unified(p, engine_version="legacy")
+
+    assert "diagnosisSynthesis" in out
+    assert isinstance(out["diagnosisSynthesis"].get("diagnoses"), list)
+
+
+def test_evaluate_unified_v4_includes_diagnosis_synthesis():
+    p = Patient({"age": 60, "sex": "M", "race": "other", "sbp": 130, "tc": 200, "hdl": 45, "ldl": 120, "a1c": 6.7})
+    out = evaluate_unified(p, engine_version="v4")
+
     assert "diagnosisSynthesis" in out
     assert isinstance(out["diagnosisSynthesis"].get("diagnoses"), list)
