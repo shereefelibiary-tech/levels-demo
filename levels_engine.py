@@ -25,9 +25,12 @@
 # - levels["dominantAction"] flag (used by app.py recommended_action_line())
 # - render_quick_text() no longer adds unconditional CAC lines (prevents duplication/contradictions)
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
+from datetime import date
 
 SYSTEM_NAME = "Risk Continuum™"
 PCE_DEBUG_SENTINEL = "PCE_EPIC_2019_ALIGNED_v3_1"
@@ -5234,6 +5237,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
