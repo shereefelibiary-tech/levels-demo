@@ -3095,6 +3095,23 @@ def evaluate(p: Patient) -> Dict[str, Any]:
 
     plan = plan_sentence(level, sublevel, therapy_on, at_tgt, risk10, plaque)
 
+    # Reconcile lipid action text to a single dominant intent (initiate vs defer).
+    rp_val = safe_float(risk10.get("risk_pct")) if isinstance(risk10, dict) else None
+    pce_low = (rp_val is not None) and (rp_val < PCE_HARD_NO_MAX)
+    cac_val_eval = plaque.get("cac_value")
+    cac_zero = bool(isinstance(cac_val_eval, int) and cac_val_eval == 0)
+    apob_v = safe_float(p.get("apob"))
+    ldl_v = safe_float(p.get("ldl"))
+    hard_lipid_trigger = bool(
+        (p.get("ascvd") is True)
+        or (isinstance(cac_val_eval, int) and cac_val_eval >= 100)
+        or ((apob_v is not None) and apob_v >= APOB_INITIATE_CUT)
+        or ((ldl_v is not None) and ldl_v >= 190)
+    )
+    if cac_zero and pce_low and (not hard_lipid_trigger):
+        # Guardrail: CAC=0 + low near-term risk without hard triggers must defer lipid initiation.
+        plan = "Lipid-lowering therapy not required at this time."
+
     # NEW: dominantAction flag (consumed by app.py)
     dominant_action = False
 
@@ -3105,6 +3122,9 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         dominant_action = True
     elif (stab_band or "").strip().lower() == "high" and "dominant" in (stab_note or "").strip().lower():
         dominant_action = True
+
+    if cac_zero and pce_low and (not hard_lipid_trigger):
+        dominant_action = False
 
     # ---- FIX: label builder (no posture dependency) ----
     # Uses management label when sublevels exist (2A/2B/3A/3B).
@@ -3262,6 +3282,7 @@ def evaluate(p: Patient) -> Dict[str, Any]:
         out["insights"]["criteria_table_html"] = ""
 
     out["nextActions"] = compose_actions(p, out)
+    out["plan_bullets"] = _canonical_plan_bullets_from_out(out)
 
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
@@ -3394,6 +3415,14 @@ def _pick_primary_action(next_actions: List[str], dominant: bool) -> Tuple[Optio
     return lines[0], lines[1:]
 
 
+def _canonical_plan_bullets_from_out(out: Dict[str, Any]) -> List[str]:
+    """Single engine-owned Plan bullets list for EMR/UI rendering."""
+    lvl = out.get("levels") or {}
+    dominant = bool(lvl.get("dominantAction") is True)
+    primary, rest = _pick_primary_action(out.get("nextActions") or [], dominant=dominant)
+    return _action_to_plan_bullets(primary, rest)
+
+
 def _action_to_plan_bullets(primary: Optional[str], rest: List[str]) -> List[str]:
     """
     Converts nextActions (already canonical) into a minimal, non-redundant Plan section.
@@ -3488,9 +3517,7 @@ def render_quick_text(p: Patient, out: Dict[str, Any]) -> str:
     cac_copy = insights.get("cac_copy") or {}
     cac_head = _normalize_space(str(cac_copy.get("headline") or ""))
 
-    dominant = bool(lvl.get("dominantAction") is True)
-    primary, rest = _pick_primary_action(out.get("nextActions") or [], dominant=dominant)
-    plan_bullets = _action_to_plan_bullets(primary, rest)
+    plan_bullets = out.get("plan_bullets") or _canonical_plan_bullets_from_out(out)
 
     ins = insights or {}
 

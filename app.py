@@ -563,12 +563,13 @@ def _inject_management_line_into_note(note: str, action_line: str) -> str:
     return note
 
 
-def _tidy_emr_plan_section(note: str) -> str:
+def _tidy_emr_plan_section(note: str, *, treatment_trigger: bool = False, cac0_low_risk: bool = False, enhancer_only: bool = False, engine_plan_bullets: list[str] | None = None) -> str:
     """
-    Keep Plan concise and clinician-friendly without altering any computed outputs.
+    Keep Plan concise and clinician-friendly without altering computed thresholds/scoring.
     - Collapse duplicate high-level treatment bullets (Management + Lipid-lowering therapy).
-    - Order Plan bullets consistently.
-    - Avoid duplicate CAC rationale in Context when already present in Plan.
+    - Reconcile mutually exclusive lipid-lowering statements.
+    - Deterministically de-duplicate overlapping plan bullets.
+    - Tighten Context to avoid repeating CKM/driver information already shown above.
     """
     if not note:
         return note or ""
@@ -580,6 +581,31 @@ def _tidy_emr_plan_section(note: str) -> str:
 
     def _is_bullet(ln: str) -> bool:
         return bool(re.match(r"^\s*[-•]\s+", ln or ""))
+
+    def _normalize_for_dedupe(text: str) -> str:
+        t = re.sub(r"\s+", " ", (text or "").strip())
+        t = t.rstrip(".")
+        return t.casefold()
+
+    def _dedupe_bullets(bullets: list[str]) -> list[str]:
+        out: list[str] = []
+        norm_out: list[str] = []
+        for b in bullets:
+            n = _normalize_for_dedupe(b)
+            if not n or n in norm_out:
+                continue
+            out.append(b.strip())
+            norm_out.append(n)
+
+        keep = [True] * len(out)
+        for i, ni in enumerate(norm_out):
+            for j, nj in enumerate(norm_out):
+                if i == j:
+                    continue
+                if ni and (ni != nj) and (ni in nj):
+                    keep[i] = False
+                    break
+        return [b for i, b in enumerate(out) if keep[i]]
 
     start = plan_idx + 1
     end = start
@@ -620,29 +646,122 @@ def _tidy_emr_plan_section(note: str) -> str:
         parsed = [p for i, p in enumerate(parsed) if i not in {mgmt_idx, lipid_idx}]
         parsed.insert(0, combined[:1].upper() + combined[1:])
 
+    def _is_initiate_line(t: str) -> bool:
+        tl = t.lower()
+        return "initiate lipid-lowering therapy" in tl or "initiate treatment" in tl
+
+    def _is_not_required_line(t: str) -> bool:
+        tl = t.lower()
+        return ("lipid-lowering therapy" in tl) and ("not required" in tl)
+
+    def _is_lpa_line(t: str) -> bool:
+        tl = t.lower()
+        return ("lp(a)" in tl or "lpa" in tl) and "elevated" in tl
+
+    def _is_lipid_bullet(t: str) -> bool:
+        tl = t.lower()
+        return (
+            tl.startswith("lipid-lowering therapy:")
+            or "lipid-lowering therapy appropriate" in tl
+            or "optimize lipid-lowering" in tl
+            or "intensity individualized" in tl
+        )
+
+    parsed = [p for p in parsed if p]
+
+    if engine_plan_bullets:
+        parsed = [re.sub(r"^\s*[-•]\s+", "", str(b)).strip() for b in engine_plan_bullets if str(b).strip()]
+    elif treatment_trigger:
+        parsed = [p for p in parsed if not _is_not_required_line(p)]
+        if not any(_is_initiate_line(p) for p in parsed):
+            parsed.insert(0, "Initiate lipid-lowering therapy")
+    elif cac0_low_risk:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+        if not any(_is_not_required_line(p) for p in parsed):
+            parsed.insert(0, "Lipid-lowering therapy not required at this time")
+
+    if enhancer_only:
+        parsed = [p for p in parsed if not _is_initiate_line(p)]
+        parsed = [p for p in parsed if not _is_lpa_line(p)]
+        parsed.append("Elevated Lp(a) informs lifetime risk discussion.")
+
+    lipid_positions = [i for i, p in enumerate(parsed) if _is_lipid_bullet(p)]
+    if lipid_positions:
+        first_pos = lipid_positions[0]
+        parsed = [
+            p for i, p in enumerate(parsed)
+            if (i not in lipid_positions)
+            and ("intensity individualized" not in p.lower())
+            and ("targets and risk profile" not in p.lower() or "lipid-lowering therapy" in p.lower())
+        ]
+        parsed.insert(
+            min(first_pos, len(parsed)),
+            "Lipid-lowering therapy: Appropriate; intensity individualized to targets and risk profile.",
+        )
+
+    _has_specific_lipid_bullet = any(str(p).strip().lower().startswith("lipid-lowering therapy:") for p in parsed)
+    if _has_specific_lipid_bullet:
+        def _is_generic_lipid_initiation(text: str) -> bool:
+            tl = str(text or "").strip().lower()
+            if tl.startswith("lipid-lowering therapy:"):
+                return False
+            if tl.startswith("initiate lipid-lowering therapy"):
+                return True
+            if tl.startswith("start lipid-lowering therapy"):
+                return True
+            if tl == "lipid-lowering therapy appropriate":
+                return True
+            if "initiate lipid" in tl:
+                return True
+            return False
+
+        parsed = [p for p in parsed if not _is_generic_lipid_initiation(p)]
+
+    parsed = _dedupe_bullets(parsed)
+
     def _cat(text: str) -> int:
         t = text.lower()
-        if t.startswith("treatment ") or t.startswith("management:") or t.startswith("lipid-lowering therapy"):
+        if t.startswith("treatment ") or t.startswith("management:") or t.startswith("lipid-lowering therapy") or t.startswith("initiate lipid-lowering therapy"):
             return 0
         if "apob" in t or "driver" in t:
             return 1
-        if "aspirin" in t:
+        if "lp(a)" in t or "lpa" in t:
             return 2
-        if "cac" in t or "coronary calcium" in t:
+        if "aspirin" in t:
             return 3
-        return 4
+        if "cac" in t or "coronary calcium" in t:
+            return 4
+        return 5
 
     parsed = [p for _, p in sorted(enumerate(parsed), key=lambda x: (_cat(x[1]), x[0]))]
+    parsed = _dedupe_bullets(parsed)
     new_bullets = [f"- {p}" for p in parsed]
 
     has_plan_cac = any(("cac" in p.lower() or "coronary calcium" in p.lower()) for p in parsed)
-    if has_plan_cac:
-        for i, ln in enumerate(lines):
-            if ln.strip().lower().startswith("context:") and "|" in ln and "cac" in ln.lower():
-                head, tail = ln.split(":", 1)
-                parts = [p.strip() for p in tail.split("|")]
-                parts = [p for p in parts if "cac" not in p.lower() and "coronary calcium" not in p.lower()]
-                lines[i] = f"{head}: {' | '.join(parts)}" if parts else f"{head}:"
+    ckm_stage2 = any(("stage 2" in (ln or "").lower()) and ("ckm" in (ln or "").lower()) for ln in lines)
+    apob_elsewhere = any(("apob" in (ln or "").lower()) and (not (ln or "").strip().lower().startswith("context:")) for ln in lines)
+
+    for i, ln in enumerate(lines):
+        if not ln.strip().lower().startswith("context:"):
+            continue
+
+        head, tail = ln.split(":", 1)
+        parts = [p.strip() for p in tail.split("|") if p.strip()]
+        kept: list[str] = []
+        for part in parts:
+            pl = part.lower()
+            if has_plan_cac and ("cac" in pl or "coronary calcium" in pl):
+                continue
+            if ckm_stage2 and "diabetes" in pl:
+                continue
+            if apob_elsewhere and "apob" in pl:
+                continue
+            kept.append(part)
+
+        if kept:
+            lines[i] = f"{head}: {' | '.join(kept)}"
+        else:
+            lines[i] = ""
 
     lines[start:end] = new_bullets
     return "\n".join(lines)
@@ -2509,27 +2628,55 @@ with tab_report:
     _pce_value = risk10.get("risk_pct")
     _pce_text = f"{_pce_value}%" if _pce_value is not None else "—"
 
-    _targets = out.get("targets", {}) or {}
-    _targets_bits = []
-    if _targets.get("ldl") is not None:
-        _targets_bits.append(f"LDL <{int(_targets.get('ldl'))}")
-    if _targets.get("sbp") is not None:
-        _targets_bits.append(f"SBP <{int(_targets.get('sbp'))}")
-    if _targets.get("a1c") is not None:
-        _targets_bits.append(f"A1c <{float(_targets.get('a1c')):.1f}")
-    _is_treated = bool(data.get("lipid_lowering") or data.get("bp_treated") or data.get("diabetes"))
+    _plaque_label = "Present" if plaque_present is True else ("Absent" if plaque_present is False else "Unknown")
+    _burden_txt = scrub_terms(str(ev.get("burden_band", "") or "")).strip()
+    _burden_label = _burden_txt if (_burden_txt and _burden_txt != "—") else "Not quantified"
 
-    _aspirin_line = ""
-    _asp_status = str(asp.get("status") or "").strip().lower()
-    if _asp_status:
-        if _asp_status.startswith("consider"):
-            _aspirin_line = "Aspirin: Consider yes"
-        elif _asp_status.startswith("avoid"):
-            _aspirin_line = "Aspirin: Consider contraindicated"
-        elif _asp_status.startswith("secondary prevention"):
-            _aspirin_line = "Aspirin: Consider yes"
-        elif _asp_status.startswith("not indicated"):
-            _aspirin_line = "Aspirin: Consider no"
+    _ckm_context_label = "—"
+    if _ckm_stage_num is not None:
+        _ckm_context_label = f"Stage {_ckm_stage_num}"
+        _ckm_driver = _ckm_stage_snapshot_explanation(_ckm_stage_num, ckm_copy, ckm_context, data)
+        if _ckm_driver:
+            _ckm_context_label += f" ({_ckm_driver})"
+
+    _ckd_context_bits = []
+    if _egfr_v is not None:
+        _ckd_context_bits.append(f"eGFR {int(round(float(_egfr_v)))}")
+    _uacr_v = data.get("uacr")
+    try:
+        _uacr_v = float(_uacr_v) if _uacr_v is not None else None
+    except Exception:
+        _uacr_v = None
+    if _uacr_v is not None:
+        _uacr_context_val = int(round(_uacr_v)) if float(_uacr_v).is_integer() else round(_uacr_v, 1)
+        _ckd_context_bits.append(f"UACR {_uacr_context_val}")
+
+    _ckd_stage_num = None
+    if _egfr_v is not None:
+        try:
+            _egfr_num = float(_egfr_v)
+            if _egfr_num >= 90:
+                _ckd_stage_num = 1
+            elif _egfr_num >= 60:
+                _ckd_stage_num = 2
+            elif _egfr_num >= 45:
+                _ckd_stage_num = "3a"
+            elif _egfr_num >= 30:
+                _ckd_stage_num = "3b"
+            elif _egfr_num >= 15:
+                _ckd_stage_num = 4
+            else:
+                _ckd_stage_num = 5
+        except Exception:
+            _ckd_stage_num = None
+
+    _ckd_stage_label = f"Stage {_ckd_stage_num}" if _ckd_stage_num is not None else "—"
+    _has_albuminuria = bool(_uacr_v is not None and _uacr_v >= 30)
+    _ckd_context_label = _ckd_stage_label + (" with albuminuria" if _has_albuminuria and _ckd_stage_num is not None else "")
+    if _ckd_context_bits and _ckd_stage_num is not None:
+        _ckd_context_label += f" ({', '.join(_ckd_context_bits)})"
+
+    _snapshot_context_line = f"CKM {_ckm_context_label}; CKD {_ckd_context_label}"
 
     st.markdown(
         f"""
@@ -2543,25 +2690,21 @@ with tab_report:
   {f"<div class='kvline'><b>CKM:</b> {_html.escape(_ckmckd_line)}</div>" if _ckmckd_line else ""}
 
   <div class="kvline">
-    <b>Plaque status:</b> {_html.escape(_plaque_status_line)}
-  </div>
-
-  <div class="kvline"><b>Decision confidence:</b> {decision_conf}</div>
-  <div class="kvline">
-    <b>Decision stability:</b> {stab_line}
+    <b>Plaque:</b> {_html.escape(_plaque_label)} | <b>Burden:</b> {_html.escape(_burden_label)}
   </div>
 
   <div class="kvline">
-    <b>Key metrics:</b>
-    RSS {_rss_score}/100 ({_rss_band}); ASCVD PCE (10y) {_pce_text}
+    <b>Confidence:</b> {decision_conf} | <b>Stability:</b> {stab_line}
   </div>
+
+  <div class="kvline"><b>RSS:</b> {_rss_score}/100 ({_rss_band})</div>
+  <div class="kvline"><b>ASCVD PCE (10y):</b> {_pce_text}</div>
 
   <div class="kvline">
-    <b>PREVENT (10y):</b> total CVD {f"{p_total}%" if p_total is not None else '—'}, ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
+    <b>PREVENT (10y):</b> Total CVD {f"{p_total}%" if p_total is not None else '—'} | ASCVD {f"{p_ascvd}%" if p_ascvd is not None else '—'}
   </div>
 
-  {f"<div class='kvline'><b>Targets (if treated):</b> {_html.escape(', '.join(_targets_bits))}</div>" if (_is_treated and _targets_bits) else ""}
-  {f"<div class='kvline'><b>{_html.escape(_aspirin_line)}</b></div>" if _aspirin_line else ""}
+  <div class="kvline"><b>Context:</b> {_html.escape(_snapshot_context_line)}</div>
 </div>
 """,
         unsafe_allow_html=True,
@@ -2717,21 +2860,6 @@ if str(struct_clar or "").strip():
         unsafe_allow_html=True,
     )
 
-# CKM/CKD context (engine-gated; display-only)
-if ckm_copy.get("headline") or ckd_copy.get("headline"):
-    st.markdown(
-        f"""
-<div class="block compact">
-  <div class="block-title compact">CKM/CKD context</div>
-  {f"<div class='kvline compact'>{_html.escape(ckm_copy.get('headline',''))}</div>" if ckm_copy.get("headline") else ""}
-  {f"<div class='kvline compact inline-muted'>{_html.escape(ckm_copy.get('detail',''))}</div>" if ckm_copy.get("detail") else ""}
-  {f"<div class='kvline compact'>{_html.escape(ckd_copy.get('headline',''))}</div>" if ckd_copy.get("headline") else ""}
-  {f"<div class='kvline compact inline-muted'>{_html.escape(ckd_copy.get('detail',''))}</div>" if ckd_copy.get("detail") else ""}
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
 st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
 
 col_t, col_m = st.columns([1.05, 1.35], gap="small")
@@ -2843,7 +2971,47 @@ if not str(note_for_emr).strip():
 # 3) Final formatting + unified Management line injection
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
-note_for_emr = _tidy_emr_plan_section(note_for_emr)
+
+try:
+    _pce_pct_for_plan = float((risk10 or {}).get("risk_pct")) if (risk10 or {}).get("risk_pct") is not None else None
+except Exception:
+    _pce_pct_for_plan = None
+
+_ldl_v = data.get("ldl")
+_apob_v = data.get("apob")
+try:
+    _ldl_v = float(_ldl_v) if _ldl_v is not None else None
+except Exception:
+    _ldl_v = None
+try:
+    _apob_v = float(_apob_v) if _apob_v is not None else None
+except Exception:
+    _apob_v = None
+
+_pce_tx_cut = float(getattr(le, "PCE_INTERMEDIATE_CUT", 7.5))
+_ldl_hard_cut = float(getattr(le, "MAJOR_LDL_CUT", 130.0))
+_apob_hard_cut = float(getattr(le, "MAJOR_APOB_CUT", 100.0))
+_low_risk_cut = float(getattr(le, "PCE_HARD_NO_MAX", 4.0))
+
+_ldl_or_apob_hard_trigger = ((_apob_v is not None and _apob_v >= _apob_hard_cut) or (_apob_v is None and _ldl_v is not None and _ldl_v >= _ldl_hard_cut))
+_treatment_trigger = bool((plaque_present is True) or (_pce_pct_for_plan is not None and _pce_pct_for_plan >= _pce_tx_cut) or _ldl_or_apob_hard_trigger)
+_cac0_low_risk = bool((plaque_present is False) and (_pce_pct_for_plan is not None) and (_pce_pct_for_plan < _low_risk_cut) and (not _treatment_trigger))
+
+try:
+    _lpa_v = float(data.get("lpa")) if data.get("lpa") is not None else None
+except Exception:
+    _lpa_v = None
+
+_lpa_elev = bool((_lpa_v is not None and _lpa_v >= 125) or any("lp(a) elevated" in str(t).lower() for t in (lvl.get("triggers") or [])))
+_enhancer_only = bool(_lpa_elev and not _treatment_trigger)
+
+note_for_emr = _tidy_emr_plan_section(
+    note_for_emr,
+    treatment_trigger=_treatment_trigger,
+    cac0_low_risk=_cac0_low_risk,
+    enhancer_only=_enhancer_only,
+    engine_plan_bullets=out.get("plan_bullets"),
+)
 
 # 4) Fallback visibility if still empty (do not break rendering)
 if not str(note_for_emr).strip():
@@ -2984,7 +3152,6 @@ st.caption(
     f"{VERSION.get('riskCalc','')} | {VERSION.get('aspirin','')} | "
     f"{VERSION.get('prevent','')}. No storage intended."
 )
-
 
 
 
