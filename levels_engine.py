@@ -3284,8 +3284,12 @@ def evaluate(p: Patient) -> Dict[str, Any]:
     out["nextActions"] = compose_actions(p, out)
     out["plan_bullets"] = _canonical_plan_bullets_from_out(out)
 
+    # NEW: diagnosis synthesis
+    out["diagnosisSynthesis"] = build_diagnosis_synthesis(p, out)
+
     add_trace(trace, "Engine_end", VERSION["levels"], "Evaluation complete")
     return out
+
 
 # -------------------------------------------------------------------
 # Canonical EMR output (locked style) — direct: WHY → WHAT
@@ -4547,6 +4551,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
