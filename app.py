@@ -660,7 +660,7 @@ def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirme
     section_text = "\n".join(section)
 
     # Replace existing Assessment block if present.
-    pat = re.compile(r"(?mis)^Assessment:\s*\n(?:^[ \t]*[-•].*\n?)+")
+    pat = re.compile(r"(?mi)^Assessment:\s*\n(?:^[ \t]*[-•][^\n]*\n?)+")
     if pat.search(note):
         return pat.sub(section_text + "\n", note, count=1)
 
