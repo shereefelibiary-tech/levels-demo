@@ -470,7 +470,6 @@ div[data-testid="stCheckbox"] label {
     unsafe_allow_html=True,
 )
 
-
 # ============================================================
 # Header card (clean product header)
 # ============================================================
