@@ -3142,7 +3142,10 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
     UACR_A2_MIN = 30.0
     UACR_A3_MIN = 300.0
 
-    LPA_ELEVATED_CUTOFF = float(globals().get("LPA_ELEVATED_CUTOFF", 50.0))  # unit-aware handling belongs in parser if possible
+    # Unit-aware Lp(a) threshold
+    LPA_ELEVATED_CUTOFF_NMOL = 125.0
+    LPA_ELEVATED_CUTOFF_MGDL = 50.0
+    # unit-aware handling belongs in parser if possible
     LDL_FH_SUSPECT_CUTOFF = 190.0
 
     TG_HIGH_CUTOFF = float(globals().get("TG_HIGH_CUTOFF", 150.0))
@@ -3474,8 +3477,19 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
             )
         )
 
-    # Lipoprotein(a) (DX12)
-    if lpa is not None and lpa >= LPA_ELEVATED_CUTOFF:
+     # Lipoprotein(a) (DX12) — unit-aware
+    lpa_unit = _get_attr_first(patient, ["lpa_unit", "lp_a_unit"])
+    lpa_unit_s = str(lpa_unit).strip().lower() if lpa_unit is not None else ""
+
+    lpa_elevated_flag = False
+    if lpa is not None:
+        if "mg" in lpa_unit_s:
+            lpa_elevated_flag = float(lpa) >= LPA_ELEVATED_CUTOFF_MGDL
+        else:
+            # default assume nmol/L
+            lpa_elevated_flag = float(lpa) >= LPA_ELEVATED_CUTOFF_NMOL
+
+    if lpa_elevated_flag:
         dxs.append(
             _dx(
                 dx_id="dx_lpa_elevated",
@@ -3485,10 +3499,11 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
                 is_hcc=False,
                 severity=55,
                 actionability="high",
-                criteria_summary="Lp(a) above threshold.",
-                evidence=[{"key": "lpa", "value": lpa, "unit": "unit-dependent"}],
+                criteria_summary="Lp(a) above unit-aware threshold.",
+                evidence=[{"key": "lpa", "value": lpa, "unit": (lpa_unit or "nmol/L")}],
             )
         )
+
 
     # Dyslipidemia classification (DX13) — choose one best-fit code
     lipid_code: Optional[str] = None
@@ -5249,6 +5264,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
