@@ -1803,11 +1803,18 @@ with st.form("risk_continuum_form"):
             st.checkbox("Prior intracranial hemorrhage", value=st.session_state.get("bleed_ich", False), key="bleed_ich")
             st.checkbox("Advanced CKD / eGFR <45", value=st.session_state.get("bleed_ckd", False), key="bleed_ckd")
 
-    submitted = st.form_submit_button("Run", type="primary")
+submitted = st.form_submit_button("Run", type="primary")
+
+st.session_state.setdefault("has_run", False)
+st.session_state.setdefault("dx_confirmed_ids", [])
 
 if submitted:
-    st.session_state["run_clicked"] = True
+    st.session_state["has_run"] = True
+    # New run = new patient context → clear prior confirmations
     st.session_state["dx_confirmed_ids"] = []
+if not st.session_state["has_run"]:
+    st.stop()
+
 
 # ============================================================
 # Run
