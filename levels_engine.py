@@ -3369,18 +3369,15 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
             )
         )
 
-    # CKD + albuminuria linked phenotype (DX8)
+       # CKD + albuminuria linked phenotype (DX8)
+    # Albuminuria persistence confirmation is NOT required to classify A2/A3.
+    # Suspected only reflects CKD confirmation status (persistence/flag), not UACR category.
     if ckd_stage is not None and uacr_cat is not None:
-        weak_suspected = False
-        if not ckd_confirmed and ckd_suspected:
-            weak_suspected = True
-        if albuminuria_suspected:
-            weak_suspected = True
+        status = "confirmed" if ckd_confirmed else "suspected"
 
-        status = "suspected" if weak_suspected else "confirmed"
         label = f"CKD stage {ckd_stage} with {uacr_cat} albuminuria"
         if status == "suspected":
-            label = f"{label} — confirm persistence"
+            label = f"{label} — confirm CKD persistence"
 
         ev = []
         if egfr is not None:
@@ -3390,10 +3387,13 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
 
         # ICD: CKD stage only if CKD is confirmed; keep albuminuria phenotype-only
         icd_list: List[Dict[str, str]] = []
-        if ckd_confirmed:
-            stage_icd = _icd_ckd_stage(ckd_stage)
-            if stage_icd:
+        icd10_candidates: List[Dict[str, str]] = []
+        stage_icd = _icd_ckd_stage(ckd_stage)
+        if stage_icd:
+            if ckd_confirmed:
                 icd_list.append({"code": stage_icd, "display": f"Chronic kidney disease, stage {ckd_stage}"})
+            else:
+                icd10_candidates.append({"code": stage_icd, "display": f"Chronic kidney disease, stage {ckd_stage}"})
 
         dxs.append(
             _dx(
@@ -3406,8 +3406,69 @@ def build_diagnosis_synthesis(patient: Any, out: Dict[str, Any]) -> Dict[str, An
                 actionability="high",
                 criteria_summary="Combined CKD stage (eGFR) and albuminuria category (UACR).",
                 evidence=ev,
+                icd10_candidates=(icd10_candidates if status == "suspected" else None),
             )
         )
+
+    # SUPER: T2DM + CKD stage + albuminuria category (linked; high-signal)
+    # Albuminuria persistence confirmation is NOT required for this linked phenotype.
+    if dm_confirmed and (ckd_stage is not None) and (uacr_cat is not None):
+        # Confirmed if DM confirmed AND CKD confirmed; otherwise suspected (CKD persistence).
+        super_status = "confirmed" if ckd_confirmed else "suspected"
+
+        super_label = f"Type 2 diabetes mellitus with CKD stage {ckd_stage} and {uacr_cat} albuminuria"
+        if super_status == "suspected":
+            super_label += " — confirm CKD persistence"
+
+        # ICD attachment: only when confirmed (quietly attached; UI decides visibility)
+        super_icd: List[Dict[str, str]] = []
+        super_icd_candidates: List[Dict[str, str]] = []
+        stage_icd = _icd_ckd_stage(ckd_stage)
+
+        # Use E11.22 + CKD stage as the attachable ICD set
+        if super_status == "confirmed":
+            super_icd.append(
+                {"code": "E11.22", "display": "Type 2 diabetes mellitus with diabetic chronic kidney disease"}
+            )
+            if stage_icd:
+                super_icd.append({"code": stage_icd, "display": f"Chronic kidney disease, stage {ckd_stage}"})
+        else:
+            super_icd_candidates.append(
+                {"code": "E11.22", "display": "Type 2 diabetes mellitus with diabetic chronic kidney disease"}
+            )
+            if stage_icd:
+                super_icd_candidates.append({"code": stage_icd, "display": f"Chronic kidney disease, stage {ckd_stage}"})
+
+        ev2: List[Dict[str, Any]] = []
+        if a1c is not None:
+            ev2.append({"key": "a1c", "value": a1c, "unit": "%"})
+        if egfr is not None:
+            ev2.append({"key": "egfr", "value": egfr, "unit": "mL/min/1.73m2"})
+        if uacr is not None:
+            ev2.append({"key": "uacr", "value": uacr, "unit": "mg/g"})
+
+        dxs.append(
+            _dx(
+                dx_id=f"dx_t2dm_ckd_{ckd_stage}_{uacr_cat}",
+                status=super_status,
+                label=super_label,
+                icd10=super_icd,
+                is_hcc=True,
+                severity=95 if (ckd_stage in {"4", "5"} or uacr_cat == "A3") else 90,
+                actionability="high",
+                criteria_summary="Linked phenotype: diabetes + CKD stage + albuminuria category.",
+                evidence=ev2,
+                # Suppress fragments when the super diagnosis exists
+                suppress_if_present=[
+                    f"dx_ckd_{ckd_stage}_{uacr_cat}",
+                    f"dx_ckd_{ckd_stage}",
+                    "dx_t2dm",
+                    "dx_t2dm_ckd",
+                ],
+                icd10_candidates=(super_icd_candidates if super_status == "suspected" else None),
+            )
+        )
+
 
     # Hypertension (DX9) and Hypertensive CKD (DX10)
     if htn_flag is True:
@@ -5264,6 +5325,7 @@ def canonical_criteria_table_html(p: Patient, out: Dict[str, Any]) -> str:
 </div>
 """
     return html.strip()
+
 
 
 
