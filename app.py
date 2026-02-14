@@ -472,22 +472,62 @@ div[data-testid="stCheckbox"] label {
 
 
 # ============================================================
-# Header card (title + version)
+# Header card (clean product header)
 # ============================================================
 st.markdown(
     f"""
-<div class="header-card">
-  <div class="header-title">{SYSTEM_NAME} {VERSION.get("levels","")}</div>
-  <p class="header-sub">
-    De-identified Demo • SmartPhrase paste → auto-fill • Levels 1–5 (+ sublevels)
-  </p>
+<div style="
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid rgba(31,41,55,0.10);
+  border-radius: 20px;
+  padding: 26px 30px;
+  margin-bottom: 18px;
+  box-shadow: 0 22px 50px rgba(0,0,0,0.06);
+">
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px;">
+
+    <div>
+      <div style="
+        font-size:1.75rem;
+        font-weight:1000;
+        letter-spacing:-0.025em;
+        color:#111827;
+        line-height:1.1;
+      ">
+        {SYSTEM_NAME}
+      </div>
+
+      <div style="
+        margin-top:10px;
+        font-size:0.95rem;
+        font-weight:600;
+        color:rgba(31,41,55,0.60);
+        letter-spacing:0.01em;
+      ">
+        CKM staging • Structural plaque integration • Linked data-derived diagnoses
+      </div>
+    </div>
+
+    <div style="
+      padding:7px 14px;
+      border-radius:999px;
+      border:1px solid rgba(59,130,246,0.30);
+      background:rgba(59,130,246,0.08);
+      font-size:0.78rem;
+      font-weight:900;
+      color:#111827;
+      white-space:nowrap;
+    ">
+      De-identified Demo
+    </div>
+
+  </div>
+
 </div>
 """,
     unsafe_allow_html=True,
 )
-
-st.info("De-identified use only. Do not enter patient identifiers.")
-st.caption("DEPLOY CHECK: engine control patch active")
 
 # ============================================================
 # Normalized extractors + action helpers (single source of truth)
