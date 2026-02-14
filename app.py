@@ -697,7 +697,6 @@ def _render_emr_dx_panel(dx_entries: list[dict]) -> bool:
                         cur = st.session_state.get("dx_confirmed_ids") or []
                         if dxid and dxid not in cur:
                             st.session_state["dx_confirmed_ids"] = cur + [dxid]
-                        st.rerun()
 
     _render_confirmed(c1, "Confirmed", confirmed)
     _render_suspected(c2, "Suspected", suspected)
