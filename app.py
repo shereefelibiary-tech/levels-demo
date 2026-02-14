@@ -1819,7 +1819,7 @@ if not st.session_state["has_run"]:
 # ============================================================
 # Run
 # ============================================================
-if not st.session_state.get("run_clicked", False):
+if not st.session_state.get("has_run", False):
     st.caption("Enter values (or use Demo defaults) and click Run.")
     st.stop()
 
