@@ -1087,7 +1087,7 @@ def render_risk_continuum_bar(level: int, sublevel: str | None = None) -> str:
         2: "rgba(16,185,129,0.10)",
         3: "rgba(245,158,11,0.12)",
         4: "rgba(249,115,22,0.12)",
-        5: "rgba(185,28,28,0.18)",
+        5: "rgba(220,38,38,0.28)",
 
     }
 
