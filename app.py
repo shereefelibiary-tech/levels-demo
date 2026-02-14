@@ -84,7 +84,7 @@ def safe_level_def(level_num: int, sublevel: str | None = None) -> dict:
 # ============================================================
 # System naming
 # ============================================================
-SYSTEM_NAME = "Risk Continuum™"
+SYSTEM_NAME = "Risk Continuum CKM+™"
 
 LEVEL_NAMES = {
     1: "Minimal risk signal",
