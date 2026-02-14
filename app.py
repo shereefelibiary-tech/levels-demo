@@ -3185,6 +3185,13 @@ dx_entries = _coerce_emr_dx_entries(out)
 st.write("DX COUNT:", len(dx_entries))
 
 _has_dx_panel = _render_emr_dx_panel(dx_entries)
+_confirmed_ids = set(str(x) for x in (st.session_state.get("dx_confirmed_ids") or []))
+if _confirmed_ids:
+    dx_entries = [
+        ({**d, "status": "confirmed"} if str((d or {}).get("id") or "").strip() in _confirmed_ids else d)
+        for d in dx_entries
+        if isinstance(d, dict)
+    ]
 include_icd_confirmed = False
 if _has_dx_panel:
     include_icd_confirmed = st.toggle(
