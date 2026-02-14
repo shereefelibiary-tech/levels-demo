@@ -3229,6 +3229,16 @@ if not str(note_for_emr).strip():
 # 3) Final formatting + unified Management line injection
 note_for_emr = scrub_terms(note_for_emr)
 note_for_emr = _inject_management_line_into_note(note_for_emr, rec_action)
+
+# Apply in-session Confirm promotions BEFORE injecting into note
+_confirmed_ids = set(str(x) for x in (st.session_state.get("dx_confirmed_ids") or []))
+if _confirmed_ids:
+    dx_entries = [
+        ({**d, "status": "confirmed"} if str((d or {}).get("id") or "").strip() in _confirmed_ids else d)
+        for d in dx_entries
+        if isinstance(d, dict)
+    ]
+
 note_for_emr = _inject_dx_into_note(
     note_for_emr,
     dx_entries=dx_entries,
@@ -3256,9 +3266,21 @@ _ldl_hard_cut = float(getattr(le, "MAJOR_LDL_CUT", 130.0))
 _apob_hard_cut = float(getattr(le, "MAJOR_APOB_CUT", 100.0))
 _low_risk_cut = float(getattr(le, "PCE_HARD_NO_MAX", 4.0))
 
-_ldl_or_apob_hard_trigger = ((_apob_v is not None and _apob_v >= _apob_hard_cut) or (_apob_v is None and _ldl_v is not None and _ldl_v >= _ldl_hard_cut))
-_treatment_trigger = bool((plaque_present is True) or (_pce_pct_for_plan is not None and _pce_pct_for_plan >= _pce_tx_cut) or _ldl_or_apob_hard_trigger)
-_cac0_low_risk = bool((plaque_present is False) and (_pce_pct_for_plan is not None) and (_pce_pct_for_plan < _low_risk_cut) and (not _treatment_trigger))
+_ldl_or_apob_hard_trigger = (
+    (_apob_v is not None and _apob_v >= _apob_hard_cut)
+    or (_apob_v is None and _ldl_v is not None and _ldl_v >= _ldl_hard_cut)
+)
+_treatment_trigger = bool(
+    (plaque_present is True)
+    or (_pce_pct_for_plan is not None and _pce_pct_for_plan >= _pce_tx_cut)
+    or _ldl_or_apob_hard_trigger
+)
+_cac0_low_risk = bool(
+    (plaque_present is False)
+    and (_pce_pct_for_plan is not None)
+    and (_pce_pct_for_plan < _low_risk_cut)
+    and (not _treatment_trigger)
+)
 
 _apob_initiate_cut = float(getattr(le, "APOB_INITIATE_CUT", 110.0))
 _very_high_ldl_cut = 190.0
@@ -3267,7 +3289,11 @@ _very_high_lipid_trigger = bool(
     or (_ldl_v is not None and _ldl_v >= _very_high_ldl_cut)
 )
 
-_rs_missing = {str(x).strip().lower() for x in ((out.get("riskSignal") or {}).get("missing") or []) if str(x).strip()}
+_rs_missing = {
+    str(x).strip().lower()
+    for x in ((out.get("riskSignal") or {}).get("missing") or [])
+    if str(x).strip()
+}
 _missing_key_biomarkers = bool(("apob" in _rs_missing) or any(x in _rs_missing for x in ("lp(a)", "lpa")))
 _plaque_unmeasured = _plaque_unmeasured((lvl.get("evidence") or {}) if isinstance(lvl.get("evidence"), dict) else {})
 _low_stability_incomplete_clarifiers = bool(
@@ -3281,7 +3307,10 @@ try:
 except Exception:
     _lpa_v = None
 
-_lpa_elev = bool((_lpa_v is not None and _lpa_v >= 125) or any("lp(a) elevated" in str(t).lower() for t in (lvl.get("triggers") or [])))
+_lpa_elev = bool(
+    (_lpa_v is not None and _lpa_v >= 125)
+    or any("lp(a) elevated" in str(t).lower() for t in (lvl.get("triggers") or []))
+)
 _enhancer_only = bool(_lpa_elev and not _treatment_trigger)
 
 note_for_emr = _tidy_emr_plan_section(
@@ -3309,9 +3338,6 @@ if not str(note_for_emr).strip():
         st.exception(_note_err)
 
 emr_copy_box("Risk Continuum — EMR Note", note_for_emr, height_px=520)
-
-
-
 
 # ------------------------------------------------------------
 # DECISION FRAMEWORK TAB (no giant second table)
