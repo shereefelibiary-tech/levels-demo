@@ -706,11 +706,25 @@ def _render_emr_dx_panel(dx_entries: list[dict]) -> bool:
 
 
 def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirmed: bool = False) -> str:
-    """Insert/replace Assessment section in EMR note using Confirmed/Suspected lists."""
+    """Insert/replace Assessment section in EMR note using Confirmed/Suspected lists (session-confirm aware)."""
     if not note:
         return note or ""
     if not dx_entries:
         return note
+
+    # Apply in-session Confirm promotions INSIDE the injector (most reliable)
+    confirmed_ids = set(str(x) for x in (st.session_state.get("dx_confirmed_ids") or []))
+    if confirmed_ids:
+        promoted: list[dict] = []
+        for d in dx_entries:
+            if not isinstance(d, dict):
+                continue
+            d2 = dict(d)
+            dxid = str(d2.get("id") or "").strip()
+            if dxid and dxid in confirmed_ids:
+                d2["status"] = "confirmed"
+            promoted.append(d2)
+        dx_entries = promoted
 
     confirmed = [d for d in dx_entries if d.get("status") == "confirmed"]
     suspected = [d for d in dx_entries if d.get("status") == "suspected"]
@@ -718,19 +732,30 @@ def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirme
     if not confirmed and not suspected:
         return note
 
+    def _label_for(d: dict) -> str:
+        return str(d.get("label_display") or d.get("label") or "").strip()
+
     section: list[str] = ["Assessment:"]
+
     if confirmed:
         section.append("- Confirmed:")
         for d in confirmed:
-            line = f"  - {str(d.get('label') or '').strip()}"
+            label = _label_for(d)
+            if not label:
+                continue
+            line = f"  - {label}"
             icd = str(d.get("icd") or "").strip()
             if include_icd_confirmed and icd:
                 line += f" (ICD: {icd})"
             section.append(line)
+
     if suspected:
         section.append("- Suspected:")
         for d in suspected:
-            section.append(f"  - {str(d.get('label') or '').strip()}")
+            label = _label_for(d)
+            if not label:
+                continue
+            section.append(f"  - {label}")
 
     section_text = "\n".join(section)
 
@@ -753,13 +778,13 @@ def _inject_dx_into_note(note: str, dx_entries: list[dict], include_icd_confirme
         return "\n".join(lines)
 
     # Otherwise insert before Plan when possible.
-    lines = note.splitlines()
     plan_idx = next((i for i, ln in enumerate(lines) if ln.strip().lower() == "plan:"), None)
     if plan_idx is None:
         return note.rstrip() + "\n\n" + section_text
 
     new_lines = lines[:plan_idx] + [section_text, ""] + lines[plan_idx:]
     return "\n".join(new_lines)
+
 
 
 def _tidy_emr_plan_section(
