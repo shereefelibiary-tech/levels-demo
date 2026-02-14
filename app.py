@@ -1805,10 +1805,14 @@ with st.form("risk_continuum_form"):
 
     submitted = st.form_submit_button("Run", type="primary")
 
+if submitted:
+    st.session_state["run_clicked"] = True
+    st.session_state["dx_confirmed_ids"] = []
+
 # ============================================================
 # Run
 # ============================================================
-if not submitted:
+if not st.session_state.get("run_clicked", False):
     st.caption("Enter values (or use Demo defaults) and click Run.")
     st.stop()
 
@@ -3206,8 +3210,6 @@ with col_m:
     )
 
 dx_entries = _coerce_emr_dx_entries(out)
-st.write("DX COUNT:", len(dx_entries))
-
 _has_dx_panel = _render_emr_dx_panel(dx_entries)
 _confirmed_ids = set(str(x) for x in (st.session_state.get("dx_confirmed_ids") or []))
 if _confirmed_ids:
